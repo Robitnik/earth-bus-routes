@@ -1,0 +1,10 @@
+{
+"earthBusRoutes_menu": {
+"cat": "gameplay",
+"order": 98,
+"ctx": "tlua",
+"onDown": "if earthBusRoutes_main then earthBusRoutes_main.toggleMenu() end",
+"title": "Earth Bus Routes: open the bus routes menu",
+"desc": "Opens the menu with the bus stops near you and their lines (Ctrl+Shift+B)."
+}
+}

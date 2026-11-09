@@ -71,7 +71,8 @@ def snap(v):
 def nearby_query(lat, lon, radius=RADIUS_M):
     a = f"around:{int(radius)},{lat:.5f},{lon:.5f}"
     return (f"[out:json][timeout:50];(node[highway=bus_stop]({a});node[public_transport=platform]({a});"
-            f"node[public_transport=stop_position]({a}););out tags center;"
+            f"node[public_transport=stop_position]({a});nwr[amenity=bus_station]({a});"
+            f"nwr[public_transport=station][bus=yes]({a}););out tags center;"
             f'rel(bn)[type=route][route~"{MODES}"];out body;')
 
 
@@ -80,7 +81,7 @@ def route_query(rel_id):
 
 
 def nearby_key(lat, lon):
-    return f"near_{snap(lat):.3f}_{snap(lon):.3f}"
+    return f"near2_{snap(lat):.3f}_{snap(lon):.3f}"      # (near_: before the bus stations were asked for)
 
 
 def route_key(rel_id):

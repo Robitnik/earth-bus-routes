@@ -1,0 +1,6 @@
+{
+  "displayName": "Keyboard",
+  "bindings":[
+    {"control":"ctrl shift b", "action":"earthBusRoutes_menu"}
+  ]
+}

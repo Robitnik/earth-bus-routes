@@ -22,6 +22,7 @@ class Queries(unittest.TestCase):
         q = d.nearby_query(50.4157, 16.1626)
         self.assertIn("around:650,50.41570,16.16260", q)
         self.assertIn("highway=bus_stop", q)
+        self.assertIn("amenity=bus_station", q)
         self.assertIn("out body;", q)
         self.assertTrue(q.startswith("[out:json]"))
 

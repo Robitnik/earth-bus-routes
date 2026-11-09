@@ -5,6 +5,7 @@ local M = {}
 
 M.MERGE_M = 150        -- same-named platforms closer than this are one stop (one platform per direction)
 M.POSITION_M = 60      -- a stop_position this close to a platform belongs to the same stop
+M.STATION_M = 150      -- platforms and stop positions this close to a bus station (amenity=bus_station) belong to it
 M.GAP_M = 40           -- a hole in a route's way chain bigger than this makes the route "incomplete"
 
 local function lower(s) return type(s) == 'string' and s:lower() or '' end
@@ -42,6 +43,7 @@ end
 
 local function nodeKind(tags, role)
   tags = tags or {}
+  if tags.amenity == 'bus_station' or (tags.public_transport == 'station' and tags.bus == 'yes') then return 'station' end
   if tags.public_transport == 'stop_position' then return 'stop' end
   if tags.public_transport == 'platform' or tags.highway == 'bus_stop' then return 'platform' end
   role = role or ''
@@ -90,12 +92,42 @@ end
 
 -- Platforms of one name close together become one "stop" with several platforms (one per direction); a stop_position
 -- near a platform joins it, because routes list those as members, not the platform.
--- Returns stations { {name, lat, lon, platforms = {..}, nodeIds = set, station = bool} } (unsorted).
+-- Returns stations { {name, lat, lon, platforms = {..}, nodeIds = set, station = bool} } (unsorted). Bus stations of the map
+-- come first and take the platforms around them.
 function M.groupStops(stops)
-  local platforms, positions = {}, {}
+  local buses, platforms, positions = {}, {}, {}
   for _, s in ipairs(stops) do
-    if s.kind == 'platform' then platforms[#platforms + 1] = s else positions[#positions + 1] = s end
+    if s.kind == 'station' then buses[#buses + 1] = s
+    elseif s.kind == 'platform' then platforms[#platforms + 1] = s
+    else positions[#positions + 1] = s end
   end
+  -- A bus station (amenity=bus_station) takes every platform and stop position near it: its platforms are often named
+  -- "4" or "V2" only, the station's own name is what the player knows.
+  local out = {}
+  for _, b in ipairs(buses) do
+    out[#out + 1] = { name = b.name or '', platforms = {}, nodeIds = {}, lat = b.lat, lon = b.lon, station = true, fixed = true }
+  end
+  local function stationFor(s)
+    local best, bd = nil, M.STATION_M
+    for _, st in ipairs(out) do
+      if st.fixed then
+        local d = geo.dist(st.lat, st.lon, s.lat, s.lon)
+        if d <= bd then best, bd = st, d end
+      end
+    end
+    return best
+  end
+  local restPlatforms, restPositions = {}, {}
+  for _, p in ipairs(platforms) do
+    local st = stationFor(p)
+    if st then st.platforms[#st.platforms + 1] = p st.nodeIds[p.id] = true else restPlatforms[#restPlatforms + 1] = p end
+  end
+  for _, sp in ipairs(positions) do
+    local st = stationFor(sp)
+    if st then st.nodeIds[sp.id] = true else restPositions[#restPositions + 1] = sp end
+  end
+  platforms, positions = restPlatforms, restPositions
+
   -- positions without any platform around are stops of their own (OSM often maps only stop positions)
   local units = {}
   for _, p in ipairs(platforms) do units[#units + 1] = p end
@@ -130,8 +162,14 @@ function M.groupStops(stops)
     end
     st.station = #st.platforms >= 3
     st.key = nil
+    out[#out + 1] = st
   end
-  return stations
+  -- a bus station nobody calls at (no stop of it is mapped) is no place to start from
+  local kept = {}
+  for _, st in ipairs(out) do
+    if not st.fixed or next(st.nodeIds) ~= nil then kept[#kept + 1] = st end
+  end
+  return kept
 end
 
 -- Stations by distance from a point (at most maxM away), each with .dist

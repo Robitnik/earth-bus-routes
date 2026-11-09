@@ -216,7 +216,7 @@ function M.hud(t)
   local stops = t.route.stops
   local nextStop = stops[t.idx]
   local list = {}
-  for i = t.idx, math.min(#stops, t.idx + 5) do
+  for i = t.idx, math.min(#stops, t.idx + 6) do
     local sched = M.scheduledArrival(t, i)
     list[#list + 1] = { name = stops[i].name, sched = sched, current = (i == t.idx), index = i, station = stops[i].station or false }
   end
@@ -241,7 +241,7 @@ function M.hud(t)
     progress = math.max(0, math.min(1, t.along / total)),
     scheduled = t.entry ~= nil,
     score = M.liveScore(t),
-    notes = M.recentNotes(t),
+    notes = M.recentNotes(t), noteSeq = t.score.noteSeq or 0,
     atStop = t.phase == 'atStop' and { alightLeft = t.alightLeft, boardLeft = t.boardLeft, doorsHint = not t.doorOpenedHere } or nil,
     finished = t.finished,
   }

@@ -1,0 +1,23 @@
+{
+  "domElement": "<earth-bus-hud></earth-bus-hud>",
+  "name": "Earth Bus Routes",
+  "types": ["ui.apps.categories.vehicle_control"],
+  "css": {
+    "right": "20px",
+    "top": "110px",
+    "width": "380px",
+    "min-width": "300px",
+    "max-width": "560px",
+    "height": "410px",
+    "min-height": "120px",
+    "max-height": "700px"
+  },
+  "description": "Route, next stop, delay, passengers and score of your Earth Bus Routes trip.",
+  "author": "Robitnik",
+  "version": "0.2",
+  "preserveAspectRatio": false,
+  "directive": "EarthBusHud",
+  "category": "Gameplay",
+  "isAuxiliary": false,
+  "interactive": "yes"
+}

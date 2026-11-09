@@ -35,6 +35,27 @@ function T.slim_answer_gives_the_same_stations_and_routes()
   end
 end
 
+function T.bus_station_takes_its_numbered_platforms()
+  local base = { 50.0, 16.0 }
+  local function node(id, kind, name, dlat, dlon, extra)
+    local t = { id = id, kind = kind, name = name, lat = base[1] + dlat, lon = base[2] + dlon, tags = {} }
+    return t
+  end
+  local stops = {
+    node(1, 'station', 'Autobusove nadrazi', 0, 0),
+    node(2, 'platform', '1', 0.0003, 0.0002), node(3, 'platform', '2', 0.0004, 0.0003), node(4, 'platform', 'V3', -0.0003, 0.0004),
+    node(5, 'stop', nil, 0.0003, 0.0002),
+    node(6, 'platform', 'Skolni', 0.01, 0.01),                 -- an ordinary stop far from the station
+    node(7, 'station', 'Empty station', 0.05, 0.05),           -- a station nobody calls at
+  }
+  local st = osm.groupStops(stops)
+  assert(#st == 2, #st)                                           -- the station and the far stop
+  local station
+  for _, s in ipairs(st) do if s.station then station = s end end
+  assert(station and station.name == 'Autobusove nadrazi' and #station.platforms == 3)
+  assert(station.nodeIds[2] and station.nodeIds[3] and station.nodeIds[4] and station.nodeIds[5] and not station.nodeIds[6])
+end
+
 function T.lines_group_variants_by_ref()
   local a = osm.parseAround(H.fixture('nachod_around'))
   local lines = osm.groupLines(a.routes)

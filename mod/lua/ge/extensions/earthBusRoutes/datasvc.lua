@@ -7,6 +7,7 @@ local M = {}
 M.HOST = '127.0.0.1'
 M.PORT = 47630
 M.RETRY_S = 6                -- after the service did not answer, ask again this much later
+M.TOTAL_S = 240              -- the service tries several public servers, each can take 45 s
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
 
 local queue, active = {}, nil
@@ -36,7 +37,7 @@ local function startNext()
   local job = table.remove(queue, 1)
   if not job then return end
   job.tries = job.tries + 1
-  local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = 'GET', path = job.path, connectTimeout = 3 })
+  local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = 'GET', path = job.path, connectTimeout = 3, totalTimeout = M.TOTAL_S })
   if not ok then req = { state = 'error', err = tostring(req) } end
   active = { job = job, req = req }
 end

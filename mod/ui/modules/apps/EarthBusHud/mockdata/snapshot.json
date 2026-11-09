@@ -1,0 +1,18 @@
+{
+  "route": { "ref": "305", "colour": "#2f9e8f", "from": "Náchod", "to": "Hradec Králové", "name": "305: Náchod - Hradec Králové", "network": "IREDO", "operator": "ICOM transport", "kind": "regional" },
+  "clock": 27960, "phase": "approach", "index": 5, "count": 10,
+  "next": { "name": "Nové Město nad Metují, Malecí nemocnice", "dist": 312, "remaining": 340, "sched": 28080, "delta": 84 },
+  "stops": [
+    { "name": "Nové Město nad Metují, Malecí nemocnice", "sched": 28080, "current": true, "index": 5 },
+    { "name": "Krčín, most", "sched": 28320, "current": false, "index": 6 },
+    { "name": "Černilov, kino", "sched": 28980, "current": false, "index": 7 },
+    { "name": "Sněžka", "sched": 29400, "current": false, "index": 8 },
+    { "name": "Hradec Králové, Šimkova", "sched": 29820, "current": false, "index": 9 },
+    { "name": "Hradec Králové, Pospíšilova", "sched": 30000, "current": false, "index": 10 }
+  ],
+  "onboard": 34, "capacity": 80, "seats": 25, "waitingNext": 4, "requested": true,
+  "boarded": 41, "alighted": 7, "lastBoard": 6, "lastAlight": 2, "leftBehind": 0,
+  "progress": 0.42, "scheduled": true, "units": "km/h",
+  "score": { "points": 874, "grade": "A", "parts": { "punctuality": 0.9, "service": 1, "comfort": 0.8, "safety": 1 } },
+  "notes": [], "noteSeq": 0, "finished": false
+}

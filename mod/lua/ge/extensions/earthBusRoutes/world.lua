@@ -223,7 +223,7 @@ function M.ensureHud()
   for _, a in ipairs(cur.apps or {}) do
     if a.appName == M.HUD_APP then return false end
   end
-  local ok = try(L.addApp, cur.filename, M.HUD_APP, { right = '20px', top = '110px', width = '380px', height = '470px' })
+  local ok = try(L.addApp, cur.filename, M.HUD_APP, { right = '20px', top = '110px', width = '380px', height = '410px' })
   if ok then
     try(function() guihooks.trigger('UiAppLayoutsChanged') end)
     try(L.setCurrentLayout, cur.filename)

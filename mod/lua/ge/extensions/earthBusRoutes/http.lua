@@ -117,7 +117,7 @@ local ipCache = {}
 -- req = M.start{ host=, port=80, method='POST', path=, headers={}, body= }; call M.step(req, dt) each frame until
 -- req.state is 'done' or 'error'. req.status / req.err / M.body(req.parser) afterwards.
 function M.start(o)
-  local req = { host = o.host, port = o.port or 80, state = 'connecting', t = 0, parser = M.newParser(), ctimeout = o.connectTimeout or M.CONNECT_TIMEOUT_S,
+  local req = { host = o.host, port = o.port or 80, state = 'connecting', t = 0, parser = M.newParser(), ctimeout = o.connectTimeout or M.CONNECT_TIMEOUT_S, ttimeout = o.totalTimeout or M.TOTAL_TIMEOUT_S,
     out = M.buildRequest(o.host, o.method or 'GET', o.path or '/', o.headers, o.body), sent = 1 }
   socket = socket or require('socket')
   local ip = ipCache[o.host]
@@ -146,7 +146,7 @@ end
 function M.step(req, dt)
   if req.state == 'done' or req.state == 'error' then return end
   req.t = req.t + dt
-  if req.t > M.TOTAL_TIMEOUT_S then return fail(req, 'timeout') end
+  if req.t > req.ttimeout then return fail(req, 'timeout') end
   local s = req.sock
   if req.state == 'connecting' then
     if s:getpeername() then req.state = 'sending'

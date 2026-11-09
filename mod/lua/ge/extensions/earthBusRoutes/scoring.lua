@@ -23,6 +23,7 @@ end
 
 local function note(s, text, points)
   s.notes[#s.notes + 1] = { text = text, points = points or 0 }
+  s.noteSeq = (s.noteSeq or 0) + 1
   if #s.notes > 40 then table.remove(s.notes, 1) end
 end
 

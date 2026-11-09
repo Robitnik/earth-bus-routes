@@ -34,6 +34,18 @@ local S = {
 
 local function earthApi() return rawget(_G, 'beamngEarth_api') end
 
+local function readStats()
+  local ok, st = pcall(jsonReadFile, '/settings/earthBusRoutes/stats.json')
+  S.stats = (ok and type(st) == 'table') and { trips = st.trips or 0, passengers = st.passengers or 0, points = st.points or 0 } or nil
+end
+
+local function readOptions()
+  readStats()
+  local o = world.options()
+  if next(o) ~= nil then S.opts = o end        -- Earth answers {} until its add-on list is loaded: keep what we had
+  if tonumber(S.opts.dataPort) then datasvc.PORT = tonumber(S.opts.dataPort) end
+end
+
 -- true, or false + why. Pure: no side effects, so the tests can call it with stub APIs.
 function M.checkEarth()
   local api = earthApi()
@@ -82,7 +94,7 @@ local function currentTrips(route)
   return c
 end
 
-local function publish()
+local function buildModel()
   local pose = world.pose()
   local model = {
     version = M.VERSION, earth = S.earth, reason = S.reason, screen = S.screen, loading = S.loading, error = S.err,
@@ -114,7 +126,13 @@ local function publish()
       reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false }
   end
   if S.result then model.result = S.result end
-  guihooks.trigger('EarthBusRoutesState', model)
+  model.stats = S.stats
+  return model
+end
+M.model = buildModel
+
+local function publish()
+  guihooks.trigger('EarthBusRoutesState', buildModel())
 end
 M.publish = publish
 
@@ -185,6 +203,7 @@ end
 -- ---- menu actions (called by the Vue pages through bngApi.engineLua) --------------------------------------------------
 
 function M.uiOpen()
+  readOptions()
   S.screen = S.trip and 'trip' or ((S.result and S.result.show) and 'result') or 'nearby'
   if S.screen == 'nearby' then loadNearby(false) else publish() end
   world.navigate('earthBusRoutes')
@@ -262,6 +281,7 @@ end
 -- ---- starting a trip -----------------------------------------------------------------------------------------------
 
 local function buildPlan()
+  readOptions()
   local route = currentRoute()
   if not route then return nil, 'no route chosen' end
   local c = currentTrips(route)
@@ -322,7 +342,7 @@ local function beginTrip(plan)
   S.screen = 'trip'
   world.navigate('play')
   publish()
-  guihooks.trigger('EarthBusRoutesHud', trip.hud(S.trip))
+  M.sendHud()
   log('I', TAG, ('trip started: %s %s -> %s from stop %d, clock %s'):format(plan.route.ref, tostring(plan.route.from), tostring(plan.route.to),
     plan.startIndex, menu.clockLabel(plan.clock)))
 end
@@ -379,6 +399,7 @@ local function finishTrip(t)
     totals = { trips = stats.trips, passengers = stats.passengers, points = stats.points },
     scheduled = t.entry ~= nil,
   }
+  S.stats = { trips = stats.trips, passengers = stats.passengers, points = stats.points }
   S.finishedRouteId = t.route.id
   S.finishedStation = S.sel.station
   S.trip = nil
@@ -432,6 +453,20 @@ end
 
 -- ---- every frame -----------------------------------------------------------------------------------------------------
 
+-- The HUD's payload (units come from the player's option)
+local function hudOf(t)
+  local h = trip.hud(t)
+  h.units = S.opts.units or 'km/h'
+  return h
+end
+
+-- The HUD app asks when it mounts (it may have been added after the trip started)
+function M.sendHud()
+  if S.trip then guihooks.trigger('EarthBusRoutesHud', hudOf(S.trip))
+  elseif S.result and S.result.show then guihooks.trigger('EarthBusRoutesHud', { finished = true, result = S.result })
+  else guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
+end
+
 local function handleEvents(t)
   for _, e in ipairs(trip.takeEvents(t)) do
     if e.name == 'arrived' then
@@ -467,7 +502,7 @@ local function tripFrame(dt)
   S.hudTimer = S.hudTimer - dt
   if S.hudTimer <= 0 then
     S.hudTimer = 0.25
-    guihooks.trigger('EarthBusRoutesHud', trip.hud(t))
+    guihooks.trigger('EarthBusRoutesHud', hudOf(t))
   end
 end
 
@@ -512,11 +547,6 @@ function M.onUpdate(dtReal, dtSim)
 end
 
 -- ---- game hooks ------------------------------------------------------------------------------------------------------
-
-local function readOptions()
-  S.opts = world.options()
-  if tonumber(S.opts.dataPort) then datasvc.PORT = tonumber(S.opts.dataPort) end
-end
 
 function M.onExtensionLoaded()
   refreshEarth()

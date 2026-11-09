@@ -1,0 +1,588 @@
+<template>
+  <div class="ebm" tabindex="-1" ref="rootEl" @keydown.esc.stop="close" :style="{ '--line': lineColour, '--ink-on-line': lineInk }">
+    <div class="shell">
+      <header class="top">
+        <div class="titles">
+          <h1>{{ t("title") }}</h1>
+          <div v-if="whereText" class="where">{{ whereText }}</div>
+        </div>
+        <nav class="crumbs" aria-label="steps">
+          <button v-if="['lines', 'route'].includes(screen)" class="crumb" :disabled="busyTrip" @click="go('nearby')">{{ t("crumb.stops") }}</button>
+          <template v-if="s && s.station && ['lines', 'route'].includes(screen)">
+            <span class="sep"></span>
+            <button class="crumb" :class="{ on: screen === 'lines' }" @click="go('lines')">{{ s.station.name }}</button>
+          </template>
+          <template v-if="s && s.route && screen === 'route'">
+            <span class="sep"></span>
+            <span class="crumb on"><span class="mini-plate">{{ s.route.ref }}</span>{{ s.route.to }}</span>
+          </template>
+        </nav>
+        <div class="tools">
+          <div class="lang" role="group" :aria-label="t('lang')">
+            <button :class="{ on: lang === 'en' }" @click="setLang('en')">EN</button>
+            <button :class="{ on: lang === 'uk' }" @click="setLang('uk')">УК</button>
+          </div>
+          <button class="btn ghost" @click="close">{{ t("close") }}</button>
+        </div>
+      </header>
+
+      <main class="body">
+        <!-- the add-on cannot work without BeamNG.Earth -->
+        <section v-if="s && !s.earth" class="notice bad">
+          <h2>BeamNG.Earth</h2>
+          <p>{{ s.reason }}</p>
+        </section>
+
+        <!-- a trip is running -->
+        <section v-else-if="s && screen === 'trip'" class="card center">
+          <h2>{{ t("trip.title") }}</h2>
+          <p>{{ t("trip.text", { ref: hudRef, to: hudTo }) }}</p>
+          <div class="row">
+            <button class="btn" @click="close">{{ t("trip.back") }}</button>
+            <button class="btn danger" @click="call('uiCancelTrip')">{{ t("trip.cancel") }}</button>
+          </div>
+        </section>
+
+        <!-- 1. stops near you -->
+        <section v-else-if="screen === 'nearby'" class="split">
+          <div class="list">
+            <div class="head">
+              <div>
+                <h2>{{ t("near.title") }}</h2>
+                <p class="sub">{{ t("near.sub") }}</p>
+              </div>
+              <button class="btn ghost" :disabled="!!(s && s.loading)" @click="call('uiRefresh')">{{ t("refresh") }}</button>
+            </div>
+
+            <div v-if="serviceDown" class="notice">
+              <h3>{{ t("svc.downTitle") }}</h3>
+              <p>{{ t("svc.downText") }}</p>
+              <p class="steps">{{ t("svc.downSteps") }}</p>
+              <button class="btn" @click="call('uiRefresh')">{{ t("retry") }}</button>
+            </div>
+            <div v-else-if="s && s.error" class="notice bad">
+              <p>{{ t("err.generic", { e: s.error }) }}</p>
+              <button class="btn" @click="call('uiRefresh')">{{ t("retry") }}</button>
+            </div>
+            <div v-else-if="!s || s.loading === 'nearby'" class="loading">
+              <span class="spin"></span>
+              <div><b>{{ t("near.loading") }}</b><div class="muted">{{ t("near.loadingHint") }}</div></div>
+            </div>
+            <div v-else-if="!stations.length" class="empty">
+              <b>{{ t("near.empty") }}</b>
+              <div class="muted">{{ t("near.emptyHint") }}</div>
+            </div>
+            <div v-else class="stops">
+              <button v-for="(st, i) in stations" :key="st.id" class="stop-card" :class="{ nearest: i === 0 }" @click="call('uiSelectStation', st.id)">
+                <div class="stop-main">
+                  <div class="stop-name">{{ st.name }}</div>
+                  <div class="stop-meta">
+                    <span class="dist">{{ dist(st.dist) }}</span>
+                    <span class="dir">{{ st.dir }}</span>
+                    <span v-if="st.station" class="tag">{{ t("near.station") }}</span>
+                    <span v-else-if="st.platforms > 1" class="muted">{{ t("near.platforms", { n: st.platforms }) }}</span>
+                  </div>
+                </div>
+                <div class="chips">
+                  <span v-for="c in st.lines" :key="c.ref" class="plate" :style="{ background: c.colour, color: ink(c.colour) }">{{ c.ref }}</span>
+                  <span v-if="st.lineCount > st.lines.length" class="muted">+{{ st.lineCount - st.lines.length }}</span>
+                  <span v-if="!st.lineCount" class="muted">—</span>
+                </div>
+              </button>
+            </div>
+          </div>
+          <aside class="aside">
+            <div class="card">
+              <h3>{{ t("near.position") }}</h3>
+              <div v-if="s && s.pos" class="coords">{{ s.pos.lat.toFixed(5) }}, {{ s.pos.lon.toFixed(5) }}</div>
+              <div v-if="whereText" class="muted">{{ whereText }}</div>
+            </div>
+            <div v-if="s && s.stats && s.stats.trips" class="card">
+              <h3>{{ t("stats.title") }}</h3>
+              <div class="muted">{{ t("stats.line", { trips: s.stats.trips, pax: s.stats.passengers }) }}</div>
+            </div>
+          </aside>
+        </section>
+
+        <!-- 2. lines at the stop -->
+        <section v-else-if="screen === 'lines'" class="list wide">
+          <div class="head">
+            <div>
+              <h2>{{ t("lines.title", { name: s.station ? s.station.name : "" }) }}</h2>
+              <p class="sub">{{ t("lines.sub") }}</p>
+            </div>
+            <button class="btn ghost" @click="go('nearby')">{{ t("back") }}</button>
+          </div>
+          <div v-if="s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("lines.loading") }}</b><div class="muted">{{ t("lines.loadingHint") }}</div></div></div>
+          <div v-if="s.error" class="notice bad"><p>{{ t("err.generic", { e: s.error }) }}</p></div>
+          <div class="lines">
+            <div v-for="ln in (s.lines || [])" :key="ln.id" class="line-row">
+              <span class="plate big" :style="{ background: ln.colour, color: ink(ln.colour) }">{{ ln.ref }}</span>
+              <div class="line-body">
+                <div class="muted small">{{ [ln.network, ln.operator].filter(Boolean).join(" · ") }}</div>
+                <div class="variants">
+                  <button v-for="v in ln.variants" :key="v.id" class="variant" :disabled="s.loading === 'route'" @click="call('uiSelectRoute', v.id)">
+                    {{ v.to ? t("lines.variant", { to: v.to }) : v.label }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. the route and starting it -->
+        <section v-else-if="screen === 'route' && s.route" class="route">
+          <div class="card line-card">
+            <div class="line-head">
+              <span class="plate huge" :style="{ background: s.route.colour, color: ink(s.route.colour) }">{{ s.route.ref }}</span>
+              <div>
+                <div class="from-to">{{ s.route.from }}<span class="arrow"> → </span>{{ s.route.to }}</div>
+                <div class="muted small">{{ kindText }}<template v-if="s.route.loop"> · {{ t("route.loop") }}</template></div>
+              </div>
+            </div>
+            <dl class="facts">
+              <div v-if="s.route.operator"><dt>{{ t("route.operator") }}</dt><dd>{{ s.route.operator }}</dd></div>
+              <div v-if="s.route.network"><dt>{{ t("route.network") }}</dt><dd>{{ s.route.network }}</dd></div>
+              <div><dt>{{ t("route.length") }}</dt><dd>{{ lengthText }}</dd></div>
+              <div><dt>{{ t("route.time") }}</dt><dd>{{ t("route.min", { n: s.route.minutes }) }}</dd></div>
+              <div><dt>{{ t("route.stops") }}</dt><dd>{{ s.route.stopCount }}</dd></div>
+              <div v-if="s.route.first"><dt>{{ t("route.first") }}</dt><dd>{{ s.route.first }}</dd></div>
+              <div v-if="s.route.last"><dt>{{ t("route.last") }}</dt><dd>{{ s.route.last }}</dd></div>
+            </dl>
+            <div class="freq">
+              <div class="freq-title">{{ t("route.interval") }} <span class="muted">· {{ t("day." + s.day) }}</span></div>
+              <div class="bars">
+                <div v-for="p in s.route.periods" :key="p.from" class="bar" :class="{ peak: p.peak, off: !p.minutes }" :title="p.minutes ? t('route.every', { n: p.minutes }) : t('route.none')">
+                  <i :style="{ height: barHeight(p) + '%' }"></i>
+                  <b>{{ p.minutes ? trim(p.minutes) : "–" }}</b>
+                  <span>{{ p.from }}–{{ p.to }}</span>
+                </div>
+              </div>
+            </div>
+            <p v-if="s.route.incomplete" class="warn">{{ t("route.incomplete") }}</p>
+          </div>
+
+          <div class="card diagram">
+            <h3>{{ t("route.stopsTitle") }}</h3>
+            <ol class="strip">
+              <li v-for="st in s.route.stops" :key="st.i" :class="{ here: isHere(st.i), passed: isPassed(st.i) }">
+                <span class="dot"></span>
+                <span class="nm">{{ st.name }}</span>
+                <span class="km">{{ units === 'mph' ? (st.km * 0.6214).toFixed(1) : st.km.toFixed(1) }}</span>
+                <span v-if="isHere(st.i)" class="you">{{ t("route.youHere") }}</span>
+              </li>
+            </ol>
+          </div>
+
+          <div class="card start" v-if="s.start">
+            <h3>{{ t("start.title") }}</h3>
+            <div class="seg" role="group">
+              <button :class="{ on: s.start.mode === 'here' }" @click="call('uiSetStartMode', 'here')">
+                {{ t("start.here") }}<small>{{ stopAt(s.start.index) }}</small>
+              </button>
+              <button :class="{ on: s.start.mode === 'first' }" @click="call('uiSetStartMode', 'first')">
+                {{ t("start.first") }}<small>{{ s.route.stops[0].name }}</small>
+              </button>
+            </div>
+
+            <div class="time">
+              <div class="label">{{ t("start.time") }}</div>
+              <div class="led-time">
+                <div class="unit">
+                  <button class="step" aria-label="+1 h" @click="bump(3600)">▲</button>
+                  <span class="digits">{{ hh }}</span>
+                  <button class="step" aria-label="-1 h" @click="bump(-3600)">▼</button>
+                </div>
+                <span class="colon">:</span>
+                <div class="unit">
+                  <button class="step" aria-label="+5 min" @click="bump(300)">▲</button>
+                  <span class="digits">{{ mm }}</span>
+                  <button class="step" aria-label="-5 min" @click="bump(-300)">▼</button>
+                </div>
+                <button class="btn ghost now" @click="call('uiSetTime', s.nowSec)">{{ t("start.now") }}</button>
+              </div>
+            </div>
+
+            <div class="deps">
+              <div class="label">{{ t("start.next") }}</div>
+              <div v-if="!s.start.deps.length" class="muted">{{ t("start.none") }}</div>
+              <div class="chips">
+                <button v-for="(d, i) in s.start.deps" :key="d.trip" class="dep" :class="{ on: s.start.dep === i + 1 }" @click="call('uiSelectDep', i + 1)">
+                  {{ d.label }}<small v-if="d.tomorrow">{{ t("start.tomorrow") }}</small>
+                </button>
+              </div>
+            </div>
+
+            <button v-if="s.start.reverseId" class="btn ghost reverse" @click="call('uiToggleReverse')">
+              ⇄ {{ t("start.reverse") }}<small>{{ t("start.reverseHint", { to: s.route.from }) }}</small>
+            </button>
+
+            <button class="btn go" :disabled="s.starting" @click="call('uiStart')">{{ s.starting ? t("start.teleporting") : t("start.go") }}</button>
+            <p v-if="s.error" class="warn">{{ s.error }}</p>
+            <p class="muted small">{{ t("start.goHint") }}</p>
+          </div>
+        </section>
+
+        <!-- 4. the end of the trip -->
+        <section v-else-if="screen === 'result' && s.result" class="result card">
+          <div class="res-head">
+            <span class="plate big" :style="{ background: s.result.colour, color: ink(s.result.colour) }">{{ s.result.ref }}</span>
+            <div>
+              <h2>{{ t("res.title") }}</h2>
+              <div class="muted">{{ s.result.from }} → {{ s.result.to }}</div>
+            </div>
+          </div>
+          <div class="res-main">
+            <div class="grade-ring">
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle cx="60" cy="60" r="52" class="bg" />
+                <circle cx="60" cy="60" r="52" class="fg" :stroke-dasharray="ring(s.result.points)" />
+              </svg>
+              <div class="g">{{ s.result.grade }}</div>
+            </div>
+            <div class="points"><b>{{ s.result.points }}</b><span>{{ t("res.points") }}</span>
+              <div class="stars" :aria-label="s.result.stars + ' / 5'"><i v-for="n in 5" :key="n" :class="{ on: n <= s.result.stars }">★</i></div>
+              <div v-if="s.result.record" class="record">{{ t("res.record") }}</div>
+              <div v-else-if="s.result.previous" class="muted small">{{ t("res.best", { n: s.result.previous }) }}</div>
+            </div>
+            <div class="parts">
+              <div v-for="k in PARTS" :key="k" class="part">
+                <span>{{ t("res." + k) }}</span>
+                <div class="meter"><i :style="{ width: Math.round(s.result.parts[k] * 100) + '%' }"></i></div>
+                <b>{{ Math.round(s.result.parts[k] * 100) }}</b>
+              </div>
+              <p v-if="!s.result.scheduled" class="muted small">{{ t("res.noSchedule") }}</p>
+            </div>
+          </div>
+          <dl class="facts row-facts">
+            <div><dt>{{ t("res.passengers") }}</dt><dd>{{ s.result.passengers }}</dd></div>
+            <div><dt>{{ t("res.stops") }}</dt><dd>{{ s.result.served }} / {{ s.result.planned }}</dd></div>
+            <div><dt>{{ t("res.time") }}</dt><dd>{{ t("route.min", { n: s.result.minutes }) }}</dd></div>
+            <div><dt>{{ t("res.income") }}</dt><dd>{{ s.result.revenue.toFixed(2) }}</dd></div>
+          </dl>
+          <ul v-if="s.result.notes && s.result.notes.length" class="notes">
+            <li v-for="(n, i) in s.result.notes" :key="i"><span>{{ noteText(n.text) }}</span><b>{{ n.points }}</b></li>
+          </ul>
+          <div class="muted small">{{ t("res.totals", { trips: s.result.totals.trips, pax: s.result.totals.passengers }) }}</div>
+          <div class="row">
+            <button v-if="s.result.canReverse" class="btn go" @click="call('uiReverseTrip')">⇄ {{ t("res.back") }}</button>
+            <button class="btn" @click="call('uiAnotherRoute')">{{ t("res.another") }}</button>
+            <button class="btn ghost" @click="finish">{{ t("res.close") }}</button>
+          </div>
+        </section>
+      </main>
+
+      <footer class="foot">
+        <span class="muted">{{ t("credit") }}</span>
+        <span class="svc" :class="{ ok: s && s.service && s.service.up, bad: s && s.service && s.service.up === false }">
+          <i></i>{{ svcText }}
+        </span>
+      </footer>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed, onMounted, ref } from "vue"
+import { useEvents } from "@/services/events"
+import { state, call, onState, distance, plateInk, pad } from "./store.js"
+import { lang, setLang, t, noteText } from "./i18n.js"
+
+const events = useEvents()
+events.on("EarthBusRoutesState", onState)
+
+const PARTS = ["punctuality", "service", "comfort", "safety"]
+const rootEl = ref(null)
+const s = state
+onMounted(() => {
+  if (rootEl.value) rootEl.value.focus()
+  call("uiState")
+})
+
+const screen = computed(() => (s.value ? s.value.screen : "nearby"))
+const units = computed(() => (s.value ? s.value.units : "km/h"))
+const stations = computed(() => (s.value && s.value.stations) || [])
+const serviceDown = computed(() => !!(s.value && (s.value.error === "service_down" || (s.value.service && s.value.service.up === false && !stations.value.length))))
+const busyTrip = computed(() => !!(s.value && s.value.tripActive))
+const svcText = computed(() => {
+  const v = s.value && s.value.service
+  if (!v) return ""
+  if (v.up) return t("svc.ok", { v: v.version || "" })
+  return v.up === false ? t("svc.off") : ""
+})
+
+const whereText = computed(() => {
+  const p = s.value && s.value.place
+  if (!p) return ""
+  return [p.street, p.place, p.country].filter(Boolean).join(", ")
+})
+const lineColour = computed(() => (s.value && s.value.route && s.value.route.colour) || (s.value && s.value.result && s.value.result.colour) || "#4aa3df")
+const lineInk = computed(() => plateInk(lineColour.value))
+const ink = plateInk
+const dist = m => distance(m, units.value, t)
+const hudRef = computed(() => (s.value && s.value.route ? s.value.route.ref : ""))
+const hudTo = computed(() => (s.value && s.value.route ? s.value.route.to : ""))
+
+const kindText = computed(() => (s.value && s.value.route ? t("route.kind." + s.value.route.kind) : ""))
+const lengthText = computed(() => {
+  const km = s.value.route.km
+  return units.value === "mph" ? t("route.mi", { n: (km * 0.6214).toFixed(1) }) : t("route.km", { n: km.toFixed(1) })
+})
+const stopAt = i => (s.value && s.value.route && s.value.route.stops[i - 1] ? s.value.route.stops[i - 1].name : "")
+const isHere = i => !!(s.value && s.value.start && s.value.start.mode === "here" && i === s.value.start.index)
+const isPassed = i => !!(s.value && s.value.start && s.value.start.mode === "here" && i < s.value.start.index)
+
+// the trip clock picker
+const hh = computed(() => pad(Math.floor((s.value.start.timeSec % 86400) / 3600)))
+const mm = computed(() => pad(Math.floor((s.value.start.timeSec % 3600) / 60)))
+function bump(delta) { call("uiSetTime", Math.round((s.value.start.timeSec + delta + 86400) % 86400)) }
+
+// frequency bars: buses an hour, 8 or more (a bus every 7.5 minutes) fills the bar
+const barHeight = p => (p.minutes ? Math.min(100, Math.max(12, (60 / p.minutes) * (100 / 8))) : 0)
+const trim = n => (Number.isInteger(n) ? String(n) : n.toFixed(1))
+const ring = pts => { const c = 2 * Math.PI * 52; return `${(c * Math.max(0, Math.min(1, pts / 1000))).toFixed(1)} ${c.toFixed(1)}` }
+
+function go(where) { call("uiBackTo", where) }
+function close() { call("uiClose") }
+function finish() { call("uiDismissResult"); close() }
+</script>
+
+<style scoped lang="scss">
+// One panel colour family; the line's own colour (--line) is the accent; amber only on the LED time, as on the HUD.
+.ebm {
+  --panel: #1a2830;
+  --panel-2: #22343e;
+  --panel-3: #2b414d;
+  --ink: #eef3f4;
+  --muted: #93a9b4;
+  --hair: rgba(255, 255, 255, 0.1);
+  --led: #ffc233;
+  --ok: #52d394;
+  --late: #ff875a;
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  color: var(--ink);
+  font-family: "Overpass", "Segoe UI", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  background: rgba(8, 15, 19, 0.82);
+  backdrop-filter: blur(6px);
+  outline: none;
+}
+.shell {
+  width: min(1240px, 100%);
+  height: min(780px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-radius: 14px;
+  border-left: 8px solid var(--line);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.2px; }
+h2 { font-size: 22px; font-weight: 700; }
+h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.sub { color: var(--muted); margin-top: 2px; }
+
+// ---- top bar
+.top {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--hair);
+}
+.titles { flex: none; }
+.where { color: var(--muted); font-size: 14px; margin-top: 1px; }
+.crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.crumb {
+  max-width: 280px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 99px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  cursor: pointer;
+  &.on { background: var(--panel-2); color: var(--ink); font-weight: 700; cursor: default; }
+  &:hover:not(.on):not(:disabled) { color: var(--ink); }
+  &:disabled { opacity: 0.5; cursor: default; }
+}
+.sep { flex: none; width: 14px; height: 2px; background: var(--hair); }
+.mini-plate { display: inline-block; margin-right: 8px; padding: 0 7px; border-radius: 4px; background: var(--line); color: var(--ink-on-line); font-weight: 800; }
+.tools { flex: none; display: flex; align-items: center; gap: 12px; }
+.lang { display: flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden;
+  button { border: 0; padding: 6px 10px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; &.on { background: var(--panel-3); color: var(--ink); } } }
+
+// ---- buttons
+.btn {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--panel-3);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: #36525f; }
+  &:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+  &:disabled { opacity: 0.5; cursor: default; }
+  &.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--hair); &:hover:not(:disabled) { background: var(--panel-2); } }
+  &.danger { background: #5a2a26; &:hover:not(:disabled) { background: #74352f; } }
+  &.go { background: var(--line); color: var(--ink-on-line); font-size: 17px; padding: 14px 18px; &:hover:not(:disabled) { filter: brightness(1.1); background: var(--line); } }
+}
+
+// ---- body
+.body { flex: 1; min-height: 0; padding: 18px 20px 6px; overflow: hidden; display: flex; }
+.body > section { flex: 1; min-width: 0; min-height: 0; }
+.card { background: var(--panel-2); border-radius: 12px; padding: 16px; }
+.card.center { margin: auto; text-align: center; max-width: 480px; display: flex; flex-direction: column; gap: 12px; flex: none; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; }
+.list { display: flex; flex-direction: column; gap: 12px; min-height: 0; &.wide { max-width: 900px; margin: 0 auto; width: 100%; } }
+.head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.stops, .lines { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 6px; }
+.aside { display: flex; flex-direction: column; gap: 12px; }
+.coords { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+
+.stop-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  &:hover { background: var(--panel-3); }
+  &:focus-visible { outline: 2px solid var(--line); }
+  &.nearest { box-shadow: inset 4px 0 0 var(--line); }
+}
+.stop-name { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.stop-meta { display: flex; gap: 10px; align-items: center; margin-top: 3px; color: var(--muted); .dist { color: var(--ink); font-weight: 700; } }
+.tag { padding: 0 8px; border-radius: 4px; background: var(--panel-3); color: var(--ink); font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 46%; align-items: center; }
+.plate {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 16px;
+  &.big { min-width: 64px; padding: 6px 12px; font-size: 28px; border-radius: 8px; }
+  &.huge { min-width: 84px; padding: 8px 14px; font-size: 38px; border-radius: 10px; }
+}
+
+.loading { display: flex; align-items: center; gap: 14px; padding: 22px 4px; }
+.spin { flex: none; width: 26px; height: 26px; border: 3px solid var(--hair); border-top-color: var(--line); border-radius: 50%; animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.empty { padding: 28px 4px; line-height: 1.5; }
+.notice { padding: 16px; border-radius: 12px; background: var(--panel-2); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; line-height: 1.45;
+  &.bad { box-shadow: inset 4px 0 0 var(--late); }
+  .steps { color: var(--led); } }
+
+// ---- lines
+.line-row { display: flex; gap: 16px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; background: var(--panel-2); }
+.line-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.variants { display: flex; flex-wrap: wrap; gap: 8px; }
+.variant { padding: 8px 14px; border: 0; border-radius: 8px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+  &:hover:not(:disabled) { background: #36525f; } &:disabled { opacity: 0.5; cursor: default; } &:focus-visible { outline: 2px solid var(--line); } }
+
+// ---- route
+.route { display: grid; grid-template-columns: 330px minmax(0, 1fr) 340px; gap: 16px; }
+.route > .card { min-height: 0; overflow-y: auto; }
+.line-head { display: flex; gap: 14px; align-items: center; margin-bottom: 12px; }
+.from-to { font-size: 18px; font-weight: 700; line-height: 1.25; .arrow { color: var(--muted); font-weight: 400; } }
+.facts { margin: 0; display: grid; gap: 7px; div { display: flex; justify-content: space-between; gap: 12px; } dt { color: var(--muted); } dd { margin: 0; font-weight: 600; text-align: right; } }
+.freq { margin-top: 16px; }
+.freq-title { font-weight: 700; margin-bottom: 8px; }
+.bars { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; height: 92px; }
+.bar { position: relative; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; text-align: center;
+  i { display: block; width: 100%; background: var(--panel-3); border-radius: 3px 3px 0 0; }
+  b { font-size: 12px; margin-top: 3px; }
+  span { font-size: 10px; color: var(--muted); }
+  &.peak i { background: var(--line); }
+  &.off b { color: var(--muted); font-weight: 400; } }
+.warn { margin-top: 12px; color: var(--late); font-size: 13px; line-height: 1.4; }
+
+.diagram { display: flex; flex-direction: column; }
+.strip { list-style: none; margin: 0; padding: 0 6px 0 0; flex: 1; min-height: 0; overflow-y: auto; }
+.strip li { position: relative; display: flex; align-items: baseline; gap: 10px; padding: 0 0 9px 26px; font-size: 15px;
+  &::before { content: ""; position: absolute; left: 7px; top: 14px; bottom: -5px; width: 4px; border-radius: 2px; background: var(--line); opacity: 0.9; }
+  &:last-child::before { display: none; }
+  .dot { position: absolute; left: 3px; top: 5px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 3px solid var(--line); background: var(--panel-2); z-index: 1; }
+  .nm { flex: 1; min-width: 0; }
+  .km { color: var(--muted); font-size: 13px; }
+  .you { padding: 0 8px; border-radius: 99px; background: var(--line); color: var(--ink-on-line); font-size: 12px; font-weight: 700; }
+  &.here .nm { font-weight: 700; font-size: 17px; }
+  &.here .dot { background: var(--line); width: 16px; height: 16px; left: 1px; top: 3px; }
+  &.passed { opacity: 0.45; } }
+
+.start { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+  button { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: hidden; padding: 9px 10px; border: 0; border-radius: 8px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 700; text-align: left; cursor: pointer;
+    small { font-weight: 400; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    &.on { background: var(--line); color: var(--ink-on-line); small { color: inherit; opacity: 0.8; } }
+    &:focus-visible { outline: 2px solid var(--ink); } } }
+.label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.led-time { display: flex; align-items: center; gap: 8px; }
+.led-time .unit { display: flex; flex-direction: column; align-items: center; }
+.led-time .digits {
+  position: relative; min-width: 72px; padding: 2px 10px; text-align: center; background: #07090a; border-radius: 6px; color: var(--led);
+  font-size: 40px; font-weight: 800; line-height: 54px; text-shadow: 0 0 8px rgba(255, 170, 0, 0.55); overflow: hidden;
+  &::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(rgba(0, 0, 0, 0.42) 1px, transparent 1px) 0 0 / 100% 3px, linear-gradient(90deg, rgba(0, 0, 0, 0.42) 1px, transparent 1px) 0 0 / 3px 100%; } }
+.led-time .colon { font-size: 36px; font-weight: 800; color: var(--led); margin-bottom: 4px; }
+.step { width: 72px; height: 22px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; &:hover { background: var(--panel-3); color: var(--ink); } &:focus-visible { outline: 2px solid var(--line); } }
+.now { margin-left: auto; padding: 8px 12px; }
+.deps .chips { justify-content: flex-start; max-width: none; gap: 6px; }
+.dep { padding: 8px 12px; border: 0; border-radius: 8px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; display: flex; flex-direction: column; align-items: center; line-height: 1.1;
+  small { font-weight: 400; font-size: 10px; color: var(--muted); }
+  &.on { background: var(--line); color: var(--ink-on-line); small { color: inherit; } } &:focus-visible { outline: 2px solid var(--ink); } }
+.reverse { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; small { font-weight: 400; color: var(--muted); } }
+
+// ---- result
+.result { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; }
+.res-head { display: flex; gap: 16px; align-items: center; }
+.res-main { display: grid; grid-template-columns: 150px 250px minmax(0, 1fr); gap: 24px; align-items: center; }
+.grade-ring { position: relative; width: 140px; height: 140px;
+  svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+  .bg { fill: none; stroke: var(--hair); stroke-width: 9; }
+  .fg { fill: none; stroke: var(--line); stroke-width: 9; stroke-linecap: round; transition: stroke-dasharray 0.8s ease-out; }
+  .g { position: absolute; inset: 0; display: grid; place-items: center; font-size: 64px; font-weight: 800; } }
+.points { display: flex; flex-direction: column; gap: 4px; b { font-size: 54px; line-height: 1; font-weight: 800; } span { color: var(--muted); }
+  .stars i { font-style: normal; color: var(--hair); font-size: 22px; &.on { color: var(--led); } }
+  .record { margin-top: 4px; padding: 3px 10px; white-space: nowrap; font-size: 13px; border-radius: 99px; background: rgba(82, 211, 148, 0.16); color: var(--ok); font-weight: 700; align-self: flex-start; } }
+.parts { display: flex; flex-direction: column; gap: 9px; }
+.part { display: grid; grid-template-columns: 130px minmax(0, 1fr) 36px; align-items: center; gap: 10px; b { text-align: right; }
+  .meter { height: 8px; border-radius: 4px; background: var(--hair); overflow: hidden; i { display: block; height: 100%; background: var(--line); border-radius: 4px; } } }
+.row-facts { grid-template-columns: repeat(4, 1fr); display: grid; gap: 12px; div { flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px; background: var(--panel-3); } dd { text-align: left; font-size: 20px; } }
+.notes { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; li { display: flex; justify-content: space-between; padding: 6px 10px; border-radius: 6px; background: rgba(255, 135, 90, 0.12); color: #ffb199; } }
+
+.foot { display: flex; justify-content: space-between; align-items: center; padding: 8px 20px 12px; font-size: 13px; }
+.svc { display: flex; align-items: center; gap: 6px; color: var(--muted); i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  &.ok i { background: var(--ok); } &.bad { color: var(--late); i { background: var(--late); } } }
+
+@media (max-width: 1100px) {
+  .route { grid-template-columns: 1fr 1fr; .start { grid-column: 1 / -1; } }
+  .split { grid-template-columns: 1fr; .aside { display: none; } }
+}
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } .grade-ring .fg { transition: none; } }
+</style>
