@@ -43,8 +43,20 @@ function M.linesModel(station, routes)
   local out = {}
   for i, ln in ipairs(lines) do
     local variants = {}
+    local seen = {}
+    for _, r in ipairs(ln.variants) do seen[r.to or ''] = (seen[r.to or ''] or 0) + 1 end
+    local used = {}
     for k, r in ipairs(ln.variants) do
-      variants[k] = { id = r.id, label = osm.label(r), from = r.from, to = r.to, ref = r.ref }
+      local v = { id = r.id, label = osm.label(r), from = r.from, to = r.to, ref = r.ref }
+      -- several variants of one line with the same destination (a way via a village, a short run): tell them apart by the
+      -- relation's own name ("309: Rychnov => Provodov => Náchod"), else by a counter
+      if r.to and seen[r.to] > 1 then
+        v.ambiguous = true
+        v.label = r.name and osm.label({ ref = r.ref, name = r.name }) or v.label
+        used[v.label] = (used[v.label] or 0) + 1
+        if used[v.label] > 1 then v.label = v.label .. ' (' .. used[v.label] .. ')' end
+      end
+      variants[k] = v
     end
     out[i] = { id = i, ref = ln.ref, colour = ln.colour, network = ln.network, operator = ln.operator, variants = variants }
   end

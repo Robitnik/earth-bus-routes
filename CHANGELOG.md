@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Lines with several variants to the same destination (a way via a village, a short run) are told apart by the relation's name instead of showing the same button twice.
+
 ## 0.2.0
 
 - Menu: stops near you, lines and directions, route card (length, ride time, stops, how often it runs), start from this stop or from

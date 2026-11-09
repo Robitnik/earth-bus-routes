@@ -122,7 +122,7 @@
                 <div class="muted small">{{ [ln.network, ln.operator].filter(Boolean).join(" · ") }}</div>
                 <div class="variants">
                   <button v-for="v in ln.variants" :key="v.id" class="variant" :disabled="s.loading === 'route'" @click="call('uiSelectRoute', v.id)">
-                    {{ v.to ? t("lines.variant", { to: v.to }) : v.label }}
+                    {{ v.to && !v.ambiguous ? t("lines.variant", { to: v.to }) : v.label }}
                   </button>
                 </div>
               </div>

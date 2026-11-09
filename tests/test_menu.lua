@@ -42,6 +42,29 @@ function T.lines_model_lists_variants_with_ids()
   end
 end
 
+function T.variants_with_the_same_destination_are_told_apart()
+  local function head(id, to, name) return { id = id, ref = '309', network = 'N', from = 'Rychnov', to = to, name = name, colour = '#112233', nodes = { [1] = true } } end
+  local routes = {
+    head(1, 'Nachod', '309: Rychnov => Provodov => Nachod'),
+    head(2, 'Nachod', '309: Rychnov => Nachod'),
+    head(3, 'Nachod', '309: Rychnov => Nachod'),          -- even the names can be equal
+    head(4, 'Rychnov', nil),
+  }
+  local lines = menu.linesModel({ nodeIds = { [1] = true } }, routes)
+  assert(#lines == 1 and #lines[1].variants == 4)
+  local labels, n = {}, 0
+  for _, v in ipairs(lines[1].variants) do
+    if v.to == 'Nachod' then
+      assert(v.ambiguous and not labels[v.label], 'duplicate label ' .. tostring(v.label))
+      labels[v.label] = true
+      n = n + 1
+    else
+      assert(not v.ambiguous)
+    end
+  end
+  assert(n == 3)
+end
+
 function T.route_model_and_departures()
   local r = assert(osm.parseRoute(H.fixture('route_6964117')))
   local trips = sched.generate(r, 2)
