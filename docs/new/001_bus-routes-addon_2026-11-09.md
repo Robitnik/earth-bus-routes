@@ -219,3 +219,11 @@ GTFS через Transitland (реальний розклад; ключ грав�
 4. Геометрія світу Earth може не збігатися з OSM на кілька метрів — зона платформи з запасом (25 м / 6 м).
 5. Неблокуючий HTTP у Lua без TLS: лише `http://`-дзеркала; якщо всі перейдуть на https — потрібен companion або
    запит через сервер Earth (тоді — пропозиція в апстрім).
+
+## Хід виконання
+- **A (2026-11-09) — код готовий, у грі не перевірено** (гра була запущена іншою сесією: мод не підключали до `mods/unpacked`).
+  Є: `mod/` (modScript, `earthBusRoutes_main` з перевіркою API Earth і одним тостом, `beamngEarth_addon.json` — 5 опцій,
+  перевірено `addons.parse_options` з `origin/dev`), `tools/` (`run_tests.py`, `build_zip.py`, `link_dev.py`, `local_addon.py`),
+  5 Lua-тестів (lupa), LICENSE (MIT). Лишилось для закриття A: у грі з Earth `local.json` → Install → консоль чиста.
+  Запуск тестів: `D:\Projects\BeamNG.Earth-dev\.venv\Scripts\python.exe tools/run_tests.py`.
+  i18n (EN + UK) — починається з етапу G (UI); у Lua-частині тексти англійські.

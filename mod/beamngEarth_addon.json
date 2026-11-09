@@ -1,0 +1,13 @@
+{
+  "options": [
+    {"key": "density", "label": "Passenger density", "type": "choice", "choices": ["low", "normal", "high"], "default": "normal",
+     "help": "How many passengers wait at stops. The time of day still changes it."},
+    {"key": "difficulty", "label": "Scoring strictness", "type": "choice", "choices": ["relaxed", "normal", "strict"], "default": "normal",
+     "help": "How hard punctuality, comfort and safety are judged."},
+    {"key": "timeScale", "label": "Trip clock speed", "type": "int", "default": 1, "min": 1, "max": 10,
+     "help": "1 = real speed. Higher values make the trip clock (and the sky) run faster."},
+    {"key": "units", "label": "Units", "type": "choice", "choices": ["km/h", "mph"], "default": "km/h"},
+    {"key": "overpass", "label": "Overpass server", "type": "text", "default": "",
+     "help": "Your own http:// Overpass interpreter URL. Empty = the built-in list."}
+  ]
+}
