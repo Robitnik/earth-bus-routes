@@ -1,0 +1,5 @@
+*.zip
+__pycache__/
+.venv/
+node_modules/
+tools/hud_preview/dist/
