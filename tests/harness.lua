@@ -19,6 +19,8 @@ function H.earth(features, major)
   }
   return toasts
 end
+-- A recorded Overpass answer from tests/fixtures as a Lua table
+function H.fixture(name) return jsonDecode(readFileText('tests/fixtures/' .. name .. '.json')) end
 function H.load(path)
   local f = assert(loadfile(path))
   return f()

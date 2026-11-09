@@ -1,0 +1,901 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-11-09T22:35:43Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 317937340,
+  "lat": 50.2133111,
+  "lon": 15.8343482,
+  "tags": {
+    "bench": "no",
+    "bin": "no",
+    "bus": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "local_ref": "2",
+    "name": "Hradec Králové, Šimkova",
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "public_transport": "platform",
+    "ref:IREDO": "1047202",
+    "shelter": "no",
+    "tactile_paving": "no"
+  }
+},
+{
+  "type": "node",
+  "id": 317937342,
+  "lat": 50.2131257,
+  "lon": 15.8341324,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "local_ref": "1",
+    "name": "Hradec Králové, Šimkova",
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "public_transport": "platform",
+    "ref:IREDO": "1047201",
+    "shelter": "yes",
+    "tactile_paving": "no"
+  }
+},
+{
+  "type": "node",
+  "id": 763080156,
+  "lat": 50.2106030,
+  "lon": 15.8300609,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "realtime",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Adalbertinum",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 763080168,
+  "lat": 50.2109175,
+  "lon": 15.8307079,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Adalbertinum",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no"
+  }
+},
+{
+  "type": "node",
+  "id": 2182370214,
+  "lat": 50.2090398,
+  "lon": 15.8361242,
+  "tags": {
+    "bench": "no",
+    "bin": "yes",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Komenského",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "no",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2182370215,
+  "lat": 50.2092487,
+  "lon": 15.8371828,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "name": "Komenského",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "yes",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2182370228,
+  "lat": 50.2070938,
+  "lon": 15.8322590,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "name": "Zimní stadion",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "ref:CIS_JR": "58282",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2182370229,
+  "lat": 50.2075870,
+  "lon": 15.8326317,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "name": "Zimní stadion",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "ref:CIS_JR": "58282",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2638739774,
+  "lat": 50.2123442,
+  "lon": 15.8288707,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "realtime",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Muzeum",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2638739778,
+  "lat": 50.2121543,
+  "lon": 15.8297267,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "realtime",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Muzeum",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2638739782,
+  "lat": 50.2122136,
+  "lon": 15.8364198,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "realtime",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Magistrát města",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2638739786,
+  "lat": 50.2119344,
+  "lon": 15.8367528,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "realtime",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Magistrát města",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 2638739789,
+  "lat": 50.2122893,
+  "lon": 15.8376107,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "name": "Magistrát města",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "no",
+    "tactile_paving": "yes",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 10255598217,
+  "lat": 50.2067286,
+  "lon": 15.8321952,
+  "tags": {
+    "bench": "yes",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "yes",
+    "highway": "bus_stop",
+    "lit": "no",
+    "name": "Zimní stadion",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "ref:CIS_JR": "58282",
+    "shelter": "yes",
+    "tactile_paving": "no",
+    "trolleybus": "yes"
+  }
+},
+{
+  "type": "node",
+  "id": 13831102321,
+  "lat": 50.2117421,
+  "lon": 15.8286326,
+  "tags": {
+    "bench": "no",
+    "bin": "yes",
+    "bus": "yes",
+    "departures_board": "yes",
+    "description": "Sight-seeing train / turisticky vlaček",
+    "highway": "bus_stop",
+    "lit": "yes",
+    "name": "Turistický vláček Muzeum",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport": "platform",
+    "shelter": "no",
+    "tactile_paving": "no"
+  }
+},
+{
+  "type": "relation",
+  "id": 3469721,
+  "tags": {
+    "from": "Nový Hradec Králové",
+    "name": "Trolejbus 2",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "2",
+    "route": "trolleybus",
+    "to": "Terminál HD",
+    "type": "route",
+    "via": "Magistrát města"
+  }
+},
+{
+  "type": "relation",
+  "id": 3481410,
+  "tags": {
+    "from": "Terminál HD",
+    "name": "Trolejbus 2",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "2",
+    "route": "trolleybus",
+    "to": "Nový Hradec Králové",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 3535391,
+  "tags": {
+    "from": "Slezské Předměstí - cihelna",
+    "name": "Trolejbus 3",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "3",
+    "route": "trolleybus",
+    "to": "Plačice",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4118085,
+  "tags": {
+    "complete": "yes",
+    "from": "Terminál HD",
+    "name": "Bus 5: Terminál HD ⇒ Slatina ⇒ Divec",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "5",
+    "route": "bus",
+    "to": "Divec",
+    "type": "route",
+    "via": "Slatina"
+  }
+},
+{
+  "type": "relation",
+  "id": 4118089,
+  "tags": {
+    "complete": "yes",
+    "from": "Divec",
+    "name": "Bus 5: Divec ⇒ Terminál HD",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "5",
+    "route": "bus",
+    "to": "Terminál HD",
+    "type": "route",
+    "via": "Slatina"
+  }
+},
+{
+  "type": "relation",
+  "id": 4120199,
+  "tags": {
+    "from": "Terminál HD",
+    "name": "Trolejbus 6",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "6",
+    "route": "trolleybus",
+    "to": "Slezské Předměstí - cihelna",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4120207,
+  "tags": {
+    "from": "Slezské Předměstí - cihelna",
+    "name": "Trolejbus 6",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "6",
+    "route": "trolleybus",
+    "to": "Terminál HD",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4120219,
+  "tags": {
+    "from": "Terminál HD",
+    "name": "Trolejbus 7",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "7",
+    "route": "bus",
+    "to": "Malšovice - U Čechů",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4120221,
+  "tags": {
+    "from": "Malšovice - U Čechů",
+    "name": "Trolejbus 7",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "7",
+    "route": "bus",
+    "to": "Terminál HD",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136417,
+  "tags": {
+    "complete": "yes",
+    "from": "Terminál HD",
+    "name": "Bus 11: Terminál HD => Svinary => Terminál HD",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "11",
+    "route": "bus",
+    "to": "Terminál HD",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136418,
+  "tags": {
+    "complete": "yes",
+    "from": "Terminál HD",
+    "name": "Bus 17: Terminál HD => Svinary => Terminál HD",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "17",
+    "route": "bus",
+    "to": "Terminál HD",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136485,
+  "tags": {
+    "complete": "yes",
+    "from": "Březhrad",
+    "name": "Bus 12: Březhrad => Kingspan",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "12",
+    "route": "bus",
+    "to": "Kingspan",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136556,
+  "tags": {
+    "complete": "yes",
+    "from": "Terminál HD",
+    "name": "Bus 13: Terminál HD => Rusek škola",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "13",
+    "route": "bus",
+    "to": "Rusek škola",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136575,
+  "tags": {
+    "complete": "no",
+    "from": "Jungmannova",
+    "name": "Bus 14: Jungmannova => Slezské Předměstí - cihelna",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "14",
+    "route": "bus",
+    "to": "Slezské Předměstí - cihelna",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4136620,
+  "tags": {
+    "name": "15",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "15",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4141681,
+  "tags": {
+    "complete": "no",
+    "from": "Roudnička",
+    "name": "16",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "16",
+    "route": "bus",
+    "to": "Stěžery",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4144517,
+  "tags": {
+    "name": "18",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "18",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 4144524,
+  "tags": {
+    "name": "19",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "19",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 6964117,
+  "tags": {
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "ref": "305",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 6964209,
+  "tags": {
+    "complete": "yes",
+    "from": "Dobruška, autobusové stanoviště",
+    "name": "Bus 111: Dobruška => Hradec Králové",
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "operator": "AUDIS BUS s.r.o.",
+    "public_transport:version": "2",
+    "ref": "111",
+    "route": "bus",
+    "to": "B2 (výstupní)",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 6989265,
+  "tags": {
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "ref": "338",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 7008802,
+  "tags": {
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "ref": "110",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 7181404,
+  "tags": {
+    "ref": "660052",
+    "route": "bus",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 9261351,
+  "tags": {
+    "from": "Plačice",
+    "name": "Trolejbus 3",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "3",
+    "route": "trolleybus",
+    "to": "Slezské Předměstí - cihelna",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 10926429,
+  "tags": {
+    "complete": "yes",
+    "from": "Terminál HD",
+    "name": "Bus 111: Hradec Králové => Dobruška",
+    "network": "Integrovaná regionální doprava Královéhradeckého a Pardubického kraje",
+    "network:short": "IREDO",
+    "network:wikidata": "Q12021384",
+    "network:wikipedia": "cs:IREDO",
+    "operator": "AUDIS BUS s.r.o.",
+    "public_transport:version": "2",
+    "ref": "111",
+    "route": "bus",
+    "to": "Dobruška, autobusové stanoviště",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 12218864,
+  "tags": {
+    "from": "Pod Strání",
+    "name": "Trolejbus 4: Pod Strání - Terminál HD",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "4",
+    "route": "trolleybus",
+    "to": "Terminál HD",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 12218865,
+  "tags": {
+    "from": "Terminál HD",
+    "name": "Trolejbus 4: Terminál HD - Pod strání",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "network:wikipedia": "cs:Východočeský dopravní integrovaný systém",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "operator:wikipedia": "cs:Dopravní podnik města Hradce Králové",
+    "public_transport:version": "2",
+    "ref": "4",
+    "route": "trolleybus",
+    "to": "Pod strání",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 15014441,
+  "tags": {
+    "complete": "yes",
+    "from": "Plachta U Parku",
+    "name": "Trolejbus 21: Plachata U Parku - Magistrát města - Plachta U Parku",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "21",
+    "route": "trolleybus",
+    "to": "Plachta U Parku",
+    "type": "route"
+  }
+},
+{
+  "type": "relation",
+  "id": 15015748,
+  "tags": {
+    "from": "Pod Strání",
+    "name": "Trolejbus 27: Pod Strání - Slezské Předměstí, Cihelna",
+    "network": "MHD Hradec Králové",
+    "network:wikidata": "Q136803311",
+    "operator": "Dopravní podnik města Hradce Králové",
+    "operator:short": "DPMHK",
+    "operator:wikidata": "Q58557872",
+    "public_transport:version": "2",
+    "ref": "27",
+    "route": "trolleybus",
+    "to": "Slezské Předměstí, Cihelna",
+    "type": "route"
+  }
+}
+
+  ]
+}

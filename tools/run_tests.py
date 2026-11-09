@@ -1,6 +1,6 @@
 """Runs tests/test_*.lua under lupa (use the venv python of BeamNG.Earth-dev: D:/Projects/BeamNG.Earth-dev/.venv).
 Each test file returns a table of name -> function. Run from anywhere: python tools/run_tests.py [name-filter]"""
-import sys, pathlib
+import sys, pathlib, json, os
 from lupa import LuaRuntime
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -8,9 +8,18 @@ flt = sys.argv[1] if len(sys.argv) > 1 else ""
 failed = total = 0
 for f in sorted((ROOT / "tests").glob("test_*.lua")):
     lua = LuaRuntime(unpack_returned_tuples=True)
-    lua.execute(f"package.path = [[{ROOT.as_posix()}/?.lua;]] .. package.path")
-    import os
+    lua.execute(f"package.path = [[{ROOT.as_posix()}/?.lua;{ROOT.as_posix()}/mod/lua/ge/extensions/?.lua;]] .. package.path")
     os.chdir(ROOT)
+
+    def to_lua(o):
+        # JSON -> Lua tables like the game's jsonDecode (null -> nil; lists 1-based)
+        if isinstance(o, dict):
+            return lua.table_from({k: to_lua(v) for k, v in o.items() if v is not None})
+        if isinstance(o, list):
+            return lua.table_from([to_lua(v) for v in o])
+        return o
+    lua.globals().jsonDecode = lambda s: to_lua(json.loads(s))
+    lua.globals().readFileText = lambda path: pathlib.Path(path).read_text(encoding="utf8")
     suite = lua.execute(f"return dofile([[{f.as_posix()}]])")
     for name in sorted(suite.keys()):
         if flt and flt not in f.stem and flt not in name:
