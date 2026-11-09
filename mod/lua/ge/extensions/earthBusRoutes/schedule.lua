@@ -81,15 +81,15 @@ function M.intervalFor(route, kind, period, weekend, ctx)
 end
 
 -- Seconds to ride between consecutive stops and stand at each, for a trip leaving at `startSec`.
--- Returns arr[i], dep[i] (seconds after the trip's start; arr[1] = dep[1] = 0).
+-- Returns arr[i], dep[i] (seconds after the trip's start; arr[1] = 0, dep[1] = the dwell at the terminus).
 function M.runTimes(route, kind, startSec, ctx)
   local stops = route.stops
   local speed = (M.SPEED[kind] or 21) / 3.6
   local h = (startSec / 3600) % 24
   local factor = 1
   if (h >= 7 and h < 9) or (h >= 15 and h < 18) then factor = 1.15 elseif h >= 22 or h < 5 then factor = 0.9 end
-  local arr, dep = { 0 }, { 0 }
-  local t = 0
+  local arr, dep = { 0 }, { M.DWELL }           -- the bus is at the terminus at `start` and leaves after its dwell
+  local t = M.DWELL
   for i = 2, #stops do
     local d = math.max(0, stops[i].along - stops[i - 1].along)
     t = t + d / speed * factor

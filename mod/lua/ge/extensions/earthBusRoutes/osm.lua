@@ -13,7 +13,9 @@ local function lower(s) return type(s) == 'string' and s:lower() or '' end
 -- "náchod nám" are): good enough to join a stop's two platforms, which OSM names alike.
 function M.normName(s)
   s = lower(s or '')
-  s = s:gsub('[%s%p]+', ' '):gsub('^ ', ''):gsub(' $', '')
+  -- explicit ASCII separators: %p / %s change with the machine's locale (cp1251 treats UTF-8 bytes as punctuation)
+  s = s:gsub("[ \t\r\n,%.;:!%?%-_%(%)%[%]/\'\"]+", " ")
+  s = s:gsub('^ ', ''):gsub(' $', '')
   return s
 end
 
@@ -271,6 +273,19 @@ function M.parseRoute(data)
     cum, length = geo.cumulative(path)
     gaps = gaps + 1
   end
+  -- OSM often lists both sides' platforms of one stop (one per direction): in order, a stop with the same name close to
+  -- the previous one is the same stop; the platform nearer the line is kept
+  local merged = {}
+  for _, s in ipairs(stops) do
+    local prev = merged[#merged]
+    if prev and M.normName(prev.name) == M.normName(s.name) and geo.dist(prev.lat, prev.lon, s.lat, s.lon) < M.MERGE_M then
+      if (s.off or 0) < (prev.off or 0) then merged[#merged] = s end
+    else
+      merged[#merged + 1] = s
+    end
+  end
+  stops = merged
+  if #stops < 2 then return nil, 'fewer than two distinct stops in the relation' end
   for i, s in ipairs(stops) do s.index = i end
 
   local first, last = stops[1], stops[#stops]

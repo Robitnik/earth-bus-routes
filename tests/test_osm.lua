@@ -24,6 +24,17 @@ function T.stations_group_platforms_and_find_routes()
   assert(any > 0, 'no station has a route')
 end
 
+function T.slim_answer_gives_the_same_stations_and_routes()
+  local full = osm.parseAround(H.fixture('nachod_around'))
+  local slim = osm.parseAround(H.fixture('nachod_around_slim'))
+  assert(#slim.routes == #full.routes and #slim.stops == #full.stops)
+  local near = osm.nearest(osm.groupStops(slim.stops), NACHOD[1], NACHOD[2], 600)
+  local nearFull = osm.nearest(osm.groupStops(full.stops), NACHOD[1], NACHOD[2], 600)
+  for i = 1, math.min(#near, 5) do
+    assert(#osm.routesAt(near[i], slim.routes) == #osm.routesAt(nearFull[i], full.routes), 'station ' .. i)
+  end
+end
+
 function T.lines_group_variants_by_ref()
   local a = osm.parseAround(H.fixture('nachod_around'))
   local lines = osm.groupLines(a.routes)
