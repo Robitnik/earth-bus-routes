@@ -89,7 +89,7 @@ class Paths(unittest.TestCase):
         q = d.stations_query(50.4157, 16.1626)
         self.assertIn("around:25000,50.4157,16.1626", q)
         self.assertIn("amenity=bus_station", q)
-        self.assertEqual(d.stations_key(50.4157, 16.1626), d.stations_key(50.4300, 16.1800))
+        self.assertEqual(d.stations_key(50.4157, 16.1626), d.stations_key(50.4000, 16.1400))
         self.assertNotEqual(d.stations_key(50.4157, 16.1626), d.stations_key(50.6, 16.1626))
 
     def test_straight_fallback(self):
