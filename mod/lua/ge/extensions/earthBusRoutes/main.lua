@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.4.1'
+M.VERSION = '0.5.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -141,6 +141,7 @@ local function buildModel()
   end
   if S.result then model.result = S.result end
   model.stats = S.stats
+  model.find = M.findModel()
   model.saved = M.savedModel()
   model.features = datasvc.state.features
   if S.build then model.build = M.buildModelOf() end
@@ -216,6 +217,112 @@ local function findReverse(route)
       end
     end)
   end
+end
+
+-- ---- search: stations by name, lines by number -------------------------------------------------------------------------------
+
+local function trim(q) return (tostring(q or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
+
+-- Asks the data service for stations by name (or lines by number, when `q` is one): first what it already knows (its index, on
+-- the fast lane: results as you type), then the public servers (a final answer). cb(kind, data, final, err); returns the kind.
+local function twoStep(q, lat, lon, onlyFast, wanted, cb)
+  local kind = osm.isLineRef(q) and 'lines' or 'stations'
+  local ask = (kind == 'lines') and datasvc.lines or datasvc.search
+  if datasvc.has(kind == 'lines' and 'lines' or 'search') == false then cb(kind, nil, true, 'service_old') return kind end
+  local gotFull = false
+  if datasvc.has('local') == true then
+    ask(q, lat, lon, function(data) if data and not gotFull and wanted() then cb(kind, data, false) end end, true)
+  end
+  if not onlyFast then
+    ask(q, lat, lon, function(data, info)
+      gotFull = true
+      if not wanted() then return end
+      if data then cb(kind, data, true)
+      else cb(kind, nil, true, (info and info.down and 'service_down') or (info and info.error) or 'unknown error') end
+    end, false)
+  end
+  return kind
+end
+
+local function findPos()
+  local pose = world.pose()
+  if pose then return pose.lat, pose.lon end
+  if S.cell then return S.cell.lat, S.cell.lon end
+end
+
+function M.findModel()
+  local F = S.find
+  if not F then return nil end
+  local items = {}
+  for i, it in ipairs(F.items or {}) do
+    if F.kind == 'lines' then items[i] = it
+    else items[i] = { id = it.id, name = it.name, dist = it.dist, dir = it.dir, station = it.station, platforms = it.platforms, lat = it.lat, lon = it.lon } end
+  end
+  return { q = F.q, kind = F.kind, items = items, busy = F.busy or false, err = F.err }
+end
+
+-- The search box of the first screen
+function M.uiFind(q, onlyFast)
+  q = trim(q)
+  local lat, lon = findPos()
+  if not lat then return end
+  if not osm.isLineRef(q) and #q < 2 then M.uiFindClear() return end
+  if not S.find or S.find.q ~= q then S.find = { q = q, items = {} } end
+  local F = S.find
+  F.token = (F.token or 0) + 1
+  local token = F.token
+  F.err = nil
+  if not onlyFast then F.busy = true end
+  F.kind = twoStep(q, lat, lon, onlyFast, function() return S.find == F and F.token == token end, function(kind, data, final, err)
+    if final then F.busy = false end
+    if data then
+      local ok, a = pcall(osm.parseAround, data)
+      if ok then
+        F.kind = kind
+        if kind == 'lines' then F.items = menu.linesModel(nil, a.routes)
+        else F.items = builder.nameHits(builder.fromStops(a.stops), lat, lon) end
+      end
+    elseif err and #(F.items or {}) == 0 then
+      F.err = err
+    end
+    publish()
+  end)
+  if not onlyFast then publish() end
+end
+
+function M.uiFindClear()
+  S.find = nil
+  publish()
+end
+
+-- A station of the results: its lines, as if it were the one nearest to you
+function M.uiFindStation(i)
+  local F = S.find
+  local item = F and F.kind == 'stations' and F.items[tonumber(i)]
+  if not item then return end
+  S.loading, S.err = 'nearby', nil
+  publish()
+  datasvc.nearby(item.lat, item.lon, function(data, info)
+    S.loading = nil
+    if not data then S.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error' publish() return end
+    local ok, a = pcall(osm.parseAround, data)
+    if not ok then S.err = 'Could not read the map data' publish() return end
+    local stations = osm.groupStops(a.stops)
+    local model = menu.nearbyModel(stations, a.routes, item.lat, item.lon)
+    if #model == 0 then S.err = 'No stop found there' publish() return end
+    S.cell = { stations = stations, routes = a.routes, model = model, lat = item.lat, lon = item.lon, found = item.name }
+    local pick = 1
+    for k, st in ipairs(model) do if st.name == item.name then pick = k break end end
+    M.uiSelectStation(pick)
+  end, 'urgent')
+end
+
+-- A line of the results: its card, to start from its first stop
+function M.uiFindLine(id)
+  local F = S.find
+  if not (F and F.kind == 'lines') then return end
+  S.sel = { lines = F.items, mode = 'first' }
+  M.uiSelectRoute(id)
 end
 
 -- ---- manual mode: a route built from stations ----------------------------------------------------------------------------
@@ -399,7 +506,7 @@ function M.uiBuildAdd(id)
   if not c then return end
   local ok, why = builder.add(B.b, c)
   if not ok then B.err = (why == 'full') and 'build_full' or nil publish() return end
-  B.query, B.candKind, B.searchCands, B.justSaved = nil, 'ring', nil, false
+  B.query, B.candKind, B.searchCands, B.justSaved, B.lineName = nil, 'ring', nil, false, nil
   loadCandidates()
   requestPath()
   publish()
@@ -408,39 +515,61 @@ end
 function M.uiBuildUndo()
   local B = S.build
   if not B or not builder.undo(B.b) then return end
-  B.query, B.candKind, B.searchCands, B.justSaved = nil, 'ring', nil, false
+  B.query, B.candKind, B.searchCands, B.justSaved, B.lineName = nil, 'ring', nil, false, nil
   loadCandidates()
   requestPath()
   publish()
 end
 
-function M.uiBuildSearch(q)
+function M.uiBuildSearch(q, onlyFast)
   local B = S.build
   if not B then return end
-  q = tostring(q or ''):gsub('^%s+', ''):gsub('%s+$', '')
-  if #q < 2 then B.query, B.candKind, B.searchCands = nil, 'ring', nil publish() return end
-  if datasvc.has('search') == false then B.err = 'service_old' publish() return end
-  B.query = q
+  q = trim(q)
+  if not osm.isLineRef(q) and #q < 2 then B.query, B.candKind, B.searchCands, B.lineHits = nil, 'ring', nil, nil publish() return end
+  B.query, B.lineName = q, nil
   B.searchToken = (B.searchToken or 0) + 1
   local token = B.searchToken
   local last = B.b.points[#B.b.points]
-  busy('search', true)
+  if not onlyFast then busy('search', true) end
   B.err = nil
-  publish()
-  datasvc.search(q, last.lat, last.lon, function(data, info)
-    if S.build ~= B or B.searchToken ~= token then return end
-    busy('search', false)
-    if not data then
-      B.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error'
-    else
+  local got = false
+  twoStep(q, last.lat, last.lon, onlyFast, function() return S.build == B and B.searchToken == token end, function(kind, data, final, err)
+    if final then busy('search', false) end
+    if data then
+      got = true
       local ok, a = pcall(osm.parseAround, data)
-      local list = {}
-      if ok then
-        local ok2, l = pcall(function() return builder.candidates(builder.fromStops(a.stops), B.b, { byName = true }) end)
-        if ok2 then list = l end
+      if kind == 'lines' then
+        B.lineHits = (ok and menu.linesModel(nil, a.routes)) or {}
+        B.candKind = 'lines'
+      else
+        local list = {}
+        if ok then
+          local ok2, l = pcall(function() return builder.candidates(builder.fromStops(a.stops), B.b, { byName = true }) end)
+          if ok2 then list = l end
+        end
+        B.searchCands, B.candKind = list, 'search'
       end
-      B.searchCands, B.candKind = list, 'search'
+    elseif err and not got then
+      B.err = err
     end
+    publish()
+  end)
+  if not onlyFast then publish() end
+end
+
+-- A line found by its number: its stations to pick from, in the order of the line
+function M.uiBuildLine(id)
+  local B = S.build
+  id = tonumber(id)
+  if not (B and id) then return end
+  busy('search', true)
+  publish()
+  loadRoute(id, function(route, why)
+    if S.build ~= B then return end
+    busy('search', false)
+    if not route then B.err = why or 'unknown error' publish() return end
+    B.searchCands = builder.candidates(builder.routeStations(route), B.b, { byName = true, order = true })
+    B.candKind, B.query, B.lineName = 'search', route.ref, route.ref
     publish()
   end)
 end
@@ -448,7 +577,7 @@ end
 function M.uiBuildClearSearch()
   local B = S.build
   if not B then return end
-  B.query, B.candKind, B.searchCands = nil, 'ring', nil
+  B.query, B.candKind, B.searchCands, B.lineHits, B.lineName = nil, 'ring', nil, nil, nil
   publish()
 end
 
@@ -692,6 +821,8 @@ function M.buildModelOf()
   return {
     points = pts, legs = builder.legInfo(b), km = math.floor(km / 100 + 0.5) / 10, minutes = math.floor(min + 0.5),
     mode = b.mode, straight = b.straight or false, line = line, cands = cands, candKind = B.candKind, query = B.query,
+    lineHits = (B.candKind == 'lines') and B.lineHits or nil,
+    lineName = (B.candKind == 'search') and B.lineName or nil,
     busy = B.busy, err = B.err, pathErr = B.pathErr, alongErr = b.alongErr, stops = stops,
     ref = b.ref, colour = osm.colorFor((b.ref ~= '' and b.ref) or 'My', b.colour), customColour = b.colour, name = b.name,
     canFinish = b.path ~= nil and #b.points >= 2, full = #b.points >= builder.MAX_POINTS, maxPoints = builder.MAX_POINTS,
@@ -720,7 +851,10 @@ function M.uiRefresh() datasvc.forget() S.cell = nil loadNearby(false) end
 
 function M.uiBackTo(screen)
   S.screen = screen
-  if screen == 'nearby' then S.sel = {} S.result = nil S.build = nil end
+  if screen == 'nearby' then
+    S.sel = {} S.result = nil S.build = nil
+    if S.cell and S.cell.found then S.cell = nil loadNearby(false) return end      -- back from a station found by search: around you again
+  end
   if screen == 'build' then S.sel = {} end
   if screen == 'lines' then S.sel.routeId, S.sel.dep, S.sel.reversed = nil, nil, false end
   if screen == 'buildStops' then M.uiBuildStops() return end

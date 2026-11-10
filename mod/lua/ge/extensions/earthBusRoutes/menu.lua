@@ -42,7 +42,8 @@ M.TABS = { 'from', 'to', 'through' }
 -- Lines of one station with every variant (direction / branch) the data lists. Each variant says where the station is on it
 -- (`place`: from | to | through | loop, `approx` when guessed).
 function M.linesModel(station, routes)
-  local lines = M.linesAt(station, routes)
+  -- no station: the lines of a search by number (their stops are not known yet, so no `place`)
+  local lines = station and M.linesAt(station, routes) or osm.groupLines(routes)
   local out = {}
   for i, ln in ipairs(lines) do
     local variants = {}
@@ -50,7 +51,8 @@ function M.linesModel(station, routes)
     for _, r in ipairs(ln.variants) do seen[r.to or ''] = (seen[r.to or ''] or 0) + 1 end
     local used = {}
     for k, r in ipairs(ln.variants) do
-      local place, approx = osm.placeAt(station, r)
+      local place, approx
+      if station then place, approx = osm.placeAt(station, r) end
       local v = { id = r.id, label = osm.label(r), from = r.from, to = r.to, ref = r.ref, place = place, approx = approx }
       -- several variants of one line with the same destination (a way via a village, a short run): tell them apart by the
       -- relation's own name ("309: Rychnov => Provodov => Náchod"), else by a counter

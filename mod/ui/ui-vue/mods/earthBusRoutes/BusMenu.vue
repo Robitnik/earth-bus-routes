@@ -74,6 +74,46 @@
             </div>
             <p v-if="tab === 'near'" class="sub">{{ t("near.sub") }}</p>
 
+            <!-- search: a station by name, a line by number -->
+            <form v-if="tab === 'near'" class="find" @submit.prevent="runFind">
+              <input v-model="fq" type="text" maxlength="40" :placeholder="t('find.ph')" :aria-label="t('find.label')"
+                     @keydown.stop @keyup.esc.stop="clearFind" @input="typedFind" @focus="typing(true)" @blur="typing(false)" />
+              <button type="submit" class="btn" :disabled="!fq.trim()">{{ t("find.go") }}</button>
+            </form>
+            <template v-if="tab === 'near' && s && s.find">
+              <div class="find-head">
+                <b>{{ t(s.find.kind === "lines" ? "find.linesFor" : "find.stationsFor", { q: s.find.q }) }}</b>
+                <button class="btn ghost slim" @click="clearFind">{{ t("find.clear") }}</button>
+              </div>
+              <div v-if="s.find.busy" class="loading small"><span class="spin"></span><div><b>{{ t("find.searching") }}</b><div class="muted">{{ t("find.searchingHint") }}</div></div></div>
+              <div v-if="s.find.err" class="notice bad"><p>{{ findErr(s.find.err) }}</p></div>
+              <div v-else-if="!s.find.items.length && !s.find.busy" class="empty"><b>{{ t(s.find.kind === "lines" ? "find.noLines" : "find.noStations") }}</b><div class="muted">{{ t(s.find.kind === "lines" ? "find.noLinesHint" : "find.noStationsHint") }}</div></div>
+              <div v-if="s.find.kind === 'lines'" class="lines found">
+                <div v-for="ln in s.find.items" :key="ln.id" class="line-row">
+                  <span class="plate big" :style="{ background: ln.colour, color: ink(ln.colour) }">{{ ln.ref }}</span>
+                  <div class="line-body">
+                    <div class="muted small">{{ [ln.network, ln.operator].filter(Boolean).join(" · ") }}</div>
+                    <div class="variants">
+                      <button v-for="v in ln.variants" :key="v.id" class="variant" :disabled="!!s.loading" @click="call('uiFindLine', v.id)">
+                        {{ v.ambiguous ? v.label : (v.from && v.to ? v.from + " → " + v.to : v.label) }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="stops found">
+                <button v-for="it in s.find.items" :key="it.id" class="stop-card" :disabled="!!s.loading" @click="call('uiFindStation', it.id)">
+                  <div class="stop-main">
+                    <div class="stop-name">{{ it.name }}</div>
+                    <div class="stop-meta">
+                      <span class="dist">{{ dist(it.dist) }}</span><span class="dir">{{ it.dir }}</span>
+                      <span v-if="it.station" class="tag">{{ t("near.station") }}</span>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </template>
+
             <!-- my routes -->
             <template v-if="tab === 'mine'">
               <div v-if="s && s.error" class="notice bad"><p>{{ errText(s.error) }}</p></div>
@@ -95,7 +135,7 @@
               </div>
             </template>
 
-            <div v-if="tab !== 'near'"></div>
+            <div v-if="tab !== 'near' || (s && s.find)"></div>
             <div v-else-if="serviceDown" class="notice">
               <h3>{{ t("svc.downTitle") }}</h3>
               <p>{{ t("svc.downText") }}</p>
@@ -392,6 +432,23 @@ function variantText(v) {
   if (curTab.value === "through" && v.from && v.to) return t("lines.variantThrough", { from: v.from, to: v.to })
   return v.to ? t("lines.variant", { to: v.to }) : v.label
 }
+const fq = ref("")
+let findTimer = null
+const clean = v => String(v).replace(/[\\"\u0000-\u001f]/g, " ").trim()
+// as you type: only what the data service already knows (instant); Enter or the button asks the public servers too
+function typedFind() {
+  clearTimeout(findTimer)
+  const v = clean(fq.value)
+  if (v.length < 1) { if (s.value && s.value.find) call("uiFindClear"); return }
+  findTimer = setTimeout(() => call("uiFind", v, true), 250)
+}
+function runFind() { clearTimeout(findTimer); const v = clean(fq.value); if (v) call("uiFind", v) }
+function clearFind() { clearTimeout(findTimer); fq.value = ""; call("uiFindClear") }
+function findErr(e) {
+  const key = "build.err." + e
+  const v = t(key)
+  return v === key ? t("err.generic", { e }) : v
+}
 const tab = ref("near")
 watch(() => s.value && s.value.tab, v => { if (v) tab.value = v }, { immediate: true })
 const sure = ref(null)
@@ -593,6 +650,12 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   .steps { color: var(--led); } }
 
 // ---- station tabs, armed bar
+.find { display: flex; gap: 8px;
+  input { flex: 1; min-width: 0; padding: 10px 14px; border: 0; border-radius: 10px; background: #0f1a20; color: var(--ink); font: inherit; font-size: 16px; box-shadow: inset 0 0 0 1px var(--hair);
+    &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); } } }
+.find-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.found { min-height: 0; }
+.stop-card:disabled { opacity: 0.6; cursor: default; }
 .station-tabs { align-self: flex-start; button { font-size: 16px; padding: 7px 14px; } }
 .badge.zero { background: var(--panel-3); color: var(--muted); }
 .tab-hint { margin: -2px 0 2px; }

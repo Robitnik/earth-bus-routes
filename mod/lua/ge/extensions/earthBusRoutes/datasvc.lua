@@ -11,6 +11,7 @@ M.TOTAL_S = 240              -- the service tries several public servers, each c
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
 
 local queue, active = {}, nil
+local fastQueue, fastActive = {}, nil      -- the second lane: answers the service has at once (its index), never behind a slow request
 local wait = 0
 local memo = {}              -- path -> decoded data, for this game session
 M.state = { up = nil, error = nil, version = nil, lastDown = nil, features = nil }
@@ -24,6 +25,11 @@ end
 -- total (seconds to wait for the answer)
 function M.get(path, cb, opts)
   opts = opts or {}
+  if opts.fast then
+    for _, j in ipairs(fastQueue) do if j.path == path then j.cbs[#j.cbs + 1] = cb return end end
+    fastQueue[#fastQueue + 1] = { path = path, cbs = { cb }, tries = 1, total = opts.total or 15 }
+    return
+  end
   if memo[path] and not opts.fresh then cb(memo[path].data, { cached = true, memo = true }) return end
   for _, j in ipairs(queue) do
     if j.path == path then
@@ -63,8 +69,15 @@ end
 function M.path(pts, cb) M.get('/v1/path?pts=' .. pts, cb, { urgent = true, total = 60 }) end
 function M.along(pts, cb) M.get('/v1/along?pts=' .. pts, cb, { urgent = true }) end
 function M.stations(lat, lon, cb) M.get(('/v1/stations?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
-function M.search(q, lat, lon, cb)
-  M.get(('/v1/search?q=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(q), lat, lon), cb, { urgent = true, total = 120 })
+-- fast: only what the service already knows, answered at once (on the second lane); else it asks the public servers
+function M.search(q, lat, lon, cb, fast)
+  local path = ('/v1/search?q=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(q), lat, lon)
+  if fast then M.get(path .. '&local=1', cb, { fast = true }) else M.get(path, cb, { urgent = true, total = 120 }) end
+end
+-- the bus lines with this number near a point
+function M.lines(ref, lat, lon, cb, fast)
+  local path = ('/v1/lines?ref=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(ref), lat, lon)
+  if fast then M.get(path .. '&local=1', cb, { fast = true }) else M.get(path, cb, { urgent = true, total = 120 }) end
 end
 function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
 function M.ping(cb) M.get('/v1/info', cb, { fresh = true }) end
@@ -87,7 +100,37 @@ local function failed(job, err, down)
   finish(job, nil, { error = err, down = down or false })
 end
 
+-- the second lane: no retries, no memo (the service's index grows)
+local function updateFast(dt)
+  if not fastActive then
+    local job = table.remove(fastQueue, 1)
+    if not job then return end
+    local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = 'GET', path = job.path, connectTimeout = 2, totalTimeout = job.total })
+    if not ok then req = { state = 'error', err = tostring(req) } end
+    fastActive = { job = job, req = req }
+  end
+  local req = fastActive.req
+  http.step(req, dt)
+  if req.state == 'done' then
+    local job = fastActive.job
+    fastActive = nil
+    local ok, data = pcall(jsonDecode, http.body(req.parser))
+    if not ok or type(data) ~= 'table' or data.ok == false then
+      finish(job, nil, { error = (type(data) == 'table' and data.error) or 'bad answer from the data service', down = false })
+    else
+      M.state.up = true
+      finish(job, data.data or data, { cached = true, fast = true })
+    end
+  elseif req.state == 'error' then
+    local job = fastActive.job
+    fastActive = nil
+    local err = tostring(req.err)
+    finish(job, nil, { error = err, down = err:find('connect', 1, true) ~= nil })
+  end
+end
+
 function M.update(dt)
+  updateFast(dt)
   if wait > 0 then wait = wait - dt return end
   if not active then startNext() if not active then return end end
   local req = active.req
@@ -124,7 +167,8 @@ function M.busy() return active ~= nil or #queue > 0 end
 
 function M.reset()
   if active and active.req then http.cancel(active.req) end
-  queue, active, wait = {}, nil, 0
+  if fastActive and fastActive.req then http.cancel(fastActive.req) end
+  queue, active, wait, fastQueue, fastActive = {}, nil, 0, {}, nil
 end
 
 function M.forget() memo = {} end

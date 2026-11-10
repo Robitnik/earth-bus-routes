@@ -187,6 +187,64 @@ class Paths(unittest.TestCase):
         self.assertEqual(d.search_key("Broumov", 50.41, 16.16), d.search_key("  broumov ", 50.42, 16.16))
 
 
+class Index(unittest.TestCase):
+    def setUp(self):
+        self.idx = d.StopIndex()
+        self.n = self.idx.add(NEAR, anchor=(50.4157, 16.1626))
+
+    def test_fold_removes_accents(self):
+        self.assertEqual(d.fold("Náchod, Okresní soud"), "nachod, okresni soud")
+        self.assertEqual(d.fold("Łódź"), "lodz")
+
+    def test_search_finds_names_without_accents_and_by_words(self):
+        self.assertGreater(self.n, 10)
+        a = self.idx.search("nachod", 50.4157, 16.1626)
+        self.assertGreater(len(a), 3)
+        self.assertTrue(all("náchod" in e["tags"]["name"].lower() for e in a))
+        b = self.idx.search("okresni  SOUD", 50.4157, 16.1626)
+        self.assertTrue(b and all("Okresní soud" in e["tags"]["name"] for e in b))
+        self.assertEqual(self.idx.search("   ", 50.4157, 16.1626), [])
+        self.assertEqual(self.idx.search("zzzzqq", 50.4157, 16.1626), [])
+
+    def test_search_is_nearest_first_and_limited_to_the_radius(self):
+        a = self.idx.search("nachod", 50.4157, 16.1626)
+        ds = [(e["lat"] - 50.4157) ** 2 + (e["lon"] - 16.1626) ** 2 for e in a]
+        self.assertEqual(ds, sorted(ds))
+        self.assertEqual(self.idx.search("nachod", 40.0, 16.1626), [])         # far away
+
+    def test_lines_by_number(self):
+        a = self.idx.find_lines("309", 50.4157, 16.1626)
+        self.assertGreaterEqual(len(a), 2)                                        # both directions and variants
+        self.assertTrue(all(e["type"] == "relation" and e["tags"]["ref"] == "309" for e in a))
+        self.assertEqual(self.idx.find_lines("999", 50.4157, 16.1626), [])
+        self.assertEqual(self.idx.find_lines("309", 10.0, 100.0), [])             # known to be elsewhere
+        self.assertTrue(self.idx.find_lines(" 309 ", 50.4157, 16.1626))
+
+    def test_clean_ref(self):
+        for ok in ("305", "N1", "X12", "305A", "6/7", "22-3"):
+            self.assertEqual(d.clean_ref(ok), ok)
+        for bad in ("", "Broumov", "a b 1", "1);out;(", "123456789", '1"2', "Ná"):
+            self.assertIsNone(d.clean_ref(bad), bad)
+
+    def test_lines_query_and_key(self):
+        q = d.lines_query("363", 50.4157, 16.1626)
+        self.assertIn('[ref="363"]', q)
+        self.assertIn("around:40000,50.4157,16.1626", q)
+        with self.assertRaises(ValueError):
+            d.lines_query('1"]', 50.0, 16.0)
+        self.assertEqual(d.lines_key("N1", 50.41, 16.16), d.lines_key("n1", 50.43, 16.19))
+        self.assertEqual(d.anchor_of(d.lines_key("363", 50.4157, 16.1626)), (50.4, 16.2))
+
+    def test_load_from_the_cache_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            c = d.Cache(tmp)
+            c.put("near3_50.416_16.162", d.slim_nearby(json.dumps(NEAR)))
+            idx = d.StopIndex()
+            self.assertGreater(idx.load(tmp), 10)
+            self.assertTrue(idx.search("nachod", 50.4157, 16.1626))
+            self.assertTrue(idx.find_lines("309", 50.4157, 16.1626))                # the anchor came from the file name
+
+
 class PathService(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -366,6 +424,29 @@ class Http(unittest.TestCase):
         s, j = self.get("/v1/stations?lat=50.4157&lon=16.1626")
         self.assertEqual((s, j["ok"]), (200, True))
         self.assertEqual(self.get("/v1/stations?lat=99&lon=16")[0], 400)
+
+    def test_local_search_and_lines_endpoints(self):
+        Http.svc.index.add(NEAR, anchor=(50.4157, 16.1626))
+        s, j = self.get("/v1/search?q=nachod&lat=50.4157&lon=16.1626&local=1")
+        self.assertEqual((s, j["ok"], j["data"]["local"]), (200, True, True))
+        self.assertTrue(j["data"]["elements"])
+        s, j = self.get("/v1/lines?ref=309&lat=50.4157&lon=16.1626&local=1")
+        self.assertEqual(s, 200)
+        self.assertTrue(j["data"]["elements"])
+        self.assertEqual(self.get("/v1/lines?ref=Broumov&lat=50.4&lon=16.1")[0], 400)
+        self.assertEqual(self.get("/v1/lines?ref=305&lat=99&lon=16.1")[0], 400)
+
+    def test_lines_endpoint_asks_overpass_and_keeps_the_answer(self):
+        heads = {"elements": [{"type": "relation", "id": 7185111, "tags": {"type": "route", "route": "bus", "ref": "363", "from": "A", "to": "B"}}]}
+        saved, Http.svc.upstream = Http.svc.upstream, (lambda q: json.dumps(heads))
+        try:
+            s, j = self.get("/v1/lines?ref=363&lat=50.5&lon=16.2")
+        finally:
+            Http.svc.upstream = saved
+        self.assertEqual((s, j["data"]["elements"][0]["id"]), (200, 7185111))
+        # what was fetched is found at once the next time, offline
+        s, j = self.get("/v1/lines?ref=363&lat=50.5&lon=16.2&local=1")
+        self.assertEqual(j["data"]["elements"][0]["tags"]["to"], "B")
 
     def test_search_endpoint_validates(self):
         self.assertEqual(self.get("/v1/search?q=a&lat=50&lon=16")[0], 400)

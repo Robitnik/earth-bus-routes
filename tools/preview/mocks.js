@@ -131,3 +131,21 @@ Object.assign(MENU_STATES, {
     start: { ...start, mode: "first", index: 1, place: "to", dist: 21400, canDrive: true } },
   armedbar: { ...common2, screen: "nearby", stations, armed: { ref: "305", colour: "#2f9e8f", to: "Hradec Králové", stopName: "Náchod, aut. nádraží", dist: 3420 } },
 })
+
+// ---- search
+const hits = [
+  { id: 1, name: "Broumov, autobusové nádraží", dist: 21400, dir: "NE", station: true, platforms: 6, lat: 50.5855, lon: 16.332 },
+  { id: 2, name: "Broumov, železniční stanice", dist: 21750, dir: "NE", station: true, platforms: 2, lat: 50.5859, lon: 16.3322 },
+  { id: 3, name: "Broumov, Hradební", dist: 21500, dir: "NE", station: false, platforms: 2, lat: 50.5849, lon: 16.3301 },
+]
+const found = tlines.map(l => ({ ...l, variants: l.variants.map(v => ({ ...v, place: undefined })) }))
+Object.assign(MENU_STATES, {
+  findstations: { ...common2, screen: "nearby", stations, find: { q: "broum", kind: "stations", items: hits, busy: true, err: null } },
+  findlines: { ...common2, screen: "nearby", stations, find: { q: "363", kind: "lines", busy: false, err: null, items: [
+    { id: 1, ref: "363", colour: "#c0572b", network: "IREDO", operator: "ČDS", variants: [
+      { id: 7185111, label: "Police nad Metují, autobusové stanoviště → Police nad Metují, autobusové stanoviště", from: "Police nad Metují, autobusové stanoviště", to: "Police nad Metují, autobusové stanoviště" },
+      { id: 11872572, label: "x", from: "Hlavňov, chata Hvězda", to: "Hlavňov, točna" }, { id: 11872574, label: "x", from: "Hlavňov, točna", to: "Hlavňov, chata Hvězda" }] }] } },
+  findnone: { ...common2, screen: "nearby", stations, find: { q: "zzz", kind: "stations", items: [], busy: false, err: null } },
+  buildlines: { ...common2, screen: "build", stations, build: { ...build, candKind: "lines", query: "305", cands: [], lineHits: [
+    { id: 1, ref: "305", colour: "#2f9e8f", variants: [{ id: 6964117, label: "x", from: "Náchod", to: "Hradec Králové" }] }] } },
+})

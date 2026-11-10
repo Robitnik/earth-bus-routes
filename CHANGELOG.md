@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- **Search by line number**: the first screen has a search box for a station name *or* a line number ("363", "N1"). A number lists the lines with it within 40 km, each direction and variant; pick one to see its card and start it from its first stop (teleport, or drive there with the GPS). A name lists stations, nearest first; pick one to open its three tabs.
+- **Much faster search**: the data service keeps an index of every stop, station and line it has ever seen, so results appear as you type, in milliseconds, even offline. The public servers are asked in addition (Enter or the button) and fill in what the index did not know; whatever they find is indexed for next time. Before, every search waited for Overpass, often a minute.
+- Matching ignores accents and case ("nachod" finds Náchod).
+- In the route builder, the same search box also takes a line number: it lists the lines, and a picked line offers its stations, in the order of the line, to add to your route.
+- Needs data service 0.4.0 (an older one still searches by name, the slow way; number search needs the new one).
+
 ## 0.4.1
 
 - **Opposite direction for every line**: when the map has no line the other way (OpenStreetMap often maps one direction only, as with 305), "Opposite direction" drives the same road and the same stops in reverse; it is marked as such. A real opposite line from the map still wins when there is one. Also after a trip: "Drive back".

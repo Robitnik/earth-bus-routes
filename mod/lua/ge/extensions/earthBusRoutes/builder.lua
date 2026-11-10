@@ -138,6 +138,31 @@ function M.straightAnswer(s)
   return { points = pts, legs = legs, source = 'straight' }
 end
 
+-- Stations found by a search, nearest to (lat, lon) first: { id, name, lat, lon, station, dist, dir, platforms, ref }
+function M.nameHits(stations, lat, lon)
+  local out = {}
+  for _, st in ipairs(stations) do
+    if st.name and st.name ~= '' then
+      out[#out + 1] = { name = st.name, lat = st.lat, lon = st.lon, station = st.station and true or false,
+        dist = math.floor(geo.dist(lat, lon, st.lat, st.lon) + 0.5), dir = menu.compass(geo.bearing(lat, lon, st.lat, st.lon)),
+        platforms = #st.platforms, ref = st }
+    end
+  end
+  table.sort(out, function(a, b) return a.dist < b.dist end)
+  local keep = {}
+  for i = 1, math.min(#out, 40) do keep[i] = out[i] keep[i].id = i end
+  return keep
+end
+
+-- The stops of a route as stations to pick from (a line found by its number: add its stations one by one)
+function M.routeStations(route)
+  local out = {}
+  for i, s in ipairs(route.stops) do
+    out[i] = { name = s.name, lat = s.lat, lon = s.lon, platforms = {}, nodeIds = {}, station = s.station }
+  end
+  return out
+end
+
 -- ---- "where next?" ---------------------------------------------------------------------------------------------------
 
 -- Stations (osm.groupStops) to go to from the last chosen one: not the chosen ones, bus stations first, then by distance.
@@ -166,6 +191,10 @@ function M.candidates(stations, s, opts)
       out[#out + 1] = { name = st.name, lat = st.lat, lon = st.lon, station = st.station and true or false, dist = math.floor(d + 0.5),
         dir = menu.compass(b), ahead = ahead, platforms = #st.platforms, ref = st }
     end
+  end
+  if opts.order then
+    for i, c in ipairs(out) do c.id = i end
+    return out
   end
   table.sort(out, function(a, b)
     if a.station ~= b.station then return a.station end

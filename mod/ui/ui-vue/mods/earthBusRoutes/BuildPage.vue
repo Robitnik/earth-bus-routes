@@ -35,18 +35,29 @@
       </div>
       <form class="search" @submit.prevent="runSearch">
         <input v-model="q" type="text" maxlength="40" :placeholder="t('build.searchPh')" :aria-label="t('build.search')" @keydown.stop @keyup.esc.stop="clearSearch" @input="typed" @focus="typing(true)" @blur="typing(false)" />
-        <button type="submit" class="btn" :disabled="q.trim().length < 2 || !!b.busy.search">{{ t("build.searchGo") }}</button>
+        <button type="submit" class="btn" :disabled="q.trim().length < 1 || !!b.busy.search">{{ t("build.searchGo") }}</button>
         <button v-if="b.candKind === 'search'" type="button" class="btn ghost" @click="clearSearch">{{ t("build.nearAgain") }}</button>
       </form>
-      <p class="muted small">{{ b.candKind === "search" ? t("build.resultsFor", { q: b.query }) : t("build.ringHint") }}</p>
+      <p class="muted small">{{ b.lineName ? t("build.lineStops", { q: b.lineName }) : b.candKind === "lines" ? t("build.linesFor", { q: b.query }) : b.candKind === "search" ? t("build.resultsFor", { q: b.query }) : t("build.ringHint") }}</p>
 
       <div v-if="b.err" class="notice bad"><p>{{ errText(b.err) }}</p></div>
       <div v-if="b.busy.cands || b.busy.search" class="loading small">
         <span class="spin"></span><div><b>{{ b.busy.search ? t("build.searching") : t("build.loadingCands") }}</b><div class="muted">{{ t("build.loadingHint") }}</div></div>
       </div>
-      <div v-else-if="!b.cands.length && !b.err" class="empty"><b>{{ b.candKind === "search" ? t("build.noMatch") : t("build.noCands") }}</b>
+      <div v-else-if="b.candKind === 'lines' && !(b.lineHits || []).length && !b.err" class="empty"><b>{{ t("find.noLines") }}</b><div class="muted">{{ t("find.noLinesHint") }}</div></div>
+      <div v-else-if="b.candKind !== 'lines' && !b.cands.length && !b.err" class="empty"><b>{{ b.candKind === "search" ? t("build.noMatch") : t("build.noCands") }}</b>
         <div class="muted">{{ b.candKind === "search" ? t("build.noMatchHint") : t("build.noCandsHint") }}</div></div>
-      <div class="cands" role="list">
+      <div v-if="b.candKind === 'lines'" class="cands" role="list">
+        <div v-for="ln in (b.lineHits || [])" :key="ln.id" class="line-hit" role="listitem">
+          <span class="plate" :style="{ background: ln.colour, color: ink(ln.colour) }">{{ ln.ref }}</span>
+          <div class="variants">
+            <button v-for="v in ln.variants" :key="v.id" class="variant" :disabled="!!b.busy.search" @click="call('uiBuildLine', v.id)">
+              {{ v.ambiguous ? v.label : (v.from && v.to ? v.from + " → " + v.to : v.label) }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="cands" role="list">
         <button v-for="c in b.cands" :key="c.id" class="cand-row" :class="{ behind: c.ahead === false, hot: hover === c.id }" role="listitem" :disabled="b.full"
                 @click="pick(c.id)" @mouseenter="hover = c.id" @mouseleave="hover = null" @focus="hover = c.id" @blur="hover = null">
           <span class="ic" :class="{ station: c.station }" aria-hidden="true">{{ c.station ? "■" : "●" }}</span>
@@ -79,7 +90,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue"
 import MiniMap from "./MiniMap.vue"
-import { call, distance, typing } from "./store.js"
+import { call, distance, typing, plateInk } from "./store.js"
 import { t } from "./i18n.js"
 
 const props = defineProps({ s: { type: Object, required: true } })
@@ -89,17 +100,20 @@ const hover = ref(null)
 const q = ref("")
 let timer = null
 
+const ink = plateInk
 const dist = m => distance(m, units.value, t)
 const distKm = km => (units.value === "mph" ? t("route.mi", { n: (km * 0.6214).toFixed(1) }) : t("route.km", { n: km.toFixed(1) }))
 const legText = l => (l.km == null ? "" : distKm(l.km) + " · " + t("route.min", { n: l.min }))
 const clean = v => String(v).replace(/[\\"\u0000-\u001f]/g, " ").trim()
 
 function pick(id) { hover.value = null; call("uiBuildAdd", id) }
-function runSearch() { clearTimeout(timer); const v = clean(q.value); if (v.length >= 2) call("uiBuildSearch", v) }
+// as you type: only what the data service already knows (instant); Enter or the button asks the public servers too
+function runSearch() { clearTimeout(timer); const v = clean(q.value); if (v.length >= 1) call("uiBuildSearch", v) }
 function typed() {
   clearTimeout(timer)
-  if (clean(q.value).length < 2) return
-  timer = setTimeout(runSearch, 700)
+  const v = clean(q.value)
+  if (v.length < 1) { call("uiBuildClearSearch"); return }
+  timer = setTimeout(() => call("uiBuildSearch", v, true), 250)
 }
 function clearSearch() { clearTimeout(timer); q.value = ""; call("uiBuildClearSearch") }
 onBeforeUnmount(() => { clearTimeout(timer); typing(false) })
@@ -151,6 +165,11 @@ function errText(e) {
   &.small { display: inline-block; width: 12px; height: 12px; border-width: 2px; margin-right: 6px; vertical-align: -1px; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 .empty { padding: 14px 2px; line-height: 1.5; }
+.line-hit { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--panel-3);
+  .plate { flex: none; min-width: 44px; padding: 2px 10px; display: grid; place-items: center; border-radius: 6px; font-weight: 800; font-size: 18px; }
+  .variants { display: flex; flex-wrap: wrap; gap: 6px; }
+  .variant { padding: 6px 12px; border: 0; border-radius: 8px; background: var(--panel-2); color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+    &:hover:not(:disabled) { background: #36525f; } &:disabled { opacity: 0.5; cursor: default; } &:focus-visible { outline: 2px solid var(--line); } } }
 .notice { padding: 10px 12px; border-radius: 10px; background: var(--panel-3); box-shadow: inset 4px 0 0 var(--late); line-height: 1.4; }
 
 // map + actions

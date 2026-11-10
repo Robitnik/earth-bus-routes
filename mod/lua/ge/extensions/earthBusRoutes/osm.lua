@@ -199,6 +199,12 @@ function M.routesAt(station, routes)
   return out
 end
 
+-- Is what the player typed a line number ("305", "N1", "X12", "6/7") rather than a name? Letters, digits, - and / only, a digit in it.
+function M.isLineRef(q)
+  q = tostring(q or ''):gsub('^%s+', ''):gsub('%s+$', '')
+  return #q >= 1 and #q <= 8 and q:match('^[%w/%-]+$') ~= nil and q:find('%d') ~= nil
+end
+
 -- Where a station is on a route: 'from' (the route starts here), 'to' (it ends here), 'loop' (both: a circular line), 'through'.
 -- Second result: true when it is only a guess (the data has no order of stops, so the ends are compared by name).
 local function sameName(a, b)
