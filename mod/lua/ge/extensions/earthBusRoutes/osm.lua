@@ -226,6 +226,79 @@ function M.label(r)
   return r.ref
 end
 
+M.CAND_OFF_M = 60      -- a stop is looked for at every place this near the road (a loop passes the same stop twice)
+M.BACK_M = 30          -- the next stop may lie this much behind the previous one (platforms of one stop on both sides)
+M.BACKWARDS_COST = 1e5
+
+-- Stops in the order the relation lists them (public_transport:version 2) get their place along the road: a road that passes
+-- the same stop twice (a loop, or the same road out and back) offers several, so the choice is the one that keeps the order
+-- and stays nearest the road in total (dynamic programming over the candidates).
+-- Returns the total cost and { {along, off} ... } (one per stop); the stops are not touched.
+function M.fitStops(path, cum, stops)
+  local cands = {}
+  for i, s in ipairs(stops) do
+    local _, nearest = geo.along(path, cum, s.lat, s.lon)
+    cands[i] = geo.alongCandidates(path, cum, s.lat, s.lon, math.max(M.CAND_OFF_M, (nearest or 0) + 30))
+  end
+  local cost, from = {}, {}
+  for i = 1, #stops do
+    cost[i], from[i] = {}, {}
+    for k, c in ipairs(cands[i]) do
+      if i == 1 then
+        cost[i][k] = c.off
+      else
+        local best, bestJ = math.huge, 1
+        for j, p in ipairs(cands[i - 1]) do
+          local v = cost[i - 1][j] + ((c.along >= p.along - M.BACK_M) and 0 or M.BACKWARDS_COST)
+          if v < best then best, bestJ = v, j end
+        end
+        cost[i][k], from[i][k] = best + c.off, bestJ
+      end
+    end
+  end
+  local k, best = 1, math.huge
+  for j = 1, #cands[#stops] do
+    if cost[#stops][j] < best then best, k = cost[#stops][j], j end
+  end
+  local res = {}
+  for i = #stops, 1, -1 do
+    res[i] = cands[i][k]
+    k = from[i][k] or 1
+  end
+  return best, res, cands
+end
+
+-- A closed road (a loop) started `at` metres further on: { points }; the start point is also the end.
+function M.rotatePath(path, cum, at)
+  local lat0, lon0 = geo.pointAt(path, cum, at)
+  local out = { { lat = lat0, lon = lon0 } }
+  for i = 2, #path do if cum[i] > at then out[#out + 1] = { lat = path[i].lat, lon = path[i].lon } end end
+  for i = 2, #path do if cum[i] <= at then out[#out + 1] = { lat = path[i].lat, lon = path[i].lon } end end
+  out[#out + 1] = { lat = lat0, lon = lon0 }
+  return out
+end
+
+M.LOOP_CLOSED_M = 60
+
+-- Places the stops along the road, turning a closed road to start where the first stop is when that fits the order better
+-- (OSM lists the ways of a loop from anywhere). Returns path, cum, length (maybe rotated); sets s.along and s.off.
+function M.orderedAlong(path, cum, length, stops)
+  local cost, res, cands = M.fitStops(path, cum, stops)
+  local closed = geo.dist(path[1].lat, path[1].lon, path[#path].lat, path[#path].lon) < M.LOOP_CLOSED_M
+  if closed and cost >= M.BACKWARDS_COST * 0.5 or (closed and #cands[1] > 1) then
+    local bestCost, bestPath, bestCum, bestLen, bestRes = cost, nil, nil, nil, nil
+    for _, c in ipairs(cands[1]) do
+      local p2 = M.rotatePath(path, cum, c.along)
+      local cum2, len2 = geo.cumulative(p2)
+      local cost2, res2 = M.fitStops(p2, cum2, stops)
+      if cost2 < bestCost then bestCost, bestPath, bestCum, bestLen, bestRes = cost2, p2, cum2, len2, res2 end
+    end
+    if bestPath then path, cum, length, res = bestPath, bestCum, bestLen, bestRes end
+  end
+  for i, s in ipairs(stops) do s.along, s.off = res[i].along, res[i].off end
+  return path, cum, length
+end
+
 -- The full route: data = the answer of overpass.routeQuery (relation with geometry first, then its member nodes / ways
 -- with tags). Returns route table (see fields below) or nil, why.
 function M.parseRoute(data)
@@ -291,15 +364,14 @@ function M.parseRoute(data)
   -- 3. positions along the line -----------------------------------------------------------------------------------
   local cum, length = geo.cumulative(path)
   local sorted = tags['public_transport:version'] ~= '2'
-  if #path >= 2 then
-    local prev = 0
+  if #path >= 2 and sorted then
     for _, s in ipairs(stops) do
-      local a, off = geo.along(path, cum, s.lat, s.lon, (not sorted) and math.max(0, prev - 30) or nil)
-      if not a then a, off = geo.along(path, cum, s.lat, s.lon) end
-      s.along, s.off = a or prev, off or 0
-      prev = s.along
+      local a, off = geo.along(path, cum, s.lat, s.lon)
+      s.along, s.off = a or 0, off or 0
     end
-    if sorted then table.sort(stops, function(x, y) return x.along < y.along end) end
+    table.sort(stops, function(x, y) return x.along < y.along end)
+  elseif #path >= 2 then
+    path, cum, length = M.orderedAlong(path, cum, length, stops)
   else
     -- no road geometry at all: a straight line through the stops
     local acc = 0

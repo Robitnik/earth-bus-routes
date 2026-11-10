@@ -59,6 +59,36 @@ function M.along(path, cum, lat, lon, from)
   return bestAlong, bestOff
 end
 
+-- Every place along a polyline a point is close to (the nearest spots of each pass: a loop or an out-and-back road goes by the
+-- same stop twice): { {along, off} ... } in road order, each at most `maxOff` m off, at least `sepM` m apart; the nearest one only
+-- when none is that close.
+function M.alongCandidates(path, cum, lat, lon, maxOff, sepM)
+  sepM = sepM or 80
+  local n = #path - 1
+  local offs, alongs = {}, {}
+  for i = 1, n do
+    local off, t, len = M.pointSegment(lat, lon, path[i].lat, path[i].lon, path[i + 1].lat, path[i + 1].lon)
+    offs[i], alongs[i] = off, cum[i] + t * len
+  end
+  local out = {}
+  for i = 1, n do
+    if offs[i] <= maxOff and (i == 1 or offs[i] <= offs[i - 1]) and (i == n or offs[i] < offs[i + 1]) then
+      local last = out[#out]
+      if last and alongs[i] - last.along < sepM then
+        if offs[i] < last.off then out[#out] = { along = alongs[i], off = offs[i] } end
+      else
+        out[#out + 1] = { along = alongs[i], off = offs[i] }
+      end
+    end
+  end
+  if #out == 0 and n >= 1 then
+    local best = 1
+    for i = 2, n do if offs[i] < offs[best] then best = i end end
+    out[1] = { along = alongs[best], off = offs[best] }
+  end
+  return out
+end
+
 -- The point `m` metres along a polyline (clamped): lat, lon, bearing
 function M.pointAt(path, cum, m)
   if #path == 0 then return nil end

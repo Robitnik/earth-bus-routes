@@ -132,4 +132,36 @@ function T.geo_basics()
   assert(lat == 50.001 and lon == 16.001)
 end
 
+-- Line 363 at Police nad Metují: a loop that passes its first stop twice and goes to Suchý Důl and back along the same road
+function T.loop_with_an_out_and_back_keeps_its_stops_in_order()
+  local r = assert(osm.parseRoute(H.fixture('route_7185111')))
+  assert(r.loop and #r.stops == 14, #r.stops)
+  assert(r.length > 13500 and r.length < 15000)
+  assert(r.stops[1].along < 100, 'the first stop is at the start, not at the end of the loop: ' .. r.stops[1].along)
+  assert(r.stops[#r.stops].along > r.length - 400, r.stops[#r.stops].along)
+  for i, s in ipairs(r.stops) do
+    assert(s.off <= 40, ('stop %d %s is %.0f m off the road'):format(i, s.name, s.off))
+    if i > 1 then assert(s.along >= r.stops[i - 1].along - 30, ('stop %d goes backwards'):format(i)) end
+  end
+  -- Suchý Důl is passed on the way out and on the way back: both visits keep their own place
+  local first, second
+  for i, s in ipairs(r.stops) do
+    if s.name == 'Suchý Důl, MŠ' then if first then second = s else first = s end end
+  end
+  assert(first and second and second.along - first.along > 500)
+  -- the ride is spread over the line (the timetable depends on it)
+  local sched = require('earthBusRoutes/schedule')
+  local trips = sched.generate(r, 2)
+  assert(#trips > 0 and trips[1].arr[#r.stops] > 15 * 60)
+end
+
+function T.short_branch_pair_still_found()
+  local a = assert(osm.parseRoute(H.fixture('route_11872572')))
+  local b = assert(osm.parseRoute(H.fixture('route_11872574')))
+  assert(#a.stops == 2 and #b.stops == 2)
+  assert(a.stops[2].along > a.stops[1].along and b.stops[2].along > b.stops[1].along)
+  local back = osm.reverseOf(a, { a, b })
+  assert(back and back.id == b.id)
+end
+
 return T

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Loops and roads driven out and back (line 363 at Police nad Metují): the stops of a PTv2 line get their places along the road in the
+  order the relation lists them, choosing between the several places a stop is passed (best total fit), and a loop is turned to start
+  at its first stop. Before, nearly all stops piled up at the end of the road, with no ride time between them.
+
 ## 0.3.1
 
 - Text fields (station search, line number, name) work in the game: the game is told that a field has the focus (`setCEFTyping`), so the keys are no longer taken as controls.
