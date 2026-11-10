@@ -10,6 +10,7 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
   GET /v1/route?id=..                   one route relation with its geometry and its stops' tags
   GET /v1/path?pts=lat,lon;lat,lon;..   the road route through 2..25 points (OSRM): {points, legs, dist, dur, source}
   GET /v1/along?pts=...                 the bus stops within 25 m of that road route
+  GET /v1/stations?lat=..&lon=..        the bus stations within 25 km of a point
   GET /v1/search?q=..&lat=..&lon=..     stations and stops by name within 40 km of a point
   GET /v1/status                        what it did lately (for the Add-ons page's log)
 
@@ -51,7 +52,9 @@ BACKOFF_S = (1.0, 3.0, 8.0)
 TIMEOUT_S = 45                   # a public server that takes longer is overloaded: try the next one
 MAX_BYTES = 12 * 1024 * 1024
 MODES = "^(bus|trolleybus|minibus|share_taxi)$"
-FEATURES = ["path", "along", "search"]
+FEATURES = ["path", "along", "search", "stations"]
+STATIONS_M = 25000
+STATIONS_CELL_DEG = 0.05
 OSRM = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"]
 OSRM_TIMEOUT_S = 25
 MAX_WAYPOINTS = 25
@@ -273,6 +276,17 @@ def search_query(text, lat, lon, radius=SEARCH_M):
             f"node[public_transport=platform]{n}({a}););out tags center 120;")
 
 
+def stations_query(lat, lon, radius=STATIONS_M):
+    a = f"around:{int(radius)},{lat:.4f},{lon:.4f}"
+    return (f"[out:json][timeout:50];(nwr[amenity=bus_station]({a});nwr[public_transport=station][bus=yes]({a}););"
+            "out tags center 400;")
+
+
+def stations_key(lat, lon):
+    snap5 = lambda v: round(round(v / STATIONS_CELL_DEG) * STATIONS_CELL_DEG, 4)
+    return f"stations_{snap5(lat):.2f}_{snap5(lon):.2f}"
+
+
 def search_key(text, lat, lon):
     h = hashlib.sha1(f"{' '.join(text.lower().split())}|{lat:.1f}|{lon:.1f}".encode()).hexdigest()[:20]
     return "search_" + h
@@ -483,6 +497,13 @@ def make_handler(service, port):
                     pts = parse_pts(q["pts"][0])
                     check_legs(pts)
                     text, cached = service.along(pts)
+                elif u.path == "/v1/stations":
+                    lat, lon = float(q["lat"][0]), float(q["lon"][0])
+                    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+                        return self.fail(400, "lat / lon out of range")
+                    c = STATIONS_CELL_DEG
+                    slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
+                    text, cached = service.get(stations_key(lat, lon), stations_query(slat, slon))
                 elif u.path == "/v1/search":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):

@@ -314,6 +314,18 @@ class Http(unittest.TestCase):
         self.assertEqual(self.get("/v1/path?pts=50,16")[0], 400)
         self.assertEqual(self.get("/v1/path?pts=50,16;52,16")[0], 400)
 
+    def test_stations_query_and_key(self):
+        q = d.stations_query(50.4157, 16.1626)
+        self.assertIn("around:25000,50.4157,16.1626", q)
+        self.assertIn("amenity=bus_station", q)
+        self.assertEqual(d.stations_key(50.4157, 16.1626), d.stations_key(50.4300, 16.1800))
+        self.assertNotEqual(d.stations_key(50.4157, 16.1626), d.stations_key(50.6, 16.1626))
+
+    def test_stations_endpoint(self):
+        s, j = self.get("/v1/stations?lat=50.4157&lon=16.1626")
+        self.assertEqual((s, j["ok"]), (200, True))
+        self.assertEqual(self.get("/v1/stations?lat=99&lon=16")[0], 400)
+
     def test_search_endpoint_validates(self):
         self.assertEqual(self.get("/v1/search?q=a&lat=50&lon=16")[0], 400)
         self.assertEqual(self.get("/v1/search?q=ab&lat=99&lon=16")[0], 400)
