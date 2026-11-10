@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- **Manual mode, "Build your own route"**: choose the stations one after another (the nearest bus stations and stops, or a search
+  by name up to 40 km away); the road between them is found (OSRM) and shown on a small map; the bus calls at every stop on the
+  way (switch single ones off) or only at your stations; give the line a number, a name and a colour. Straight lines when no
+  road is found. Up to 25 stations.
+- **My routes**: save, open, edit and delete your routes (`/settings/earthBusRoutes/myroutes.json`).
+- A built route runs like any line: timetable, passengers, HUD, score, **the way back** (the stations the other way round).
+- **Continue this line as your own**: an incomplete OpenStreetMap line becomes the start of a route of your own.
+- After a trip: **build the next leg from here** (the end of the route is the first station of the new one).
+- Data service 0.2.0 (needs updating on the Add-ons page): `/v1/path`, `/v1/along`, `/v1/stations`, `/v1/search`.
+- Requests the player waits for go before background prefetching.
+
 ## 0.2.1
 
 - Lines with several variants to the same destination (a way via a village, a short run) are told apart by the relation's name instead of showing the same button twice.

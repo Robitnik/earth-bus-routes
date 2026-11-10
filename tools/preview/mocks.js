@@ -61,3 +61,55 @@ export const MENU_STATES = {
     record: true, previous: 801, minutes: 84, canReverse: true, totals: { trips: 8, passengers: 277, points: 5994 }, scheduled: true } },
   mph: { ...common, screen: "nearby", units: "mph", stations },
 }
+
+// ---- manual mode
+const chain = [
+  { name: "Náchod, autobusové nádraží", lat: 50.4157, lon: 16.1626, station: true },
+  { name: "Police nad Metují, náměstí", lat: 50.5262, lon: 16.2437, station: false },
+  { name: "Broumov, autobusové nádraží", lat: 50.5855, lon: 16.332, station: true },
+]
+const roadLine = [[50.4157, 16.1626], [50.43, 16.17], [50.46, 16.2], [50.5, 16.22], [50.5262, 16.2437], [50.54, 16.27], [50.56, 16.3], [50.5855, 16.332]]
+const cands = [
+  { id: 1, name: "Broumov, autobusové nádraží", dist: 21400, dir: "NE", station: true, ahead: true, lat: 50.5855, lon: 16.332 },
+  { id: 2, name: "Hradec Králové, terminál", dist: 24100, dir: "SW", station: true, ahead: false, lat: 50.2, lon: 15.83 },
+  { id: 3, name: "Jaroměř, autobusové nádraží", dist: 17200, dir: "W", station: true, ahead: false, lat: 50.354, lon: 15.926 },
+  { id: 4, name: "Velké Poříčí, náměstí", dist: 2700, dir: "NE", station: false, ahead: true, lat: 50.4397, lon: 16.1884 },
+  { id: 5, name: "Hronov, Rokytnice", dist: 8100, dir: "E", station: false, ahead: true, lat: 50.4825, lon: 16.1945 },
+  { id: 6, name: "Česká Skalice, náměstí", dist: 9100, dir: "SW", station: false, ahead: false, lat: 50.3907, lon: 16.0536 },
+]
+const build = {
+  points: chain.slice(0, 2), line: roadLine.slice(0, 5), legs: [{ from: chain[0].name, to: chain[1].name, km: 13.2, min: 21, ready: true }],
+  km: 13.2, minutes: 21, mode: "all", straight: false, cands, candKind: "ring", query: null, busy: {}, err: null, pathErr: null, alongErr: null,
+  stops: null, ref: "", colour: "#7f6bb7", customColour: null, name: null, canFinish: true, full: false, maxPoints: 25, saved: false, justSaved: false,
+}
+const buildStops = [
+  { id: "w1", name: chain[0].name, km: 0, chosen: true, on: true, lat: 50.4157, lon: 16.1626 },
+  { id: "1", name: "Náchod, Pavlišov", km: 2.1, chosen: false, on: true, lat: 50.43, lon: 16.17 },
+  { id: "2", name: "Velké Poříčí, náměstí", km: 4.4, chosen: false, on: true, lat: 50.4397, lon: 16.1884 },
+  { id: "3", name: "Velké Poříčí, škola", km: 5.2, chosen: false, on: false, lat: 50.45, lon: 16.19 },
+  { id: "4", name: "Hronov, Rokytnice", km: 8.0, chosen: false, on: true, lat: 50.4825, lon: 16.1945 },
+  { id: "w2", name: chain[1].name, km: 13.2, chosen: true, on: true, lat: 50.5262, lon: 16.2437 },
+  { id: "5", name: "Police nad Metují, Bělý", km: 15.9, chosen: false, on: true, lat: 50.54, lon: 16.27 },
+  { id: "6", name: "Machov, rozcestí", km: 20.4, chosen: false, on: true, lat: 50.56, lon: 16.3 },
+  { id: "w3", name: chain[2].name, km: 33.1, chosen: true, on: true, lat: 50.5855, lon: 16.332 },
+]
+const own = { ...route, id: -1, ref: "310", colour: "#7f6bb7", from: chain[0].name, to: chain[2].name, name: "310: Náchod => Broumov", network: "Custom", operator: null, custom: true,
+  km: 33.1, stopCount: 9, minutes: 52, stops: buildStops.filter(x => x.on).map((x, i) => ({ i: i + 1, name: x.name, km: x.km })), tripsToday: 14, first: "05:15", last: "20:45" }
+const common2 = { ...common, version: "0.3.0", service: { up: true, version: "0.2.0", port: 47630 }, features: { path: true, along: true, search: true, stations: true } }
+const mine = [
+  { i: 1, id: "r1", name: "310: Náchod => Broumov", ref: "310", colour: "#7f6bb7", from: chain[0].name, to: chain[2].name, n: 3, mode: "all" },
+  { i: 2, id: "r2", name: "N1: Hradec Králové => Náchod", ref: "N1", colour: "#2d2d2d", from: "Hradec Králové, terminál", to: chain[0].name, n: 5, mode: "express" },
+]
+
+Object.assign(MENU_STATES, {
+  mine: { ...common2, screen: "nearby", stations, saved: mine, tab: "mine" },
+  build: { ...common2, screen: "build", stations, build },
+  build3: { ...common2, screen: "build", stations, build: { ...build, points: chain, line: roadLine, legs: [
+    { from: chain[0].name, to: chain[1].name, km: 13.2, min: 21, ready: true }, { from: chain[1].name, to: chain[2].name, km: 19.9, min: 31, ready: true }], km: 33.1, minutes: 52,
+    cands: cands.slice(0, 5).map((c, i) => ({ ...c, id: i + 1 })) } },
+  buildsearch: { ...common2, screen: "build", stations, build: { ...build, candKind: "search", query: "Broum", cands: [cands[0]] } },
+  buildbusy: { ...common2, screen: "build", stations, build: { ...build, busy: { cands: true, path: true }, cands: [], legs: [{ from: chain[0].name, to: chain[1].name, km: null, min: null, ready: false }], km: 0, minutes: 0, line: null } },
+  buildstraight: { ...common2, screen: "build", stations, build: { ...build, straight: true, pathErr: "no path" } },
+  buildstops: { ...common2, screen: "buildStops", stations, build: { ...build, points: chain, line: roadLine, km: 33.1, minutes: 52, stops: buildStops, ref: "310", colour: "#7f6bb7", customColour: "#7f6bb7" } },
+  ownroute: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false } },
+})

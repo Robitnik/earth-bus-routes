@@ -17,6 +17,7 @@ local function setup(opts)
   local ds = {
     state = { up = true, features = features },
     has = function(f) return features[f] == true end,
+    route = function(id, cb) cb(H.fixture('route_6964117'), {}) end,
     update = function() end, reset = function() end, forget = function() end, busy = function() return false end,
     ping = function(cb) cb({}) end,
     nearby = function(lat, lon, cb, how) calls[#calls + 1] = 'nearby:' .. tostring(how) cb(H.fixture('nachod_around_slim'), {}) end,
@@ -186,6 +187,22 @@ function T.limit_of_stations_is_reported()
   m.uiBuildStart(1)
   local b = model().build
   assert(b.maxPoints == 25 and not b.full)
+  cleanup()
+end
+
+function T.continue_an_osm_line_as_your_own()
+  local m, model = setup()
+  m.uiOpen()
+  local idx
+  for i, st in ipairs(model().stations) do if st.lineCount > 0 then idx = st.id break end end
+  m.uiSelectStation(idx)
+  local v = model().lines[1].variants[1]
+  m.uiSelectRoute(v.id)
+  assert(model().screen == 'route' and not model().route.custom)
+  local n = model().route.stopCount
+  m.uiBuildFromRoute()
+  local md = model()
+  assert(md.screen == 'build' and #md.build.points == n and md.build.mode == 'express' and md.build.ref == '305')
   cleanup()
 end
 

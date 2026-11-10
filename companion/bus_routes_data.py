@@ -9,7 +9,7 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
   GET /v1/nearby?lat=..&lon=..          stops and the routes calling at them around a point
   GET /v1/route?id=..                   one route relation with its geometry and its stops' tags
   GET /v1/path?pts=lat,lon;lat,lon;..   the road route through 2..25 points (OSRM): {points, legs, dist, dur, source}
-  GET /v1/along?pts=...                 the bus stops within 25 m of that road route
+  GET /v1/along?pts=...                 the bus stops within 30 m of that road route
   GET /v1/stations?lat=..&lon=..        the bus stations within 25 km of a point
   GET /v1/search?q=..&lat=..&lon=..     stations and stops by name within 40 km of a point
   GET /v1/status                        what it did lately (for the Add-ons page's log)
@@ -60,7 +60,7 @@ OSRM_TIMEOUT_S = 25
 MAX_WAYPOINTS = 25
 MAX_LEG_M = 60000
 MAX_PATH_POINTS = 2000
-ALONG_M = 25
+ALONG_M = 30
 SEARCH_M = 40000
 STRAIGHT_MS = 40 / 3.6            # speed assumed on a straight fallback leg
 
@@ -230,17 +230,73 @@ def along_key(pts):
     return _hash("along_", pts)
 
 
-def along_query(points, radius=ALONG_M):
-    """Stops within `radius` m of the polyline `points` ([[lat, lon], ...]); thinned to keep the query small."""
-    tol = 8.0
-    pts = simplify([tuple(p) for p in points], tol)
-    while len(pts) > 250:
-        tol *= 1.7
-        pts = simplify(pts, tol)
-    poly = ",".join(f"{a:.5f},{b:.5f}" for a, b in pts)
-    a = f"around:{int(radius)},{poly}"
-    return (f"[out:json][timeout:60];(node[highway=bus_stop]({a});node[public_transport=platform]({a});"
-            f"node[public_transport=stop_position]({a});nwr[amenity=bus_station]({a}););out tags center;")
+TILE_LAT, TILE_LON = 0.02, 0.03       # the boxes the stops along a road are asked for (about 2.2 x 2.1 km)
+ALONG_STATION_M = 150                 # a bus station is "on" the road this near (it is a whole yard)
+MAX_TILES = 90
+
+
+def path_tiles(points):
+    """The set of (i, j) tiles a road passes through, found by walking it in steps well under a tile."""
+    tiles = set()
+    for a, b in zip(points, points[1:]):
+        n = max(1, int(hav(a, b) / 400))
+        for k in range(n + 1):
+            lat = a[0] + (b[0] - a[0]) * k / n
+            lon = a[1] + (b[1] - a[1]) * k / n
+            tiles.add((math.floor(lat / TILE_LAT), math.floor(lon / TILE_LON)))
+    if len(points) == 1:
+        tiles.add((math.floor(points[0][0] / TILE_LAT), math.floor(points[0][1] / TILE_LON)))
+    return tiles
+
+
+def along_query(points):
+    """One query for the stops in every tile the road passes through (a small box around each: much less than the box of
+    the whole road). The answer is cut down to the stops on the road by filter_along."""
+    tiles = sorted(path_tiles([tuple(p) for p in points]))
+    if len(tiles) > MAX_TILES:
+        raise ValueError("the road is too long")
+    pad = 0.0004
+    parts = []
+    for i, j in tiles:
+        box = f"{i * TILE_LAT - pad:.4f},{j * TILE_LON - pad:.4f},{(i + 1) * TILE_LAT + pad:.4f},{(j + 1) * TILE_LON + pad:.4f}"
+        parts.append(f"node[highway=bus_stop]({box});node[public_transport=platform]({box});"
+                     f"node[public_transport=stop_position]({box});nwr[amenity=bus_station]({box});")
+    return f"[out:json][timeout:90];({''.join(parts)});out tags center;"
+
+
+def dist_to_path(lat, lon, path):
+    """Metres from a point to a polyline [(lat, lon), ...] (local flat projection)."""
+    k = math.cos(math.radians(lat)) * 111320
+    best = float("inf")
+    for (la, lo), (lb, lb2) in zip(path, path[1:]):
+        ax, ay = (lo - lon) * k, (la - lat) * 110574
+        bx, by = (lb2 - lon) * k, (lb - lat) * 110574
+        dx, dy = bx - ax, by - ay
+        L2 = dx * dx + dy * dy
+        t = 0.0 if L2 == 0 else max(0.0, min(1.0, -(ax * dx + ay * dy) / L2))
+        d = math.hypot(ax + t * dx, ay + t * dy)
+        if d < best:
+            best = d
+    return best
+
+
+def filter_along(text, points, radius=ALONG_M):
+    """The answer of along_query without the stops that are not on the road ('points' = [[lat, lon], ...])."""
+    path = [tuple(p) for p in points]
+    data = json.loads(text)
+    keep = []
+    for e in data.get("elements", []):
+        tags = e.get("tags") or {}
+        lat, lon = e.get("lat"), e.get("lon")
+        if lat is None and e.get("center"):
+            lat, lon = e["center"].get("lat"), e["center"].get("lon")
+        if lat is None or lon is None:
+            continue
+        limit = ALONG_STATION_M if tags.get("amenity") == "bus_station" else radius
+        if dist_to_path(lat, lon, path) <= limit:
+            keep.append(e)
+    data["elements"] = keep
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
 
 
 FOLD = {"a": "a\u00e1\u00e0\u00e4\u00e2", "c": "c\u010d", "d": "d\u010f", "e": "e\u00e9\u011b\u00eb\u00e8", "i": "i\u00ed\u00ee",
@@ -434,7 +490,8 @@ class Service:
         p, _ = self.path(pts)
         if p["source"] != "osrm":
             return '{"elements":[],"fallback":true}', False
-        return self.get(along_key(pts), along_query(p["points"]))
+        road = p["points"]
+        return self.get(along_key(pts), along_query(road), post=lambda text: filter_along(text, road))
 
 
 # ---- HTTP -----------------------------------------------------------------------------------------------------------

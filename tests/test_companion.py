@@ -126,12 +126,30 @@ class Paths(unittest.TestCase):
                          sleep=lambda s: None)
         self.assertEqual(len(calls), 1)             # a server that knows there is no road is believed
 
-    def test_along_query(self):
+    def test_along_query_asks_for_boxes_along_the_road(self):
         p = d.parse_osrm(json.loads(OSRM))
         q = d.along_query(p["points"])
-        self.assertIn("around:25,", q)
         self.assertIn("amenity=bus_station", q)
-        self.assertLess(len(q), 16000)
+        self.assertNotIn("around", q)
+        n = q.count("node[highway=bus_stop]")
+        self.assertTrue(8 <= n <= 60, n)                    # a 33 km road: a few dozen small boxes, not one huge one
+        self.assertLess(len(q), 20000)
+
+    def test_along_filter_keeps_only_stops_on_the_road(self):
+        road = [[50.0, 16.0], [50.0, 16.02]]                # an east-west road
+        def node(i, lat, lon, **tags):
+            return {"type": "node", "id": i, "lat": lat, "lon": lon, "tags": tags}
+        near = node(1, 50.00015, 16.01, highway="bus_stop")          # about 17 m north of the road
+        far = node(2, 50.0008, 16.01, highway="bus_stop")            # 89 m away
+        station = {"type": "way", "id": 3, "center": {"lat": 50.0006, "lon": 16.005}, "tags": {"amenity": "bus_station"}}   # 67 m
+        text = json.dumps({"elements": [near, far, station]})
+        out = json.loads(d.filter_along(text, road))
+        self.assertEqual([e["id"] for e in out["elements"]], [1, 3])
+
+    def test_dist_to_path(self):
+        self.assertAlmostEqual(d.dist_to_path(50.0, 16.01, [(50.0, 16.0), (50.0, 16.02)]), 0, delta=0.01)
+        self.assertAlmostEqual(d.dist_to_path(50.0009, 16.01, [(50.0, 16.0), (50.0, 16.02)]), 99.5, delta=2)
+        self.assertGreater(d.dist_to_path(50.0, 16.05, [(50.0, 16.0), (50.0, 16.02)]), 2000)
 
     def test_name_regex_folds_accents_and_escapes(self):
         rx = d.name_regex("Broumov")
@@ -159,7 +177,8 @@ class PathService(unittest.TestCase):
                 raise RuntimeError("osrm down")
             return json.dumps(d.parse_osrm(json.loads(OSRM)))
 
-        self.stops = {"elements": [{"type": "node", "id": 1, "lat": 50.5, "lon": 16.3, "tags": {"highway": "bus_stop"}}]}
+        p0 = d.parse_osrm(json.loads(OSRM))["points"][100]
+        self.stops = {"elements": [{"type": "node", "id": 1, "lat": p0[0], "lon": p0[1], "tags": {"highway": "bus_stop"}}]}
         self.svc = d.Service(d.Cache(self.tmp.name), upstream=lambda q: json.dumps(self.stops), router=router)
 
     def tearDown(self):

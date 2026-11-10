@@ -7,13 +7,23 @@
           <div v-if="whereText" class="where">{{ whereText }}</div>
         </div>
         <nav class="crumbs" aria-label="steps">
-          <button v-if="['lines', 'route'].includes(screen)" class="crumb" :disabled="busyTrip" @click="go('nearby')">{{ t("crumb.stops") }}</button>
-          <template v-if="s && s.station && ['lines', 'route'].includes(screen)">
+          <button v-if="['lines', 'route', 'build', 'buildStops'].includes(screen)" class="crumb" :disabled="busyTrip" @click="go('nearby')">{{ t("crumb.stops") }}</button>
+          <template v-if="s && (screen === 'build' || screen === 'buildStops')">
+            <span class="sep"></span>
+            <button class="crumb" :class="{ on: screen === 'build' }" @click="screen === 'buildStops' && go('build')">{{ t("crumb.build") }}</button>
+          </template>
+          <template v-if="s && screen === 'buildStops'">
+            <span class="sep"></span>
+            <span class="crumb on">{{ t("crumb.stopsStep") }}</span>
+          </template>
+          <template v-if="s && s.station && ['lines', 'route'].includes(screen) && !(s.route && s.route.custom)">
             <span class="sep"></span>
             <button class="crumb" :class="{ on: screen === 'lines' }" @click="go('lines')">{{ s.station.name }}</button>
           </template>
           <template v-if="s && s.route && screen === 'route'">
             <span class="sep"></span>
+            <button v-if="s.route.custom && s.build" class="crumb" @click="call('uiBuildBack')">{{ t("crumb.build") }}</button>
+            <span v-if="s.route.custom && s.build" class="sep"></span>
             <span class="crumb on"><span class="mini-plate">{{ s.route.ref }}</span>{{ s.route.to }}</span>
           </template>
         </nav>
@@ -47,14 +57,40 @@
         <section v-else-if="screen === 'nearby'" class="split">
           <div class="list">
             <div class="head">
-              <div>
-                <h2>{{ t("near.title") }}</h2>
-                <p class="sub">{{ t("near.sub") }}</p>
+              <div class="tabs" role="tablist">
+                <button role="tab" :aria-selected="tab === 'near'" :class="{ on: tab === 'near' }" @click="tab = 'near'">{{ t("near.title") }}</button>
+                <button role="tab" :aria-selected="tab === 'mine'" :class="{ on: tab === 'mine' }" @click="tab = 'mine'">{{ t("mine.title") }}<span v-if="saved.length" class="badge">{{ saved.length }}</span></button>
               </div>
-              <button class="btn ghost" :disabled="!!(s && s.loading)" @click="call('uiRefresh')">{{ t("refresh") }}</button>
+              <div class="head-actions">
+                <button v-if="tab === 'near'" class="btn ghost" :disabled="!!(s && s.loading)" @click="call('uiRefresh')">{{ t("refresh") }}</button>
+                <button class="btn go slim" :disabled="!stations.length && !(s && s.pos)" @click="call('uiBuildStart')">＋ {{ t("build.start") }}</button>
+              </div>
             </div>
+            <p v-if="tab === 'near'" class="sub">{{ t("near.sub") }}</p>
 
-            <div v-if="serviceDown" class="notice">
+            <!-- my routes -->
+            <template v-if="tab === 'mine'">
+              <div v-if="s && s.error" class="notice bad"><p>{{ errText(s.error) }}</p></div>
+              <div v-if="s && s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("mine.opening") }}</b><div class="muted">{{ t("stops.loadingHint") }}</div></div></div>
+              <div v-if="!saved.length" class="empty"><b>{{ t("mine.empty") }}</b><div class="muted">{{ t("mine.emptyHint") }}</div></div>
+              <div v-else class="stops">
+                <div v-for="m in saved" :key="m.id" class="mine-row">
+                  <span class="plate big" :style="{ background: m.colour, color: ink(m.colour) }">{{ m.ref }}</span>
+                  <div class="mine-body">
+                    <div class="stop-name">{{ m.name }}</div>
+                    <div class="muted small">{{ m.from }} → {{ m.to }} · {{ t("mine.stations", { n: m.n }) }}</div>
+                  </div>
+                  <div class="mine-actions">
+                    <button class="btn" :disabled="!!(s && s.loading)" @click="call('uiOpenSaved', m.i)">{{ t("mine.open") }}</button>
+                    <button class="btn ghost" @click="call('uiEditSaved', m.i)">{{ t("mine.edit") }}</button>
+                    <button class="btn ghost" :class="{ danger: sure === m.id }" @click="remove(m)">{{ sure === m.id ? t("mine.sure") : "×" }}</button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div v-if="tab !== 'near'"></div>
+            <div v-else-if="serviceDown" class="notice">
               <h3>{{ t("svc.downTitle") }}</h3>
               <p>{{ t("svc.downText") }}</p>
               <p class="steps">{{ t("svc.downSteps") }}</p>
@@ -111,7 +147,10 @@
               <h2>{{ t("lines.title", { name: s.station ? s.station.name : "" }) }}</h2>
               <p class="sub">{{ t("lines.sub") }}</p>
             </div>
-            <button class="btn ghost" @click="go('nearby')">{{ t("back") }}</button>
+            <div class="head-actions">
+              <button class="btn ghost" @click="call('uiBuildStart', s.station ? s.station.id : 1)">＋ {{ t("build.fromHere") }}</button>
+              <button class="btn ghost" @click="go('nearby')">{{ t("back") }}</button>
+            </div>
           </div>
           <div v-if="s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("lines.loading") }}</b><div class="muted">{{ t("lines.loadingHint") }}</div></div></div>
           <div v-if="s.error" class="notice bad"><p>{{ t("err.generic", { e: s.error }) }}</p></div>
@@ -130,6 +169,10 @@
           </div>
         </section>
 
+        <!-- manual mode -->
+        <BuildPage v-else-if="screen === 'build' && s.build" :s="s" />
+        <StopsPage v-else-if="screen === 'buildStops' && s.build" :s="s" />
+
         <!-- 3. the route and starting it -->
         <section v-else-if="screen === 'route' && s.route" class="route">
           <div class="card line-card">
@@ -137,12 +180,12 @@
               <span class="plate huge" :style="{ background: s.route.colour, color: ink(s.route.colour) }">{{ s.route.ref }}</span>
               <div>
                 <div class="from-to">{{ s.route.from }}<span class="arrow"> → </span>{{ s.route.to }}</div>
-                <div class="muted small">{{ kindText }}<template v-if="s.route.loop"> · {{ t("route.loop") }}</template></div>
+                <div class="muted small"><span v-if="s.route.custom" class="own">{{ t("route.own") }}</span>{{ kindText }}<template v-if="s.route.loop"> · {{ t("route.loop") }}</template></div>
               </div>
             </div>
             <dl class="facts">
               <div v-if="s.route.operator"><dt>{{ t("route.operator") }}</dt><dd>{{ s.route.operator }}</dd></div>
-              <div v-if="s.route.network"><dt>{{ t("route.network") }}</dt><dd>{{ s.route.network }}</dd></div>
+              <div v-if="s.route.network && !s.route.custom"><dt>{{ t("route.network") }}</dt><dd>{{ s.route.network }}</dd></div>
               <div><dt>{{ t("route.length") }}</dt><dd>{{ lengthText }}</dd></div>
               <div><dt>{{ t("route.time") }}</dt><dd>{{ t("route.min", { n: s.route.minutes }) }}</dd></div>
               <div><dt>{{ t("route.stops") }}</dt><dd>{{ s.route.stopCount }}</dd></div>
@@ -160,6 +203,12 @@
               </div>
             </div>
             <p v-if="s.route.incomplete" class="warn">{{ t("route.incomplete") }}</p>
+            <p v-if="s.route.straight" class="warn">{{ t("build.straight") }}</p>
+            <div v-if="s.route.custom" class="own-actions">
+              <button class="btn ghost" @click="call('uiSave')">{{ saveLabel }}</button>
+              <button v-if="s.build" class="btn ghost" @click="call('uiBuildBack')">{{ t("route.editBuild") }}</button>
+            </div>
+            <button v-else class="btn ghost extend" @click="call('uiBuildFromRoute')">＋ {{ t("route.extend") }}<small>{{ t("route.extendHint") }}</small></button>
           </div>
 
           <div class="card diagram">
@@ -266,6 +315,7 @@
           <div class="muted small">{{ t("res.totals", { trips: s.result.totals.trips, pax: s.result.totals.passengers }) }}</div>
           <div class="row">
             <button v-if="s.result.canReverse" class="btn go" @click="call('uiReverseTrip')">⇄ {{ t("res.back") }}</button>
+            <button v-if="s.result.canContinue" class="btn" @click="call('uiBuildContinue')">＋ {{ t("res.next") }}</button>
             <button class="btn" @click="call('uiAnotherRoute')">{{ t("res.another") }}</button>
             <button class="btn ghost" @click="finish">{{ t("res.close") }}</button>
           </div>
@@ -283,7 +333,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue"
+import { computed, onMounted, ref, watch } from "vue"
+import BuildPage from "./BuildPage.vue"
+import StopsPage from "./StopsPage.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"
@@ -300,6 +352,26 @@ onMounted(() => {
 })
 
 const screen = computed(() => (s.value ? s.value.screen : "nearby"))
+const tab = ref("near")
+watch(() => s.value && s.value.tab, v => { if (v) tab.value = v }, { immediate: true })
+const sure = ref(null)
+const saved = computed(() => (s.value && s.value.saved) || [])
+const saveLabel = computed(() => {
+  const own = s.value && s.value.route && s.value.route.custom
+  return own && s.value.start && s.value.start.saved ? "✓ " + t("build.saved") : t("build.save")
+})
+let sureTimer = null
+function remove(m) {
+  if (sure.value === m.id) { sure.value = null; call("uiDeleteSaved", m.i); return }
+  sure.value = m.id
+  clearTimeout(sureTimer)
+  sureTimer = setTimeout(() => { sure.value = null }, 3000)
+}
+function errText(e) {
+  const key = "build.err." + e
+  const v = t(key)
+  return v === key ? t("err.generic", { e }) : v
+}
 const units = computed(() => (s.value ? s.value.units : "km/h"))
 const stations = computed(() => (s.value && s.value.stations) || [])
 const serviceDown = computed(() => !!(s.value && (s.value.error === "service_down" || (s.value.service && s.value.service.up === false && !stations.value.length))))
@@ -424,24 +496,6 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .lang { display: flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden;
   button { border: 0; padding: 6px 10px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; &.on { background: var(--panel-3); color: var(--ink); } } }
 
-// ---- buttons
-.btn {
-  padding: 10px 18px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--panel-3);
-  color: var(--ink);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-  &:hover:not(:disabled) { background: #36525f; }
-  &:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
-  &:disabled { opacity: 0.5; cursor: default; }
-  &.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--hair); &:hover:not(:disabled) { background: var(--panel-2); } }
-  &.danger { background: #5a2a26; &:hover:not(:disabled) { background: #74352f; } }
-  &.go { background: var(--line); color: var(--ink-on-line); font-size: 17px; padding: 14px 18px; &:hover:not(:disabled) { filter: brightness(1.1); background: var(--line); } }
-}
-
 // ---- body
 .body { flex: 1; min-height: 0; padding: 18px 20px 6px; overflow: hidden; display: flex; }
 .body > section { flex: 1; min-width: 0; min-height: 0; }
@@ -497,6 +551,20 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .notice { padding: 16px; border-radius: 12px; background: var(--panel-2); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; line-height: 1.45;
   &.bad { box-shadow: inset 4px 0 0 var(--late); }
   .steps { color: var(--led); } }
+
+// ---- tabs, my routes
+.tabs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel-2);
+  button { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); font: inherit; font-size: 18px; font-weight: 700; cursor: pointer;
+    &.on { background: var(--panel-3); color: var(--ink); } &:hover:not(.on) { color: var(--ink); } &:focus-visible { outline: 2px solid var(--line); } } }
+.badge { padding: 0 8px; border-radius: 99px; background: var(--line); color: var(--ink-on-line); font-size: 13px; }
+.head-actions { display: flex; gap: 8px; align-items: center; }
+.btn.slim { padding: 9px 16px; font-size: 15px; }
+.mine-row { display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-radius: 12px; background: var(--panel-2); }
+.mine-body { flex: 1; min-width: 0; .stop-name { font-size: 18px; } }
+.mine-actions { display: flex; gap: 8px; flex: none; }
+.own-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.extend { margin-top: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; small { font-weight: 400; color: var(--muted); } }
+.own { display: inline-block; white-space: nowrap; margin-right: 8px; padding: 1px 8px; border-radius: 4px; background: var(--panel-3); color: var(--ink); font-weight: 700; font-size: 12px; }
 
 // ---- lines
 .line-row { display: flex; gap: 16px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; background: var(--panel-2); }
@@ -585,4 +653,28 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   .split { grid-template-columns: 1fr; .aside { display: none; } }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } .grade-ring .fg { transition: none; } }
+</style>
+
+<style lang="scss">
+// shared by the pages inside the menu (BuildPage, StopsPage): not scoped
+.ebm .btn {
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--panel-3);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  &:hover:not(:disabled) { background: #36525f; }
+  &:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+  &:disabled { opacity: 0.5; cursor: default; }
+  &.ghost { background: transparent; box-shadow: inset 0 0 0 1px var(--hair); &:hover:not(:disabled) { background: var(--panel-2); } }
+  &.danger { background: #5a2a26; &:hover:not(:disabled) { background: #74352f; } }
+  &.go { background: var(--line); color: var(--ink-on-line); font-size: 17px; padding: 14px 18px; &:hover:not(:disabled) { filter: brightness(1.1); background: var(--line); } }
+}
+.ebm h3 { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.ebm .card { background: var(--panel-2); border-radius: 12px; padding: 16px; }
+.ebm .muted { color: var(--muted); }
+.ebm .small { font-size: 13px; }
 </style>

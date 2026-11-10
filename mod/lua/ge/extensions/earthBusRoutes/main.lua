@@ -131,7 +131,7 @@ local function buildModel()
     local deps, tomorrow = menu.departuresModel(c.trips, idx, sec, 8)
     model.start = { mode = S.sel.mode or 'here', index = idx, stopName = route.stops[idx].name, timeSec = sec,
       timeLabel = menu.clockLabel(sec), deps = deps, tomorrow = tomorrow, dep = S.sel.dep or 1,
-      reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false }
+      reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil }
   end
   if S.result then model.result = S.result end
   model.stats = S.stats
@@ -638,6 +638,22 @@ function M.uiBuildFromRoute()
   publish()
 end
 
+-- After a trip: build the next leg from where it ended (the end of the route is the first station of the new one)
+function M.uiBuildContinue()
+  local last = S.finishedLast
+  if not last then return end
+  readOptions()
+  readSaved()
+  S.result = nil
+  S.sel = {}
+  S.build = { b = builder.new(last), busy = {}, candKind = 'ring' }
+  S.screen = 'build'
+  S.err = nil
+  loadCandidates()
+  publish()
+  guihooks.trigger('EarthBusRoutesHud', { idle = true })
+end
+
 -- What the builder screens show
 function M.buildModelOf()
   local B = S.build
@@ -878,10 +894,12 @@ local function finishTrip(t)
     ref = t.route.ref, colour = t.route.colour, from = t.route.from, to = t.route.to, record = record, previous = previous,
     minutes = math.floor((t.clock - t.clock0) / 60 + 0.5), canReverse = back ~= nil and back ~= false,
     totals = { trips = stats.trips, passengers = stats.passengers, points = stats.points },
-    scheduled = t.entry ~= nil,
+    scheduled = t.entry ~= nil, canContinue = #t.route.stops > 0, custom = t.route.custom or false,
   }
   S.stats = { trips = stats.trips, passengers = stats.passengers, points = stats.points }
   S.finishedRouteId = t.route.id
+  local lastStop = t.route.stops[#t.route.stops]
+  S.finishedLast = lastStop and { name = lastStop.name, lat = lastStop.lat, lon = lastStop.lon, station = lastStop.station } or nil
   S.finishedStation = S.sel.station
   S.trip = nil
   endClockAndGps()

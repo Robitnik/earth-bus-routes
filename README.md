@@ -20,6 +20,12 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 - **Score and the way back**: punctuality, service, comfort and safety, a grade, your best on the line. After the last stop:
   drive the line back, or pick another line from there.
 
+- **Your own routes** (manual mode): when OpenStreetMap has no line for where you want to go, build one. Pick the stations one
+  after another (bus stations first, a search by name reaches 40 km), watch the road between them being found, decide whether
+  the bus calls at every stop on the way or only at your stations, give it a number and a colour, save it. Then it is a
+  line like any other: timetable, passengers, HUD, score, the way back. You can also continue an incomplete OpenStreetMap line
+  as your own, and after a trip build the next leg from where it ended.
+
 English and Ukrainian; the menu follows the game language and has a switch.
 
 ## Install
@@ -37,7 +43,7 @@ busy. Everything is kept on disk, so the next time it is instant.
 
 ```
 mod/                    the game mod (the zip's contents)
-  lua/ge/extensions/earthBusRoutes/   osm, schedule, demand, scoring, trip, menu (pure logic, tested) +
+  lua/ge/extensions/earthBusRoutes/   osm, schedule, demand, scoring, trip, menu, builder (pure logic, tested) +
                                       datasvc, http, world, main (talk to the game and the service)
   ui/ui-vue/mods/earthBusRoutes/      the menu (Vue)
   ui/modules/apps/EarthBusHud/        the HUD (Vue)
@@ -46,6 +52,9 @@ tests/                                Lua tests under lupa, Python tests for the
 tools/                                build, dev loader, preview with screenshots
 docs/                                 research and plans
 ```
+
+The manual mode needs data service 0.2.0 or newer (roads from OSRM, stops along them, search); an older service still lets you
+build with straight lines between the stations.
 
 Requires BeamNG.Earth's modding API v1 (`beamngEarth_api`). The mod only calls the Earth internals it needs through `pcall`
 (`world.lua`), so a change in Earth turns a feature off instead of breaking the game.
