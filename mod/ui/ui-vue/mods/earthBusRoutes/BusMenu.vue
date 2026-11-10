@@ -276,7 +276,7 @@
             </div>
 
             <button v-if="s.start.reverseId" class="btn ghost reverse" @click="call('uiToggleReverse')">
-              ⇄ {{ t("start.reverse") }}<small>{{ t("start.reverseHint", { to: s.route.from }) }}</small>
+              ⇄ {{ t("start.reverse") }}<small>{{ t("start.reverseHint", { to: s.route.from }) }}<template v-if="s.start.reverseGuess"> · {{ t("start.reverseGuess") }}</template></small>
             </button>
 
             <p v-if="s.start.place === 'to'" class="muted small">{{ t("start.endsHere") }}</p>

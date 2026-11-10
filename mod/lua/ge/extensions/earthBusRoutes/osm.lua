@@ -461,6 +461,41 @@ function M.kind(r)
   return 'city'
 end
 
+-- The same route driven the other way, for lines whose opposite direction is not in the map data: the same road and the same stops
+-- in reverse order. id = -(the route's id) (OSM ids are big, ids of routes built by hand are small negative numbers).
+function M.reversed(route)
+  local n = #route.stops
+  -- only the stretch of road between the first and the last stop (a relation may list ways beyond them)
+  local a0, a1 = route.stops[1].along or 0, route.stops[n].along or route.length or 0
+  if a1 - a0 < 100 then a0, a1 = 0, route.length or 0 end
+  local stops = {}
+  for i = n, 1, -1 do
+    local s = route.stops[i]
+    stops[#stops + 1] = { id = s.id, name = s.name, lat = s.lat, lon = s.lon, role = s.role, off = s.off, station = s.station,
+      along = math.min(a1 - a0, math.max(0, a1 - (s.along or 0))) }
+    stops[#stops].index = #stops
+  end
+  local inside = { }
+  local lat0, lon0 = geo.pointAt(route.path, route.cum, a0)
+  local lat1, lon1 = geo.pointAt(route.path, route.cum, a1)
+  inside[1] = { lat = lat0, lon = lon0 }
+  for i = 1, #route.path do
+    if route.cum[i] > a0 and route.cum[i] < a1 then inside[#inside + 1] = { lat = route.path[i].lat, lon = route.path[i].lon } end
+  end
+  inside[#inside + 1] = { lat = lat1, lon = lon1 }
+  local path = {}
+  for i = #inside, 1, -1 do path[#path + 1] = inside[i] end
+  local cum, length = geo.cumulative(path)
+  local name = route.name
+  if route.from and route.to then name = (route.ref or '') .. ': ' .. route.to .. ' => ' .. route.from end
+  local r = {}
+  for k, v in pairs(route) do r[k] = v end
+  r.id, r.name, r.from, r.to = -route.id, name, route.to, route.from
+  r.stops, r.path, r.cum, r.length = stops, path, cum, length
+  r.reversedOf, r.synthetic = route.id, true
+  return r
+end
+
 -- The opposite direction of `route` among `candidates` (other parsed routes or heads): same ref, swapped ends.
 -- Loops have none. Returns the candidate or nil.
 function M.reverseOf(route, candidates)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- **Opposite direction for every line**: when the map has no line the other way (OpenStreetMap often maps one direction only, as with 305), "Opposite direction" drives the same road and the same stops in reverse; it is marked as such. A real opposite line from the map still wins when there is one. Also after a trip: "Drive back".
+
 ## 0.4.0
 
 - **Three tabs at a station**: *From here* (lines that start at it), *To here* (lines that end at it), *Through here* (lines that call on their way). A circular line is in the first two. The tab with lines opens first; each shows how many lines it has.

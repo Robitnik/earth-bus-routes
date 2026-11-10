@@ -153,4 +153,22 @@ function T.cancel_and_teleport_end_the_wait()
   cleanup()
 end
 
+function T.a_line_without_an_opposite_in_the_map_can_still_be_driven_back()
+  local m, model, env = setup()
+  pickStation(m, model)
+  m.uiSelectRoute(model().lines[1].variants[1].id)
+  local md = model()
+  local first = md.route
+  assert(md.start.reverseId == 'synthetic' and md.start.reverseGuess, 'the button is there even when the map has no opposite line')
+  m.uiToggleReverse()
+  md = model()
+  assert(md.route.synthetic == nil)                       -- (the model carries the card only)
+  assert(md.route.from == first.to and md.route.to == first.from and md.start.reversed)
+  assert(md.route.stopCount == first.stopCount and md.route.id ~= first.id)
+  -- and back again, to the real one
+  m.uiToggleReverse()
+  assert(model().route.from == first.from and not model().start.reversed)
+  cleanup()
+end
+
 return T

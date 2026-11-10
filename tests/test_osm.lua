@@ -164,4 +164,26 @@ function T.short_branch_pair_still_found()
   assert(back and back.id == b.id)
 end
 
+function T.reversed_route_runs_the_same_road_the_other_way()
+  local r = assert(osm.parseRoute(H.fixture('route_6964117')))
+  local b = osm.reversed(r)
+  assert(b.id == -r.id and b.from == r.to and b.to == r.from and b.synthetic and b.reversedOf == r.id)
+  assert(#b.stops == #r.stops and b.stops[1].name == r.stops[#r.stops].name and b.stops[#b.stops].name == r.stops[1].name)
+  assert(math.abs(b.length - (r.stops[#r.stops].along - r.stops[1].along)) < 5, 'only the road between the first and the last stop')
+  assert(b.stops[1].along < 5 and b.length - b.stops[#b.stops].along < 5)
+  for i, s in ipairs(b.stops) do
+    assert(s.index == i)
+    if i > 1 then assert(s.along >= b.stops[i - 1].along) end
+  end
+  local geo = require('earthBusRoutes/geomath')
+  assert(geo.dist(b.path[1].lat, b.path[1].lon, r.stops[#r.stops].lat, r.stops[#r.stops].lon) < 60, 'it starts at the last stop of the original')
+  assert(b.ref == r.ref and b.colour == r.colour and b.kind == r.kind)
+  local again = osm.reversed(b)
+  assert(again.id == r.id and again.from == r.from and again.stops[1].name == r.stops[1].name)
+  assert(math.abs(again.length - b.length) < 5)
+  -- it has a timetable like any route
+  local sched = require('earthBusRoutes/schedule')
+  assert(#sched.generate(b, 2) > 5)
+end
+
 return T

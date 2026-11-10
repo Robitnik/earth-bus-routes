@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.4.0'
+M.VERSION = '0.4.1'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -136,7 +136,7 @@ local function buildModel()
     local deps, tomorrow = menu.departuresModel(c.trips, idx, sec, 8)
     model.start = { mode = S.sel.mode or 'here', index = idx, stopName = route.stops[idx].name, timeSec = sec,
       timeLabel = menu.clockLabel(sec), deps = deps, tomorrow = tomorrow, dep = S.sel.dep or 1,
-      reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil,
+      reverseId = S.reverseOf[route.id] or nil, reverseGuess = S.reverseOf[route.id] == 'synthetic', reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil,
       place = S.sel.place, approx = S.sel.approx or false, dist = M.distToStop(route.stops[idx]), canDrive = M.distToStop(route.stops[idx]) > M.START_NEAR_M }
   end
   if S.result then model.result = S.result end
@@ -206,10 +206,11 @@ local function findReverse(route)
   for _, ln in ipairs(S.sel.lines or {}) do
     if ln.ref == route.ref then for _, v in ipairs(ln.variants) do if v.id ~= route.id then siblings[#siblings + 1] = v.id end end end
   end
-  S.reverseOf[route.id] = false
+  -- until the map data shows the opposite direction, it is the same road the other way (osm.reversed)
+  S.reverseOf[route.id] = 'synthetic'
   for i = 1, math.min(#siblings, 6) do
     loadRoute(siblings[i], function(r)
-      if r and S.reverseOf[route.id] == false then
+      if r and S.reverseOf[route.id] == 'synthetic' then
         local back = osm.reverseOf(route, { r })
         if back then S.reverseOf[route.id] = r.id S.reverseOf[r.id] = route.id publish() end
       end
@@ -791,11 +792,20 @@ end
 function M.uiSelectDep(i) S.sel.dep = tonumber(i) or 1 publish() end
 
 -- The opposite direction of the chosen route, when the data has it
+-- The route driven the other way (kept for the session): returns its id
+function M.syntheticReverse(route)
+  local rev = osm.reversed(route)
+  S.routes[rev.id] = S.routes[rev.id] or rev
+  S.reverseOf[route.id], S.reverseOf[rev.id] = rev.id, route.id
+  return rev.id
+end
+
 function M.uiToggleReverse()
   local route = currentRoute()
   local back = route and S.reverseOf[route.id]
   if not back then return end
   if back == 'custom' then return M.uiCustomReverse() end
+  if back == 'synthetic' then back = M.syntheticReverse(route) end
   S.sel.reversed = not S.sel.reversed
   M.uiSelectRoute(back)
 end
@@ -1025,6 +1035,11 @@ function M.uiReverseTrip()
   local id = S.finishedRouteId and S.reverseOf[S.finishedRouteId]
   if not id then return end
   if id == 'custom' then return M.uiCustomReverseTrip() end
+  if id == 'synthetic' then
+    local cur = S.routes[S.finishedRouteId]
+    if not cur then return end
+    id = M.syntheticReverse(cur)
+  end
   S.sel = { station = S.finishedStation, mode = 'first', routeId = id, reversed = true, lines = S.sel.lines }
   S.result = nil
   loadRoute(id, function(route, why)
