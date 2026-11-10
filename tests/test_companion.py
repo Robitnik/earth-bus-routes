@@ -187,6 +187,31 @@ class Paths(unittest.TestCase):
         self.assertEqual(d.search_key("Broumov", 50.41, 16.16), d.search_key("  broumov ", 50.42, 16.16))
 
 
+class QuietErrors(unittest.TestCase):
+    def test_a_client_that_hangs_up_is_not_an_error_but_a_bug_still_is(self):
+        import contextlib
+        import io
+        httpd = d.QuietServer(("127.0.0.1", 0), d.make_handler(d.Service(d.Cache(tempfile.mkdtemp())), 0))
+        try:
+            for exc in (ConnectionAbortedError(10053, "aborted"), ConnectionResetError(), BrokenPipeError(), TimeoutError()):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err):
+                    try:
+                        raise exc
+                    except Exception:
+                        httpd.handle_error(None, ("127.0.0.1", 1))
+                self.assertEqual(err.getvalue(), "", type(exc).__name__)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                try:
+                    raise KeyError("bug")
+                except Exception:
+                    httpd.handle_error(None, ("127.0.0.1", 1))
+            self.assertIn("KeyError", err.getvalue())
+        finally:
+            httpd.server_close()
+
+
 class Index(unittest.TestCase):
     def setUp(self):
         self.idx = d.StopIndex()

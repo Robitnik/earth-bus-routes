@@ -1,5 +1,9 @@
 # Changelog
 
+## Data service 0.4.1
+
+- A client that hangs up while the answer is sent (the game cancelling a request) no longer prints a traceback: BeamNG.Earth's Add-ons page showed it as "stopped with an error".
+
 ## 0.5.0
 
 - **Search by line number**: the first screen has a search box for a station name *or* a line number ("363", "N1"). A number lists the lines with it within 40 km, each direction and variant; pick one to see its card and start it from its first stop (teleport, or drive there with the GPS). A name lists stations, nearest first; pick one to open its three tabs.
