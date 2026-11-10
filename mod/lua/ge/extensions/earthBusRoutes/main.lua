@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.2.1'
+M.VERSION = '0.3.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -19,6 +19,7 @@ local osm = require('earthBusRoutes/osm')
 local schedule = require('earthBusRoutes/schedule')
 local trip = require('earthBusRoutes/trip')
 local menu = require('earthBusRoutes/menu')
+local builder = require('earthBusRoutes/builder')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
 
@@ -30,6 +31,8 @@ local S = {
   routes = {}, trips = {}, reverseOf = {},
   trip = nil, starting = nil, result = nil, hudTimer = 0,
   opts = {}, prefetchAt = nil, prefetchTimer = 0, hudAsked = false,
+  build = nil,                -- manual mode: { b = builder state, busy = {..}, cands, ... }
+  saved = {}, customSer = {}, nextCustomId = -1,
 }
 
 local function earthApi() return rawget(_G, 'beamngEarth_api') end
@@ -76,6 +79,11 @@ function M.status() return { version = M.VERSION, earth = S.earth, reason = S.re
 local function stationRef(i) return S.cell and S.cell.model and S.cell.model[i] and S.cell.model[i].ref end
 
 local function startIndexFor(route)
+  if S.sel.custom then
+    local p = S.sel.mode ~= 'first' and world.pose() or nil
+    if not p then return 1 end
+    return (menu.nearestStopIndex(route, p.lat, p.lon))
+  end
   local st = S.sel.station and stationRef(S.sel.station)
   if S.sel.mode == 'first' or not st then return 1 end
   return (menu.nearestStopIndex(route, st.lat, st.lon))
@@ -127,6 +135,9 @@ local function buildModel()
   end
   if S.result then model.result = S.result end
   model.stats = S.stats
+  model.saved = M.savedModel()
+  model.features = datasvc.state.features
+  if S.build then model.build = M.buildModelOf() end
   return model
 end
 M.model = buildModel
@@ -166,7 +177,7 @@ local function loadNearby(silent)
     S.loading = nil
     if not silent then S.screen = 'nearby' end
     publish()
-  end)
+  end, (not silent) and 'urgent' or nil)
 end
 
 -- Load (or take from memory) one route relation: cb(route) or cb(nil, why)
@@ -200,10 +211,477 @@ local function findReverse(route)
   end
 end
 
+-- ---- manual mode: a route built from stations ----------------------------------------------------------------------------
+
+local SAVED_PATH = '/settings/earthBusRoutes/myroutes.json'
+M.MAX_SAVED = 50
+local MAX_LINE_POINTS = 300
+
+local function readSaved()
+  local ok, d = pcall(jsonReadFile, SAVED_PATH)
+  local out = {}
+  if ok and type(d) == 'table' and type(d.routes) == 'table' then
+    for _, r in ipairs(d.routes) do
+      if type(r) == 'table' and type(r.id) == 'string' and builder.deserialize(r.state) then out[#out + 1] = r end
+    end
+  end
+  S.saved = out
+end
+
+local function writeSaved() pcall(jsonWriteFile, SAVED_PATH, { format = 1, routes = S.saved }, true) end
+
+local function defaultName(ser)
+  local a, b = ser.points[1], ser.points[#ser.points]
+  local ref = (ser.ref and ser.ref ~= '') and ser.ref or 'My'
+  return ref .. ': ' .. (a.name or '?') .. ' => ' .. (b.name or '?')
+end
+
+function M.savedModel()
+  local out = {}
+  for i, e in ipairs(S.saved) do
+    out[i] = { i = i, id = e.id, name = e.name, ref = e.ref, colour = e.colour, from = e.from, to = e.to, n = e.n, mode = e.mode }
+  end
+  return out
+end
+
+-- road path of the chosen stations (the straight line when the data service cannot give one); cb(ok, err)
+local function fetchPath(b, cb)
+  if datasvc.has('path') == false then builder.applyPath(b, builder.straightAnswer(b)) cb(false, 'service_old') return end
+  local serial = b.serial
+  datasvc.path(builder.pts(b), function(ans, info)
+    if b.serial ~= serial then return end
+    if ans and ans.points and builder.applyPath(b, ans) then cb(true) return end
+    builder.applyPath(b, builder.straightAnswer(b))
+    cb(false, info and info.error or 'no path')
+  end)
+end
+
+-- the stops along the path, in "all stops" mode; cb(ok, err)
+local function fetchAlong(b, cb)
+  if b.mode ~= 'all' or b.auto then cb(true) return end
+  if b.straight then builder.setAuto(b, {}) cb(true) return end
+  if datasvc.has('along') == false then builder.setAuto(b, {}) b.alongErr = 'service_old' cb(false, 'service_old') return end
+  local serial = b.serial
+  datasvc.along(builder.pts(b), function(ans, info)
+    if b.serial ~= serial then return end
+    if ans and ans.elements then
+      local ok, stops = pcall(builder.stopsAlong, b, ans.elements)
+      builder.setAuto(b, ok and stops or {})
+      b.alongErr = (not ok) and 'parse' or (ans.fallback and 'fallback' or nil)
+      cb(ok, b.alongErr)
+      return
+    end
+    builder.setAuto(b, {})
+    b.alongErr = info and info.error or 'no stops'
+    cb(false, b.alongErr)
+  end)
+end
+
+-- A finished route table of a builder state (asks the service for what is missing); cb(route) or cb(nil, why)
+local function makeRoute(state, cb)
+  local function done()
+    local id = S.nextCustomId
+    S.nextCustomId = id - 1
+    local r, why = builder.toRoute(state, id)
+    if not r then cb(nil, why) return end
+    S.routes[id] = r
+    S.customSer[id] = builder.serialize(state)
+    S.reverseOf[id] = 'custom'
+    cb(r)
+  end
+  local function along() fetchAlong(state, function() done() end) end
+  if state.path then along() else fetchPath(state, function() along() end) end
+end
+
+local function openCustomRoute(route, keepTime)
+  local prevTime = S.sel and S.sel.timeSec
+  S.sel = { routeId = route.id, custom = true, dep = 1, reversed = S.sel and S.sel.reversed or false }
+  local pose = world.pose()
+  local _, d = menu.nearestStopIndex(route, pose and pose.lat or route.stops[1].lat, pose and pose.lon or route.stops[1].lon)
+  S.sel.mode = (pose and d <= 250) and 'here' or 'first'
+  S.sel.timeSec = (keepTime and prevTime) or world.nowSec()
+  S.loading, S.err = nil, nil
+  S.screen = 'route'
+  publish()
+end
+
+local function busy(key, on) if S.build then S.build.busy[key] = on or nil end end
+
+-- the list the player picks the next station from
+local function activeCands()
+  local B = S.build
+  if not B then return nil end
+  return (B.candKind == 'search' and B.searchCands) or B.cands
+end
+
+local function loadCandidates()
+  local B = S.build
+  if not B then return end
+  local b = B.b
+  local last = b.points[#b.points]
+  local token = (B.candToken or 0) + 1
+  B.candToken = token
+  B.cands, B.err = nil, nil
+  busy('cands', true)
+  local pending, stops, failed, got = 2, {}, nil, false
+  local function fin()
+    pending = pending - 1
+    if pending > 0 then return end
+    if S.build ~= B or B.candToken ~= token then return end
+    busy('cands', false)
+    local ok, list = pcall(function() return builder.candidates(builder.fromStops(stops), b, {}) end)
+    B.cands = ok and list or {}
+    if not got and failed then B.err = failed end
+    publish()
+  end
+  local function take(data, info)
+    if data then
+      got = true
+      local ok, a = pcall(osm.parseAround, data)
+      if ok then for _, st in ipairs(a.stops) do stops[#stops + 1] = st end end
+    elseif not failed then
+      failed = info and info.down and 'service_down' or (info and info.error) or 'unknown error'
+    end
+    fin()
+  end
+  -- (the last asked goes first: the stations list is what the player waits for, the nearby stops are the extra)
+  datasvc.nearby(last.lat, last.lon, take, 'urgent')
+  if datasvc.has('stations') == false then fin() else datasvc.stations(last.lat, last.lon, take) end
+end
+
+local function requestPath()
+  local B = S.build
+  if not B then return end
+  local b = B.b
+  B.pathErr = nil
+  if #b.points < 2 then publish() return end
+  busy('path', true)
+  fetchPath(b, function(ok, err)
+    if S.build ~= B or B.b ~= b then return end
+    busy('path', false)
+    B.pathErr = (not ok) and err or nil
+    publish()
+  end)
+end
+
+function M.uiBuildStart(i)
+  readOptions()
+  readSaved()
+  local st, name
+  local idx = tonumber(i)
+  if idx and S.cell and S.cell.model and S.cell.model[idx] then
+    st, name = S.cell.model[idx].ref, S.cell.model[idx].name
+  elseif S.cell and S.cell.model and S.cell.model[1] then
+    st, name = S.cell.model[1].ref, S.cell.model[1].name
+  end
+  local pose = world.pose()
+  local first = st and { name = name, lat = st.lat, lon = st.lon, station = st.station }
+    or (pose and { name = 'Start', lat = pose.lat, lon = pose.lon })
+  if not first then S.err = 'The BeamNG.Earth world is not ready yet' publish() return end
+  S.build = { b = builder.new(first), busy = {}, candKind = 'ring' }
+  S.screen = 'build'
+  S.err = nil
+  loadCandidates()
+  publish()
+end
+
+function M.uiBuildAdd(id)
+  local B = S.build
+  local list = activeCands()
+  local c = list and list[tonumber(id)]
+  if not c then return end
+  local ok, why = builder.add(B.b, c)
+  if not ok then B.err = (why == 'full') and 'build_full' or nil publish() return end
+  B.query, B.candKind, B.searchCands, B.justSaved = nil, 'ring', nil, false
+  loadCandidates()
+  requestPath()
+  publish()
+end
+
+function M.uiBuildUndo()
+  local B = S.build
+  if not B or not builder.undo(B.b) then return end
+  B.query, B.candKind, B.searchCands, B.justSaved = nil, 'ring', nil, false
+  loadCandidates()
+  requestPath()
+  publish()
+end
+
+function M.uiBuildSearch(q)
+  local B = S.build
+  if not B then return end
+  q = tostring(q or ''):gsub('^%s+', ''):gsub('%s+$', '')
+  if #q < 2 then B.query, B.candKind, B.searchCands = nil, 'ring', nil publish() return end
+  if datasvc.has('search') == false then B.err = 'service_old' publish() return end
+  B.query = q
+  B.searchToken = (B.searchToken or 0) + 1
+  local token = B.searchToken
+  local last = B.b.points[#B.b.points]
+  busy('search', true)
+  B.err = nil
+  publish()
+  datasvc.search(q, last.lat, last.lon, function(data, info)
+    if S.build ~= B or B.searchToken ~= token then return end
+    busy('search', false)
+    if not data then
+      B.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error'
+    else
+      local ok, a = pcall(osm.parseAround, data)
+      local list = {}
+      if ok then
+        local ok2, l = pcall(function() return builder.candidates(builder.fromStops(a.stops), B.b, { byName = true }) end)
+        if ok2 then list = l end
+      end
+      B.searchCands, B.candKind = list, 'search'
+    end
+    publish()
+  end)
+end
+
+function M.uiBuildClearSearch()
+  local B = S.build
+  if not B then return end
+  B.query, B.candKind, B.searchCands = nil, 'ring', nil
+  publish()
+end
+
+function M.uiBuildMode(mode)
+  local B = S.build
+  if not B then return end
+  builder.setMode(B.b, mode)
+  publish()
+end
+
+function M.uiBuildToggleStop(id)
+  local B = S.build
+  if B and builder.toggleStop(B.b, id) then publish() end
+end
+
+-- the stops screen: the stops on the way come from the service the first time it is opened
+function M.uiBuildStops()
+  local B = S.build
+  if not B then return end
+  if #B.b.points < 2 or not B.b.path then B.err = 'build_few' publish() return end
+  S.screen = 'buildStops'
+  if B.b.mode == 'all' and not B.b.auto then
+    busy('along', true)
+    publish()
+    fetchAlong(B.b, function()
+      if S.build ~= B then return end
+      busy('along', false)
+      publish()
+    end)
+  else
+    publish()
+  end
+end
+
+function M.uiBuildRetryAlong()
+  local B = S.build
+  if not B then return end
+  B.b.auto, B.b.alongErr = nil, nil
+  datasvc.forget()
+  M.uiBuildStops()
+end
+
+function M.uiBuildMeta(ref, colour, name)
+  local B = S.build
+  if not B then return end
+  local b = B.b
+  if type(ref) == 'string' then b.ref = ref:gsub('[^%w%-/ ]', ''):sub(1, 6) end
+  if type(colour) == 'string' then b.colour = colour:match('^#%x%x%x%x%x%x$') and colour:lower() or nil end
+  if type(name) == 'string' then b.name = (#name > 0) and name:sub(1, 80) or nil end
+  B.justSaved = false
+  publish()
+end
+
+-- "Done": the route card (timetable, start) of what was built
+function M.uiBuildFinish()
+  local B = S.build
+  if not B then return end
+  local b = B.b
+  if #b.points < 2 or not b.path then B.err = 'build_few' publish() return end
+  S.loading, S.err = 'route', nil
+  publish()
+  makeRoute(b, function(route, why)
+    S.loading = nil
+    if not route then S.err = why or 'could not build the route' publish() return end
+    S.sel = {}
+    openCustomRoute(route)
+    S.sel.savedId = B.savedId
+  end)
+end
+
+-- Back from a built route's card to the builder
+function M.uiBuildBack()
+  if S.build then S.screen = 'build' S.sel = {} publish() end
+end
+
+local function saveSer(ser, savedId)
+  readSaved()
+  local first, last = ser.points[1], ser.points[#ser.points]
+  local ref = (ser.ref and ser.ref ~= '') and ser.ref or 'My'
+  local entry = {
+    id = savedId or ('r' .. tostring(os.time()) .. tostring(#S.saved + 1)), name = ser.name or defaultName(ser),
+    ref = ref, colour = osm.colorFor(ref, ser.colour), from = first.name, to = last.name, n = #ser.points, mode = ser.mode,
+    state = ser, savedAt = os.time(),
+  }
+  for i, e in ipairs(S.saved) do
+    if e.id == entry.id then S.saved[i] = entry writeSaved() return entry.id end
+  end
+  if #S.saved >= M.MAX_SAVED then return nil, 'full' end
+  S.saved[#S.saved + 1] = entry
+  writeSaved()
+  return entry.id
+end
+
+-- Save what is on screen (the builder, or the built route's card)
+function M.uiSave()
+  if S.screen == 'build' or S.screen == 'buildStops' then
+    local B = S.build
+    if not B or #B.b.points < 2 then return end
+    local id = saveSer(builder.serialize(B.b), B.savedId)
+    if not id then S.err = 'save_full' else B.savedId, B.justSaved = id, true end
+    publish()
+  elseif S.sel and S.sel.custom and S.sel.routeId then
+    local ser = S.customSer[S.sel.routeId]
+    if not ser then return end
+    local id = saveSer(ser, S.sel.savedId)
+    if not id then S.err = 'save_full' else S.sel.savedId, S.sel.justSaved = id, true end
+    publish()
+  end
+end
+
+function M.uiOpenSaved(i)
+  local e = S.saved[tonumber(i)]
+  local state = e and builder.deserialize(e.state)
+  if not state then return end
+  S.loading, S.err = 'route', nil
+  S.sel = {}
+  publish()
+  makeRoute(state, function(route, why)
+    S.loading = nil
+    if not route then S.err = why or 'could not build the route' S.screen = 'nearby' publish() return end
+    S.sel = {}
+    openCustomRoute(route)
+    S.sel.savedId = e.id
+  end)
+end
+
+function M.uiEditSaved(i)
+  local e = S.saved[tonumber(i)]
+  local state = e and builder.deserialize(e.state)
+  if not state then return end
+  S.build = { b = state, busy = {}, candKind = 'ring', savedId = e.id }
+  S.screen = 'build'
+  S.err = nil
+  loadCandidates()
+  requestPath()
+  publish()
+end
+
+function M.uiDeleteSaved(i)
+  i = tonumber(i)
+  if not i or not S.saved[i] then return end
+  table.remove(S.saved, i)
+  writeSaved()
+  publish()
+end
+
+-- Opposite direction of a built route: the stations the other way round
+function M.uiCustomReverse()
+  local route = currentRoute()
+  local ser = route and S.customSer[route.id]
+  local state = ser and builder.deserialize(ser)
+  if not state then return end
+  S.loading = 'route'
+  publish()
+  local reversed = not S.sel.reversed
+  local savedId = S.sel.savedId
+  makeRoute(builder.reverse(state), function(r, why)
+    S.loading = nil
+    if not r then S.err = why publish() return end
+    openCustomRoute(r, true)
+    S.sel.reversed, S.sel.savedId = reversed, savedId
+    publish()
+  end)
+end
+
+function M.uiCustomReverseTrip()
+  local cur = S.finishedRouteId and S.routes[S.finishedRouteId]
+  local ser = cur and S.customSer[cur.id]
+  local state = ser and builder.deserialize(ser)
+  if not state then return end
+  S.result = nil
+  S.loading = 'route'
+  S.screen = 'route'
+  publish()
+  makeRoute(builder.reverse(state), function(r, why)
+    S.loading = nil
+    if not r then S.err = why S.screen = 'nearby' publish() return end
+    S.sel = { routeId = r.id, custom = true, mode = 'first', dep = 1, reversed = true, timeSec = world.nowSec() + M.REVERSE_GAP_S }
+    M.uiStart()
+  end)
+end
+
+-- "Continue this line": an OSM route (even an incomplete one) as the first stations of a route of your own
+function M.uiBuildFromRoute()
+  local route = currentRoute()
+  if not route or route.custom then return end
+  readOptions()
+  readSaved()
+  S.build = { b = builder.fromRoute(route), busy = {}, candKind = 'ring' }
+  S.screen = 'build'
+  S.err = nil
+  loadCandidates()
+  requestPath()
+  publish()
+end
+
+-- What the builder screens show
+function M.buildModelOf()
+  local B = S.build
+  local b = B.b
+  local pts = {}
+  for i, p in ipairs(b.points) do pts[i] = { name = p.name or ('Stop ' .. i), lat = p.lat, lon = p.lon, station = p.station or false } end
+  local km, min = 0, 0
+  for _, l in ipairs(b.legs or {}) do km = km + l.dist min = min + l.dur / 60 * 1.25 end
+  local line
+  if b.path then
+    line = {}
+    local step = math.max(1, math.ceil(#b.path / MAX_LINE_POINTS))
+    for i = 1, #b.path, step do line[#line + 1] = { b.path[i].lat, b.path[i].lon } end
+    local lastp = b.path[#b.path]
+    if line[#line][1] ~= lastp.lat or line[#line][2] ~= lastp.lon then line[#line + 1] = { lastp.lat, lastp.lon } end
+  end
+  local cands = {}
+  for i, c in ipairs(activeCands() or {}) do
+    cands[i] = { id = c.id, name = c.name, dist = c.dist, dir = c.dir, station = c.station, ahead = c.ahead, lat = c.lat, lon = c.lon }
+  end
+  local stops
+  if b.path then
+    stops = {}
+    for i, st in ipairs(builder.stopList(b)) do
+      stops[i] = { id = tostring(st.id), name = st.name, km = math.floor(st.along / 100 + 0.5) / 10, chosen = st.chosen or false,
+        on = st.on ~= false, lat = st.lat, lon = st.lon }
+    end
+  end
+  return {
+    points = pts, legs = builder.legInfo(b), km = math.floor(km / 100 + 0.5) / 10, minutes = math.floor(min + 0.5),
+    mode = b.mode, straight = b.straight or false, line = line, cands = cands, candKind = B.candKind, query = B.query,
+    busy = B.busy, err = B.err, pathErr = B.pathErr, alongErr = b.alongErr, stops = stops,
+    ref = b.ref, colour = osm.colorFor((b.ref ~= '' and b.ref) or 'My', b.colour), customColour = b.colour, name = b.name,
+    canFinish = b.path ~= nil and #b.points >= 2, full = #b.points >= builder.MAX_POINTS, maxPoints = builder.MAX_POINTS,
+    saved = B.savedId ~= nil, justSaved = B.justSaved or false,
+  }
+end
+
 -- ---- menu actions (called by the Vue pages through bngApi.engineLua) --------------------------------------------------
 
 function M.uiOpen()
   readOptions()
+  readSaved()
+  if datasvc.state.features == nil then datasvc.ping(function() publish() end) end
   S.screen = S.trip and 'trip' or ((S.result and S.result.show) and 'result') or 'nearby'
   if S.screen == 'nearby' then loadNearby(false) else publish() end
   world.navigate('earthBusRoutes')
@@ -219,8 +697,10 @@ function M.uiRefresh() datasvc.forget() S.cell = nil loadNearby(false) end
 
 function M.uiBackTo(screen)
   S.screen = screen
-  if screen == 'nearby' then S.sel = {} S.result = nil end
+  if screen == 'nearby' then S.sel = {} S.result = nil S.build = nil end
+  if screen == 'build' then S.sel = {} end
   if screen == 'lines' then S.sel.routeId, S.sel.dep, S.sel.reversed = nil, nil, false end
+  if screen == 'buildStops' then M.uiBuildStops() return end
   publish()
 end
 
@@ -274,6 +754,7 @@ function M.uiToggleReverse()
   local route = currentRoute()
   local back = route and S.reverseOf[route.id]
   if not back then return end
+  if back == 'custom' then return M.uiCustomReverse() end
   S.sel.reversed = not S.sel.reversed
   M.uiSelectRoute(back)
 end
@@ -425,6 +906,7 @@ end
 function M.uiReverseTrip()
   local id = S.finishedRouteId and S.reverseOf[S.finishedRouteId]
   if not id then return end
+  if id == 'custom' then return M.uiCustomReverseTrip() end
   S.sel = { station = S.finishedStation, mode = 'first', routeId = id, reversed = true, lines = S.sel.lines }
   S.result = nil
   loadRoute(id, function(route, why)
@@ -540,7 +1022,7 @@ function M.onUpdate(dtReal, dtSim)
         local lat, lon = pose.lat, pose.lon
         datasvc.nearby(lat, lon, function(data)
           if data and not S.cell then pcall(onNearby, data, lat, lon) end
-        end)
+        end, 'low')
       end
     end
   end

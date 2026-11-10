@@ -10,7 +10,8 @@ local M = {}
 M.MAX_POINTS = 25
 M.SAME_M = 150           -- a station this close to a chosen one is the same place
 M.RING_MIN_M = 250       -- "where next" lists stations at least this far from the last one ...
-M.RING_MAX_M = 9000      -- ... and at most this far (a search has no limit)
+M.RING_MAX_M = 9000      -- ... and at most this far (bus stations: STATION_MAX_M; a search has no limit)
+M.STATION_MAX_M = 25000
 M.MAX_CANDIDATES = 40
 M.STOP_OFF_M = 30        -- a stop this near the road is on the route
 M.WRONG_SIDE_PENALTY_M = 12
@@ -106,6 +107,37 @@ function M.legInfo(s)
   return out
 end
 
+-- osm.groupStops of a list of stops, plus the bus stations nothing is mapped around (osm.groupStops drops those: the data
+-- service's /v1/stations answer has only the stations themselves, and they are fine places to go to).
+function M.fromStops(stops)
+  local grouped = osm.groupStops(stops)
+  for _, st in ipairs(stops) do
+    if st.kind == 'station' and st.name and st.name ~= '' then
+      local have = false
+      for _, g in ipairs(grouped) do
+        if g.station and geo.dist(g.lat, g.lon, st.lat, st.lon) < M.SAME_M then have = true break end
+      end
+      if not have then
+        grouped[#grouped + 1] = { name = st.name, lat = st.lat, lon = st.lon, platforms = {}, nodeIds = {}, station = true }
+      end
+    end
+  end
+  return grouped
+end
+
+-- The path answer for stations joined by straight lines (when the data service has no road for them)
+function M.straightAnswer(s)
+  local pts, legs = {}, {}
+  for i, p in ipairs(s.points) do
+    pts[i] = { p.lat, p.lon }
+    if i > 1 then
+      local d = geo.dist(s.points[i - 1].lat, s.points[i - 1].lon, p.lat, p.lon)
+      legs[i - 1] = { dist = d, dur = d / (40 / 3.6) }
+    end
+  end
+  return { points = pts, legs = legs, source = 'straight' }
+end
+
 -- ---- "where next?" ---------------------------------------------------------------------------------------------------
 
 -- Stations (osm.groupStops) to go to from the last chosen one: not the chosen ones, bus stations first, then by distance.
@@ -122,7 +154,8 @@ function M.candidates(stations, s, opts)
     for _, p in ipairs(s.points) do
       if geo.dist(p.lat, p.lon, st.lat, st.lon) < M.SAME_M and (lower(p.name) == lower(st.name) or geo.dist(p.lat, p.lon, st.lat, st.lon) < 60) then taken = true break end
     end
-    local inRing = d >= (opts.min or M.RING_MIN_M) and d <= (opts.max or M.RING_MAX_M)
+    local limit = (st.station and (opts.stationMax or M.STATION_MAX_M)) or opts.max or M.RING_MAX_M
+    local inRing = d >= (opts.min or M.RING_MIN_M) and d <= limit
     if not taken and st.name and st.name ~= '' and (opts.byName or inRing) then
       local b = geo.bearing(from.lat, from.lon, st.lat, st.lon)
       local ahead = true
