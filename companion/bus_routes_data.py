@@ -389,14 +389,14 @@ def post_overpass(url, query):
     return body.decode("utf-8")
 
 
-def fetch_upstream(query, mirrors=None, sender=None, sleep=time.sleep, clock=time.monotonic):
+def fetch_upstream(query, mirrors=None, sender=None, sleep=time.sleep, clock=time.monotonic, rounds=2):
     """The answer's text from the first mirror that gives a good one; raises RuntimeError with every failure when none."""
     global _last_call
     mirrors = mirrors or MIRRORS
     sender = sender or post_overpass
     errors = []
     with _lock:
-        for n, url in enumerate(mirrors * 2):                  # every mirror twice, with a longer wait between
+        for n, url in enumerate(mirrors * rounds):             # every mirror twice (once for a request somebody waits long for), a longer wait between
             gap = MIN_GAP_S - (clock() - _last_call)
             if gap > 0:
                 sleep(gap)
@@ -446,6 +446,8 @@ def fetch_osrm(pts, bases=None, getter=None, sleep=time.sleep):
 class Service:
     def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm):
         self.cache, self.upstream, self.ttl, self.router = cache, upstream, ttl, router
+        # the stops along a road are a big query: one round of mirrors, so the answer comes (or fails) before the mod stops waiting
+        self.upstream_once = (lambda q: fetch_upstream(q, rounds=1)) if upstream is fetch_upstream else upstream
         self.started = time.time()
         self.served = {"cached": 0, "fetched": 0, "stale": 0, "failed": 0}
 
@@ -491,7 +493,7 @@ class Service:
         if p["source"] != "osrm":
             return '{"elements":[],"fallback":true}', False
         road = p["points"]
-        return self.get(along_key(pts), along_query(road), post=lambda text: filter_along(text, road))
+        return self.get(along_key(pts), along_query(road), post=lambda text: filter_along(text, road), upstream=self.upstream_once)
 
 
 # ---- HTTP -----------------------------------------------------------------------------------------------------------
