@@ -15,6 +15,9 @@ export function call(fn, ...args) {
   engineLua(`if earthBusRoutes_main then earthBusRoutes_main.${fn}(${a}) end`)
 }
 
+// While a text field has the focus the game must not treat the keys as controls (it would drive the car, open menus...)
+export function typing(on) { engineLua(`if setCEFTyping then setCEFTyping(${on ? "true" : "false"}) end`) }
+
 export function onState(model) { state.value = model }
 
 // ---- small formatting helpers shared by the pages

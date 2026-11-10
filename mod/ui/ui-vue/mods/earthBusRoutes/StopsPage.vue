@@ -37,10 +37,10 @@
           <span class="plate huge" :style="{ background: b.colour, color: ink(b.colour) }">{{ b.ref || "My" }}</span>
           <div class="fields">
             <label>{{ t("meta.ref") }}
-              <input v-model="refText" type="text" maxlength="6" :placeholder="t('meta.refPh')" @keydown.stop @input="send" />
+              <input v-model="refText" type="text" maxlength="6" :placeholder="t('meta.refPh')" @keydown.stop @input="send" @focus="typing(true)" @blur="typing(false)" />
             </label>
             <label>{{ t("meta.name") }}
-              <input v-model="nameText" type="text" maxlength="60" :placeholder="autoName" @keydown.stop @input="send" />
+              <input v-model="nameText" type="text" maxlength="60" :placeholder="autoName" @keydown.stop @input="send" @focus="typing(true)" @blur="typing(false)" />
             </label>
           </div>
         </div>
@@ -61,9 +61,9 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import MiniMap from "./MiniMap.vue"
-import { call, plateInk } from "./store.js"
+import { call, plateInk, typing } from "./store.js"
 import { t } from "./i18n.js"
 
 const props = defineProps({ s: { type: Object, required: true } })
@@ -95,6 +95,7 @@ function send() {
   clearTimeout(timer)
   timer = setTimeout(() => call("uiBuildMeta", clean(refText.value).trim(), b.value.customColour || "", clean(nameText.value).trim()), 250)
 }
+onBeforeUnmount(() => { clearTimeout(timer); typing(false) })
 function setColour(c) { call("uiBuildMeta", clean(refText.value).trim(), c, clean(nameText.value).trim()) }
 function setMode(m) {
   call("uiBuildMode", m)

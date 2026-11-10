@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Text fields (station search, line number, name) work in the game: the game is told that a field has the focus (`setCEFTyping`), so the keys are no longer taken as controls.
+
 ## 0.3.0
 
 - **Manual mode, "Build your own route"**: choose the stations one after another (the nearest bus stations and stops, or a search

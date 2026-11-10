@@ -333,11 +333,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import BuildPage from "./BuildPage.vue"
 import StopsPage from "./StopsPage.vue"
 import { useEvents } from "@/services/events"
-import { state, call, onState, distance, plateInk, pad } from "./store.js"
+import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"
 
 const events = useEvents()
@@ -346,6 +346,7 @@ events.on("EarthBusRoutesState", onState)
 const PARTS = ["punctuality", "service", "comfort", "safety"]
 const rootEl = ref(null)
 const s = state
+onBeforeUnmount(() => typing(false))
 onMounted(() => {
   if (rootEl.value) rootEl.value.focus()
   call("uiState")

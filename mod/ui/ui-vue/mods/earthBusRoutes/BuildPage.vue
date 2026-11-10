@@ -34,7 +34,7 @@
         <button v-if="b.points.length > 1" class="btn ghost small-btn" @click="call('uiBuildUndo')">↶ {{ t("build.undo") }}</button>
       </div>
       <form class="search" @submit.prevent="runSearch">
-        <input v-model="q" type="text" maxlength="40" :placeholder="t('build.searchPh')" :aria-label="t('build.search')" @keydown.stop @keyup.esc.stop="clearSearch" @input="typing" />
+        <input v-model="q" type="text" maxlength="40" :placeholder="t('build.searchPh')" :aria-label="t('build.search')" @keydown.stop @keyup.esc.stop="clearSearch" @input="typed" @focus="typing(true)" @blur="typing(false)" />
         <button type="submit" class="btn" :disabled="q.trim().length < 2 || !!b.busy.search">{{ t("build.searchGo") }}</button>
         <button v-if="b.candKind === 'search'" type="button" class="btn ghost" @click="clearSearch">{{ t("build.nearAgain") }}</button>
       </form>
@@ -79,7 +79,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref } from "vue"
 import MiniMap from "./MiniMap.vue"
-import { call, distance } from "./store.js"
+import { call, distance, typing } from "./store.js"
 import { t } from "./i18n.js"
 
 const props = defineProps({ s: { type: Object, required: true } })
@@ -96,13 +96,13 @@ const clean = v => String(v).replace(/[\\"\u0000-\u001f]/g, " ").trim()
 
 function pick(id) { hover.value = null; call("uiBuildAdd", id) }
 function runSearch() { clearTimeout(timer); const v = clean(q.value); if (v.length >= 2) call("uiBuildSearch", v) }
-function typing() {
+function typed() {
   clearTimeout(timer)
   if (clean(q.value).length < 2) return
   timer = setTimeout(runSearch, 700)
 }
 function clearSearch() { clearTimeout(timer); q.value = ""; call("uiBuildClearSearch") }
-onBeforeUnmount(() => clearTimeout(timer))
+onBeforeUnmount(() => { clearTimeout(timer); typing(false) })
 
 function errText(e) {
   const key = "build.err." + e
