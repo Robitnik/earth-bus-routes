@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- **Three tabs at a station**: *From here* (lines that start at it), *To here* (lines that end at it), *Through here* (lines that call on their way). A circular line is in the first two. The tab with lines opens first; each shows how many lines it has.
+- **A line that ends here can be driven from its start**: Broumov to Náchod appears at Náchod under *To here*, and starts at Broumov.
+- **Two ways to get to the start**: "Teleport to the start and go" (as before), or "I will drive to the start": the GPS leads there, the HUD counts the distance, and the trip begins by itself when you arrive and stop (the first departure after the clock plus two minutes). A teleport or a new start cancels the wait.
+- **Through lines** start from this stop or from the first one, as before.
+- Needs data service 0.3.0 for the exact place of a station in a line (the order of stops); with an older service the tabs are guessed from the names of the line's ends (marked with ~).
+
 ## 0.3.2
 
 - Loops and roads driven out and back (line 363 at Police nad Metují): the stops of a PTv2 line get their places along the road in the

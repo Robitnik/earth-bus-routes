@@ -36,6 +36,12 @@
         </div>
       </header>
 
+      <div v-if="s && s.armed" class="armed-bar" role="status">
+        <span class="mini-plate">{{ s.armed.ref }}</span>
+        <span class="armed-text">{{ t("armed.text", { stop: s.armed.stopName, dist: dist(s.armed.dist) }) }}</span>
+        <button class="btn ghost slim" @click="call('uiCancelArmed')">{{ t("armed.cancel") }}</button>
+      </div>
+
       <main class="body">
         <!-- the add-on cannot work without BeamNG.Earth -->
         <section v-if="s && !s.earth" class="notice bad">
@@ -154,14 +160,21 @@
           </div>
           <div v-if="s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("lines.loading") }}</b><div class="muted">{{ t("lines.loadingHint") }}</div></div></div>
           <div v-if="s.error" class="notice bad"><p>{{ t("err.generic", { e: s.error }) }}</p></div>
+          <div class="tabs station-tabs" role="tablist">
+            <button v-for="k in TABS" :key="k" role="tab" :aria-selected="curTab === k" :class="{ on: curTab === k }" @click="call('uiSetTab', k)">
+              {{ t("tabs." + k) }}<span class="badge" :class="{ zero: !tabCount(k) }">{{ tabCount(k) }}</span>
+            </button>
+          </div>
+          <p class="sub tab-hint">{{ t("tabs." + curTab + "Hint") }}</p>
+          <div v-if="!tabLines.length" class="empty"><b>{{ t("tabs.empty") }}</b><div class="muted">{{ t("tabs.emptyHint") }}</div></div>
           <div class="lines">
-            <div v-for="ln in (s.lines || [])" :key="ln.id" class="line-row">
+            <div v-for="ln in tabLines" :key="ln.id" class="line-row">
               <span class="plate big" :style="{ background: ln.colour, color: ink(ln.colour) }">{{ ln.ref }}</span>
               <div class="line-body">
                 <div class="muted small">{{ [ln.network, ln.operator].filter(Boolean).join(" · ") }}</div>
                 <div class="variants">
                   <button v-for="v in ln.variants" :key="v.id" class="variant" :disabled="s.loading === 'route'" @click="call('uiSelectRoute', v.id)">
-                    {{ v.to && !v.ambiguous ? t("lines.variant", { to: v.to }) : v.label }}
+                    {{ variantText(v) }}<i v-if="v.approx" class="approx" :title="t('tabs.approx')">~</i>
                   </button>
                 </div>
               </div>
@@ -226,7 +239,7 @@
           <div class="card start" v-if="s.start">
             <h3>{{ t("start.title") }}</h3>
             <div class="seg" role="group">
-              <button :class="{ on: s.start.mode === 'here' }" @click="call('uiSetStartMode', 'here')">
+              <button v-if="s.start.place !== 'to'" :class="{ on: s.start.mode === 'here' }" @click="call('uiSetStartMode', 'here')">
                 {{ t("start.here") }}<small>{{ stopAt(s.start.index) }}</small>
               </button>
               <button :class="{ on: s.start.mode === 'first' }" @click="call('uiSetStartMode', 'first')">
@@ -266,7 +279,16 @@
               ⇄ {{ t("start.reverse") }}<small>{{ t("start.reverseHint", { to: s.route.from }) }}</small>
             </button>
 
-            <button class="btn go" :disabled="s.starting" @click="call('uiStart')">{{ s.starting ? t("start.teleporting") : t("start.go") }}</button>
+            <p v-if="s.start.place === 'to'" class="muted small">{{ t("start.endsHere") }}</p>
+            <div class="start-actions">
+            <button class="btn go" :disabled="s.starting" @click="call('uiStart')">
+              {{ s.starting ? t("start.teleporting") : (s.start.canDrive ? t("start.teleportGo") : t("start.go")) }}
+              <small v-if="s.start.canDrive && !s.starting">{{ stopAt(s.start.index) }} · {{ dist(s.start.dist) }}</small>
+            </button>
+            <button v-if="s.start.canDrive && !s.starting" class="btn drive" :disabled="!!s.armed" @click="call('uiDriveToStart')">
+              ➜ {{ t("start.drive") }}<small>{{ t("start.driveHint", { stop: stopAt(s.start.index) }) }}</small>
+            </button>
+            </div>
             <p v-if="s.error" class="warn">{{ s.error }}</p>
             <p class="muted small">{{ t("start.goHint") }}</p>
           </div>
@@ -353,6 +375,23 @@ onMounted(() => {
 })
 
 const screen = computed(() => (s.value ? s.value.screen : "nearby"))
+const TABS = ["from", "to", "through"]
+const curTab = computed(() => (s.value && s.value.tab) || "from")
+const tabCount = k => (s.value && s.value.tabCounts && s.value.tabCounts[k]) || 0
+// a circular line is in "from" and in "to"
+const inTab = (v, k) => (k === "from" ? v.place === "from" || v.place === "loop" : k === "to" ? v.place === "to" || v.place === "loop" : v.place === "through")
+const tabLines = computed(() => {
+  const k = curTab.value
+  return ((s.value && s.value.lines) || [])
+    .map(ln => ({ ...ln, variants: ln.variants.filter(v => inTab(v, k)) }))
+    .filter(ln => ln.variants.length)
+})
+function variantText(v) {
+  if (v.ambiguous) return v.label
+  if (curTab.value === "to" && v.from) return t("lines.variantFrom", { from: v.from })
+  if (curTab.value === "through" && v.from && v.to) return t("lines.variantThrough", { from: v.from, to: v.to })
+  return v.to ? t("lines.variant", { to: v.to }) : v.label
+}
 const tab = ref("near")
 watch(() => s.value && s.value.tab, v => { if (v) tab.value = v }, { immediate: true })
 const sure = ref(null)
@@ -552,6 +591,17 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .notice { padding: 16px; border-radius: 12px; background: var(--panel-2); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; line-height: 1.45;
   &.bad { box-shadow: inset 4px 0 0 var(--late); }
   .steps { color: var(--led); } }
+
+// ---- station tabs, armed bar
+.station-tabs { align-self: flex-start; button { font-size: 16px; padding: 7px 14px; } }
+.badge.zero { background: var(--panel-3); color: var(--muted); }
+.tab-hint { margin: -2px 0 2px; }
+.approx { margin-left: 6px; font-style: normal; color: var(--muted); font-weight: 400; }
+.armed-bar { display: flex; align-items: center; gap: 12px; padding: 8px 20px; background: var(--panel-3); border-bottom: 1px solid var(--hair); }
+.armed-text { flex: 1; min-width: 0; font-weight: 700; }
+.btn small { display: block; font-weight: 400; font-size: 12px; opacity: 0.85; margin-top: 1px; }
+.start-actions { position: sticky; bottom: -16px; display: flex; flex-direction: column; gap: 8px; padding: 10px 0 16px; margin-bottom: -16px; background: var(--panel-2); }
+.btn.drive { display: flex; flex-direction: column; align-items: flex-start; text-align: left; background: transparent; box-shadow: inset 0 0 0 2px var(--line); }
 
 // ---- tabs, my routes
 .tabs { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--panel-2);

@@ -64,11 +64,16 @@ function M.parseAround(data)
     local tags = e.tags or {}
     if e.type == 'relation' then
       if tags.type == 'route' then
-        local nodes = {}
+        local nodes, places = {}, {}
         for _, m in ipairs(e.members or {}) do
-          if m.type == 'node' then nodes[m.ref] = true end
+          if m.type == 'node' then
+            nodes[m.ref] = true
+            if m.i then places[m.ref] = { i = m.i, j = m.j or m.i } end     -- from the data service: the stop's place in the route
+          end
         end
-        out.routes[#out.routes + 1] = M.routeHead(e, tags, nodes)
+        local head = M.routeHead(e, tags, nodes)
+        head.places, head.n, head.ordered = places, e.n, e.ordered == true
+        out.routes[#out.routes + 1] = head
       end
     else
       local kind = nodeKind(tags)
@@ -192,6 +197,39 @@ function M.routesAt(station, routes)
     end
   end
   return out
+end
+
+-- Where a station is on a route: 'from' (the route starts here), 'to' (it ends here), 'loop' (both: a circular line), 'through'.
+-- Second result: true when it is only a guess (the data has no order of stops, so the ends are compared by name).
+local function sameName(a, b)
+  a, b = M.normName(a), M.normName(b)
+  if a == '' or b == '' then return false end
+  return a == b or a:find(b, 1, true) ~= nil or b:find(a, 1, true) ~= nil
+end
+
+function M.placeAt(station, route)
+  if route.ordered and route.n and route.n >= 2 then
+    local lo, hi
+    for id in pairs(station.nodeIds) do
+      local p = route.places and route.places[id]
+      if p then
+        lo = math.min(lo or p.i, p.i)
+        hi = math.max(hi or p.j, p.j)
+      end
+    end
+    if lo then
+      local first, last = lo == 1, hi == route.n
+      if first and last then return 'loop', false end
+      if first then return 'from', false end
+      if last then return 'to', false end
+      return 'through', false
+    end
+  end
+  local first, last = sameName(station.name, route.from), sameName(station.name, route.to)
+  if first and last then return 'loop', true end
+  if first then return 'from', true end
+  if last then return 'to', true end
+  return 'through', true
 end
 
 -- Routes with the same ref (and network) are one line: { ref, colour, network, operator, variants = { route... } }.

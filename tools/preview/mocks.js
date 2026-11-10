@@ -12,6 +12,7 @@ export const HUD_STATES = {
   free: { ...clone(base), scheduled: false, next: { ...base.next, sched: null, delta: null } },
   note: { ...clone(base), noteSeq: 1, notes: [{ text: "Moving with doors open", points: -50 }] },
   idle: { idle: true },
+  armed: { armed: { ref: "305", colour: "#2f9e8f", to: "Hradec Králové", stop: "Náchod, aut. nádraží", dist: 3420, units: "km/h" } },
   done: { finished: true, result: { grade: "A", points: 874 } },
   mph: { ...clone(base), units: "mph" },
 }
@@ -112,4 +113,21 @@ Object.assign(MENU_STATES, {
   buildstraight: { ...common2, screen: "build", stations, build: { ...build, straight: true, pathErr: "no path" } },
   buildstops: { ...common2, screen: "buildStops", stations, build: { ...build, points: chain, line: roadLine, km: 33.1, minutes: 52, stops: buildStops, ref: "310", colour: "#7f6bb7", customColour: "#7f6bb7" } },
   ownroute: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false } },
+})
+
+// ---- station tabs
+const tvars = [
+  { id: 200, label: "x", from: "Náchod", to: "Hradec Králové", place: "from" },
+  { id: 201, label: "x", from: "Hradec Králové", to: "Náchod", place: "to" },
+  { id: 202, label: "x", from: "Broumov", to: "Hradec Králové", place: "through" },
+  { id: 203, label: "x", from: "Police nad Metují", to: "Police nad Metují", place: "loop" },
+]
+const tlines = lines.slice(0, 4).map((l, i) => ({ id: i + 1, ref: l.ref, colour: l.colour, network: "IREDO", operator: "ČSAD", variants: [{ ...tvars[i], ref: l.ref }] }))
+Object.assign(MENU_STATES, {
+  tabfrom: { ...common2, screen: "lines", stations, station: stations[1], lines: tlines, tab: "from", tabCounts: { from: 2, to: 2, through: 1 } },
+  tabto: { ...common2, screen: "lines", stations, station: stations[1], lines: tlines, tab: "to", tabCounts: { from: 2, to: 2, through: 1 } },
+  tabthrough: { ...common2, screen: "lines", stations, station: stations[1], lines: tlines, tab: "through", tabCounts: { from: 2, to: 2, through: 1 } },
+  routeto: { ...common2, screen: "route", stations, station: stations[1], lines: tlines, tab: "to", tabCounts: { from: 2, to: 2, through: 1 }, route, armed: null,
+    start: { ...start, mode: "first", index: 1, place: "to", dist: 21400, canDrive: true } },
+  armedbar: { ...common2, screen: "nearby", stations, armed: { ref: "305", colour: "#2f9e8f", to: "Hradec Králové", stopName: "Náchod, aut. nádraží", dist: 3420 } },
 })

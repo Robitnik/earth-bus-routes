@@ -53,6 +53,28 @@ class Queries(unittest.TestCase):
             self.assertTrue(all(m["type"] == "node" and m["ref"] in ids for m in r["members"]))
             self.assertEqual(r["tags"], next(x["tags"] for x in a["elements"] if x["id"] == r["id"] and x["type"] == "relation"))
 
+    def test_slim_nearby_numbers_the_stops_of_a_route(self):
+        rel = {"type": "relation", "id": 5, "tags": {"type": "route", "public_transport:version": "2"}, "members": [
+            {"type": "way", "ref": 1, "role": ""}, {"type": "node", "ref": 11, "role": "stop"},
+            {"type": "node", "ref": 21, "role": "platform"}, {"type": "node", "ref": 22, "role": "platform"},
+            {"type": "node", "ref": 23, "role": "platform"}, {"type": "node", "ref": 21, "role": "platform"}]}
+        near = [{"type": "node", "id": i, "lat": 1, "lon": 1} for i in (21, 23)]
+        out = json.loads(d.slim_nearby(json.dumps({"elements": near + [rel]})))
+        r = out["elements"][-1]
+        self.assertEqual((r["n"], r["ordered"]), (4, True))          # four platforms; the stop position is not counted
+        by = {}
+        for m in r["members"]:
+            by.setdefault(m["ref"], m)
+        self.assertEqual((by[21]["i"], by[21]["j"]), (1, 4))         # the first and the last stop are one place: a loop
+        self.assertEqual(by[23]["i"], 3)
+        self.assertNotIn("j", by[23])
+        self.assertFalse(any(m["type"] == "way" for m in r["members"]))
+
+    def test_slim_nearby_unordered_when_ptv1(self):
+        rel = {"type": "relation", "id": 6, "tags": {"type": "route"}, "members": [{"type": "node", "ref": 1, "role": "stop"}, {"type": "node", "ref": 2, "role": "stop"}]}
+        out = json.loads(d.slim_nearby(json.dumps({"elements": [{"type": "node", "id": 1, "lat": 1, "lon": 1}, rel]})))
+        self.assertEqual((out["elements"][-1]["ordered"], out["elements"][-1]["n"]), (False, 2))
+
     def test_host_check(self):
         self.assertTrue(d.host_ok("127.0.0.1:47630", 47630))
         self.assertFalse(d.host_ok("evil.example:47630", 47630))

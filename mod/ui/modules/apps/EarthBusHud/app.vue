@@ -6,6 +6,20 @@
       <span class="idle-text">{{ tr("hud.idle.text") }}</span>
     </div>
 
+    <!-- the trip waits for the bus at its first stop -->
+    <div v-else-if="d.armed" class="armed">
+      <header class="blind">
+        <span class="plate">{{ d.armed.ref }}</span>
+        <span class="led dest">{{ d.armed.to }}</span>
+      </header>
+      <div class="armed-body">
+        <div class="armed-label">{{ tr("hud.armed") }}</div>
+        <div class="armed-stop">{{ d.armed.stop }}</div>
+        <div class="armed-dist">{{ armedDist }}</div>
+        <div class="armed-hint">{{ tr("hud.armedHint") }}</div>
+      </div>
+    </div>
+
     <!-- trip finished: the menu shows the details -->
     <div v-else-if="d.finished" class="idle done">
       <span class="grade">{{ d.result.grade }}</span>
@@ -103,6 +117,7 @@ const lang = (typeof navigator !== "undefined" && /^(uk|ru|be)/i.test(navigator.
 const TEXT = {
   en: {
     "hud.idle.plate": "Bus", "hud.idle.text": "No trip. Press Ctrl+Shift+B to pick a route.",
+    "hud.armed": "Drive to the start", "hud.armedHint": "The trip begins when you get there and stop.",
     "hud.done": "Trip finished: {points} points. Open the menu for details.", "hud.toggle": "Click to fold",
     "hud.openDoors": "Open the doors", "hud.closeDoors": "Close the doors and go", "hud.gettingOff": "{n} getting off", "hud.boarding": "{n} boarding",
     "hud.due": "due {time}", "hud.waiting": "{n} waiting", "hud.stopRequested": "Stop requested",
@@ -112,6 +127,7 @@ const TEXT = {
   },
   uk: {
     "hud.idle.plate": "Автобус", "hud.idle.text": "Рейсу немає. Ctrl+Shift+B: обрати маршрут.",
+    "hud.armed": "Їдьте до початку", "hud.armedHint": "Рейс почнеться, коли ви доїдете й зупинитесь.",
     "hud.done": "Рейс завершено: {points} балів. Подробиці в меню.", "hud.toggle": "Клік: згорнути",
     "hud.openDoors": "Відчиніть двері", "hud.closeDoors": "Зачиніть двері й рушайте", "hud.gettingOff": "виходить {n}", "hud.boarding": "заходить {n}",
     "hud.due": "за розкладом {time}", "hud.waiting": "чекає {n}", "hud.stopRequested": "Зупинку замовлено",
@@ -128,7 +144,17 @@ function tr(key, p) {
 const noteText = t => (TEXT[lang] && TEXT[lang]["note." + t]) || t
 
 // ---- the numbers
-const lineColour = computed(() => (d.value && d.value.route && d.value.route.colour) || "#4aa3df")
+const lineColour = computed(() => (d.value && ((d.value.route && d.value.route.colour) || (d.value.armed && d.value.armed.colour))) || "#4aa3df")
+const armedDist = computed(() => {
+  const a = d.value && d.value.armed
+  if (!a) return ""
+  const m = a.dist
+  if (a.units === "mph") {
+    const ft = m * 3.28084
+    return ft < 1000 ? Math.round(ft / 10) * 10 + " " + tr("ft") : (m / 1609.344).toFixed(1) + " " + tr("mi")
+  }
+  return m < 1000 ? Math.round(m / 10) * 10 + " " + tr("m") : (m / 1000).toFixed(1) + " " + tr("km")
+})
 // dark text on a light line colour, white on a dark one
 const lineInk = computed(() => {
   const m = /^#([0-9a-f]{6})$/i.exec(lineColour.value)
@@ -246,6 +272,13 @@ onMounted(() => {
   color: var(--ink-on-line);
   font-weight: 800;
 }
+.armed { display: flex; flex-direction: column; gap: 8px; margin: auto 0; }
+.armed .blind { cursor: default; }
+.armed-body { display: flex; flex-direction: column; gap: 2px; padding: 2px 4px; }
+.armed-label { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; }
+.armed-stop { font-size: 20px; font-weight: 800; line-height: 1.2; }
+.armed-dist { font-size: 34px; font-weight: 800; color: var(--line); line-height: 1.1; }
+.armed-hint { color: var(--muted); font-size: 13px; line-height: 1.3; }
 .idle.done .grade { flex: none; font-size: 30px; font-weight: 800; color: var(--line); }
 
 // ---- destination blind

@@ -9,6 +9,7 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 ## What you get
 
 - **Stops near you**: the bus stops and stations within 600 m, with the lines that call at each.
+- **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
 - **Lines and directions**: every line with its operator, network, length, ride time, stops and how often it runs through the day.
 - **Start where you want**: from the stop you stand at, or from the line's first stop; choose the departure time and the game
   clock jumps to it. The timetable is generated (OpenStreetMap almost never says how often a bus runs): city, regional and

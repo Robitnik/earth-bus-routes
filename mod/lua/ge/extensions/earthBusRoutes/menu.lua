@@ -37,7 +37,10 @@ function M.nearbyModel(stations, routes, lat, lon)
   return out
 end
 
--- Lines of one station with every variant (direction / branch) the data lists
+M.TABS = { 'from', 'to', 'through' }
+
+-- Lines of one station with every variant (direction / branch) the data lists. Each variant says where the station is on it
+-- (`place`: from | to | through | loop, `approx` when guessed).
 function M.linesModel(station, routes)
   local lines = M.linesAt(station, routes)
   local out = {}
@@ -47,7 +50,8 @@ function M.linesModel(station, routes)
     for _, r in ipairs(ln.variants) do seen[r.to or ''] = (seen[r.to or ''] or 0) + 1 end
     local used = {}
     for k, r in ipairs(ln.variants) do
-      local v = { id = r.id, label = osm.label(r), from = r.from, to = r.to, ref = r.ref }
+      local place, approx = osm.placeAt(station, r)
+      local v = { id = r.id, label = osm.label(r), from = r.from, to = r.to, ref = r.ref, place = place, approx = approx }
       -- several variants of one line with the same destination (a way via a village, a short run): tell them apart by the
       -- relation's own name ("309: Rychnov => Provodov => Náchod"), else by a counter
       if r.to and seen[r.to] > 1 then
@@ -61,6 +65,32 @@ function M.linesModel(station, routes)
     out[i] = { id = i, ref = ln.ref, colour = ln.colour, network = ln.network, operator = ln.operator, variants = variants }
   end
   return out
+end
+
+-- A circular line is in 'from' and in 'to'
+function M.inTab(variant, tab)
+  if tab == 'from' then return variant.place == 'from' or variant.place == 'loop' end
+  if tab == 'to' then return variant.place == 'to' or variant.place == 'loop' end
+  return variant.place == 'through'
+end
+
+-- { from = n, to = n, through = n }: lines with at least one variant in the tab
+function M.tabCounts(lines)
+  local c = { from = 0, to = 0, through = 0 }
+  for _, ln in ipairs(lines) do
+    for _, tab in ipairs(M.TABS) do
+      for _, v in ipairs(ln.variants) do
+        if M.inTab(v, tab) then c[tab] = c[tab] + 1 break end
+      end
+    end
+  end
+  return c
+end
+
+-- The tab to open first: 'from' when it has lines, else the first that has
+function M.firstTab(counts)
+  for _, tab in ipairs(M.TABS) do if counts[tab] > 0 then return tab end end
+  return 'from'
 end
 
 -- Index of the route's stop nearest to a point (the station the player is at)

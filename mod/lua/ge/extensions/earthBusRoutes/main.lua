@@ -7,11 +7,14 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.3.2'
+M.VERSION = '0.4.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
 M.START_NEAR_M = 80          -- already this near the start stop: no teleport
+M.ARRIVE_M = 45             -- a drive-to-the-start trip begins when the bus is this near the start stop
+M.ARRIVE_SPEED = 4         -- ... and slower than this (m/s)
+M.BOARD_GAP_S = 120        -- the departure is the first one after the arrival plus this much
 M.REVERSE_GAP_S = 300        -- the reverse trip leaves this long after the arrival
 
 local datasvc = require('earthBusRoutes/datasvc')
@@ -122,6 +125,8 @@ local function buildModel()
   end
   model.station = S.sel.station and model.stations and model.stations[S.sel.station] or nil
   model.lines = S.sel.lines
+  model.tabCounts, model.tab = S.sel.tabCounts, S.sel.tab
+  model.armed = M.armedModel()
   local route = currentRoute()
   if route then
     local c = currentTrips(route)
@@ -131,7 +136,8 @@ local function buildModel()
     local deps, tomorrow = menu.departuresModel(c.trips, idx, sec, 8)
     model.start = { mode = S.sel.mode or 'here', index = idx, stopName = route.stops[idx].name, timeSec = sec,
       timeLabel = menu.clockLabel(sec), deps = deps, tomorrow = tomorrow, dep = S.sel.dep or 1,
-      reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil }
+      reverseId = S.reverseOf[route.id] or nil, reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil,
+      place = S.sel.place, approx = S.sel.approx or false, dist = M.distToStop(route.stops[idx]), canDrive = M.distToStop(route.stops[idx]) > M.START_NEAR_M }
   end
   if S.result then model.result = S.result end
   model.stats = S.stats
@@ -725,7 +731,15 @@ function M.uiSelectStation(i)
   if not st then return end
   S.sel = { station = i, mode = 'here' }
   S.sel.lines = menu.linesModel(st, S.cell.routes)
+  S.sel.tabCounts = menu.tabCounts(S.sel.lines)
+  S.sel.tab = menu.firstTab(S.sel.tabCounts)
   S.screen = 'lines'
+  publish()
+end
+
+function M.uiSetTab(tab)
+  if tab ~= 'from' and tab ~= 'to' and tab ~= 'through' then return end
+  S.sel.tab = tab
   publish()
 end
 
@@ -742,6 +756,17 @@ function M.uiSelectRoute(id)
     local st = S.sel.station and stationRef(S.sel.station)
     local _, d = menu.nearestStopIndex(route, st and st.lat or route.stops[1].lat, st and st.lon or route.stops[1].lon)
     S.sel.mode = (st and d <= 250) and 'here' or 'first'
+    -- where the station is on the route, now that its stops are known (the lists only had a first guess)
+    S.sel.place, S.sel.approx = nil, false
+    if st and d <= 250 then
+      local idx = menu.nearestStopIndex(route, st.lat, st.lon)
+      S.sel.place = route.loop and 'loop' or (idx == 1 and 'from') or (idx == #route.stops and 'to') or 'through'
+    else
+      for _, ln in ipairs(S.sel.lines or {}) do
+        for _, v in ipairs(ln.variants) do if v.id == id then S.sel.place, S.sel.approx = v.place, v.approx end end
+      end
+    end
+    if S.sel.place == 'to' then S.sel.mode = 'first' end        -- a route that ends here cannot be started from here
     S.sel.timeSec = S.sel.timeSec or world.nowSec()
     S.screen = 'route'
     findReverse(route)
@@ -750,7 +775,7 @@ function M.uiSelectRoute(id)
 end
 
 function M.uiSetStartMode(mode)
-  S.sel.mode = (mode == 'first') and 'first' or 'here'
+  S.sel.mode = (mode == 'first' or S.sel.place == 'to') and 'first' or 'here'
   S.sel.dep = 1
   publish()
 end
@@ -845,6 +870,7 @@ local function beginTrip(plan)
 end
 
 function M.uiStart()
+  if S.armed then M.uiCancelArmed(true) end
   local plan, why = buildPlan()
   if not plan then S.err = why publish() return end
   S.err = nil
@@ -858,6 +884,80 @@ function M.uiStart()
   publish()
   world.navigate('play')
   world.toast('Taking you to ' .. tostring(stop.name) .. '…', 5)
+end
+
+-- ---- driving to the start: the trip waits for the bus ----------------------------------------------------------------------
+
+function M.distToStop(stop)
+  local pose = world.pose()
+  if not (pose and stop) then return 0 end
+  return geo.dist(pose.lat, pose.lon, stop.lat, stop.lon)
+end
+
+function M.armedModel()
+  local a = S.armed
+  if not a then return nil end
+  return { ref = a.ref, colour = a.colour, to = a.to, stopName = a.stop.name, dist = math.floor(M.distToStop(a.stop) + 0.5), mode = a.mode }
+end
+
+-- "Take me there": the GPS leads to the start stop; the trip begins by itself when the bus gets there
+function M.uiDriveToStart()
+  local route = currentRoute()
+  if not route then return end
+  if S.trip then S.err = 'A trip is already running' publish() return end
+  if S.armed then M.uiCancelArmed(true) end
+  local idx = startIndexFor(route)
+  local stop = route.stops[idx]
+  local sel = {}
+  for k, v in pairs(S.sel) do sel[k] = v end
+  sel.dep = 1
+  S.armed = { routeId = S.sel.routeId, ref = route.ref, colour = route.colour, to = route.to, stop = { name = stop.name, lat = stop.lat, lon = stop.lon },
+    mode = S.sel.mode, sel = sel, hudTimer = 0 }
+  S.err = nil
+  world.gpsRoute({ { lat = stop.lat, lon = stop.lon, name = stop.name } })
+  world.toast('Drive to ' .. tostring(stop.name) .. ': the trip begins there.', 6)
+  world.navigate('play')
+  publish()
+end
+
+function M.uiCancelArmed(silent)
+  if not S.armed then return end
+  S.armed = nil
+  world.gpsClear()
+  if not silent then
+    world.toast('Cancelled', 3)
+    guihooks.trigger('EarthBusRoutesHud', { idle = true })
+  end
+  publish()
+end
+
+local function armedFrame(dt)
+  local a = S.armed
+  local pose = world.pose()
+  if not pose then return end
+  local d = geo.dist(pose.lat, pose.lon, a.stop.lat, a.stop.lon)
+  a.hudTimer = a.hudTimer - dt
+  if a.hudTimer <= 0 then
+    a.hudTimer = 0.5
+    guihooks.trigger('EarthBusRoutesHud', { armed = { ref = a.ref, colour = a.colour, to = a.to, stop = a.stop.name, dist = d, units = S.opts.units or 'km/h' } })
+  end
+  if d <= M.ARRIVE_M and (pose.speed or 0) <= M.ARRIVE_SPEED then
+    -- the first departure after we got here, with a little time to board
+    local armed = a
+    S.armed = nil
+    world.gpsClear()
+    S.sel = armed.sel
+    S.sel.routeId, S.sel.timeSec, S.sel.dep = armed.routeId, (world.nowSec() + M.BOARD_GAP_S) % 86400, 1
+    local plan, why = buildPlan()
+    if not plan then
+      S.err = why
+      world.toast('Could not start: ' .. tostring(why), 5)
+      guihooks.trigger('EarthBusRoutesHud', { idle = true })
+      publish()
+      return
+    end
+    beginTrip(plan)
+  end
 end
 
 -- ---- finishing -----------------------------------------------------------------------------------------------------
@@ -963,6 +1063,7 @@ end
 -- The HUD app asks when it mounts (it may have been added after the trip started)
 function M.sendHud()
   if S.trip then guihooks.trigger('EarthBusRoutesHud', hudOf(S.trip))
+  elseif S.armed then S.armed.hudTimer = 0
   elseif S.result and S.result.show then guihooks.trigger('EarthBusRoutesHud', { finished = true, result = S.result })
   else guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
 end
@@ -1028,6 +1129,7 @@ function M.onUpdate(dtReal, dtSim)
   datasvc.update(dtReal or 0)
   if S.starting then startingFrame(dtReal or 0) end
   if S.trip then tripFrame(dtSim or 0) end
+  if S.armed and not S.trip and not S.starting then armedFrame(dtReal or 0) end
   -- keep the cell around the player ready, so the menu opens at once
   S.prefetchTimer = S.prefetchTimer - (dtReal or 0)
   if S.prefetchTimer <= 0 and not S.trip and not S.starting then
@@ -1069,6 +1171,7 @@ end
 
 -- A teleport the player asked for during a trip ends it (the bus is no longer where the trip is)
 function M.onBeamNGEarthTeleported()
+  if S.armed then M.uiCancelArmed(true) world.toast('Drive-to-start cancelled: you were teleported', 4) guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
   if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you were teleported', 4) end
 end
 

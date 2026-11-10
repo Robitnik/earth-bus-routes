@@ -80,4 +80,79 @@ function T.route_model_and_departures()
   assert(tomorrow and #late == 3)
 end
 
+local function route(over)
+  local r = { id = 1, ref = '9', network = 'N', from = 'A', to = 'B', ordered = true, n = 5, colour = '#112233',
+    nodes = { [10] = true, [11] = true }, places = { [10] = { i = 1, j = 1 } } }
+  for k, v in pairs(over or {}) do r[k] = v end
+  return r
+end
+local function station(name, ids)
+  local nodeIds = {}
+  for _, id in ipairs(ids) do nodeIds[id] = true end
+  return { name = name, nodeIds = nodeIds, platforms = {} }
+end
+
+function T.place_of_a_station_follows_the_stop_order()
+  local st = station('Stop', { 10 })
+  local at = function(i, j, n) local r = route({ n = n or 5, places = { [10] = { i = i, j = j or i } } }) return (osm.placeAt(st, r)) end
+  assert(at(1) == 'from' and at(5) == 'to' and at(3) == 'through')
+  assert(at(1, 5) == 'loop', 'a circular line starts and ends at its first stop')
+  -- a station with several platforms: the earliest and the latest of the route's stops there count
+  local two = station('Station', { 10, 11 })
+  local r = route({ places = { [10] = { i = 1, j = 1 }, [11] = { i = 5, j = 5 } } })
+  assert((osm.placeAt(two, r)) == 'loop')
+end
+
+function T.place_is_guessed_by_name_without_an_order()
+  local st = station('Náchod, autobusové nádraží', { 10 })
+  local r = route({ ordered = false, n = nil, places = {}, from = 'Náchod, autobusové nádraží', to = 'Broumov' })
+  local place, approx = osm.placeAt(st, r)
+  assert(place == 'from' and approx == true)
+  assert((osm.placeAt(st, route({ ordered = false, places = {}, from = 'Broumov', to = 'Náchod' }))) == 'to')
+  local place2, approx2 = osm.placeAt(station('Elsewhere', { 10 }), route({ ordered = false, places = {}, from = 'A', to = 'B' }))
+  assert(place2 == 'through' and approx2 == true)
+  -- an old data service (no places at all): the same guess
+  local old = route({ ordered = nil, n = nil, places = {}, from = 'Stop', to = 'Z' })
+  assert((osm.placeAt(station('Stop', { 10 }), old)) == 'from')
+end
+
+function T.tabs_split_lines_and_a_loop_is_in_two()
+  local st = station('Stop', { 10 })
+  local routes = {
+    route({ id = 1, ref = '1', places = { [10] = { i = 1, j = 1 } } }),
+    route({ id = 2, ref = '2', places = { [10] = { i = 5, j = 5 } } }),
+    route({ id = 3, ref = '3', places = { [10] = { i = 3, j = 3 } } }),
+    route({ id = 4, ref = '4', places = { [10] = { i = 1, j = 5 } } }),
+  }
+  local lines = menu.linesModel(st, routes)
+  local c = menu.tabCounts(lines)
+  assert(c.from == 2 and c.to == 2 and c.through == 1, c.from .. c.to .. c.through)
+  assert(menu.firstTab(c) == 'from')
+  assert(menu.firstTab({ from = 0, to = 0, through = 3 }) == 'through')
+  assert(menu.firstTab({ from = 0, to = 2, through = 3 }) == 'to')
+  for _, ln in ipairs(lines) do
+    for _, v in ipairs(ln.variants) do
+      assert(menu.inTab(v, 'through') == (v.place == 'through'))
+    end
+  end
+end
+
+function T.real_data_nachod_splits_lines()
+  local a = osm.parseAround(H.fixture('nachod_around_slim3'))
+  local stations = osm.groupStops(a.stops)
+  local seen = { from = 0, to = 0, through = 0 }
+  for _, s in ipairs(stations) do
+    local c = menu.tabCounts(menu.linesModel(s, a.routes))
+    for k, v in pairs(c) do seen[k] = seen[k] + v end
+  end
+  assert(seen.from > 0 and seen.through > 0, 'the recorded answer has lines that start and lines that pass')
+  -- the bus station of Náchod: lines 302 and 306 start there
+  for _, s in ipairs(stations) do
+    if s.name:find('autobusov') then
+      local lines = menu.linesModel(s, a.routes)
+      assert(menu.tabCounts(lines).from >= 1)
+    end
+  end
+end
+
 return T
