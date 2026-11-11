@@ -32,6 +32,7 @@ local shiftrun = require('earthBusRoutes/shiftrun')       -- shifts with a dispa
 local connections = require('earthBusRoutes/connections')
 local ghostrun = require('earthBusRoutes/ghostrun')     -- the ghost of the best trip (plan 006 D)
 local careersvc = require('earthBusRoutes/careersvc')       -- the profile, ranks, achievements, the driven-lines layer (plan 006, stage E)
+local busnetrun = require('earthBusRoutes/busnetrun')       -- the virtual bus network: moving dots on the map, a live station board (plan 007 T1)
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -167,6 +168,9 @@ local function buildModel()
   model.saved = M.savedModel()
   model.features = datasvc.state.features
   if S.build then model.build = M.buildModelOf() end
+  -- plan 007 T1: the buses of the lines round you (moving dots) and the board of the station on screen; nil when the option is off
+  model.buses, model.busNet = busnetrun.buses(), busnetrun.info()
+  model.board = busnetrun.boardModel(M.boardSpec())
   return model
 end
 M.model = buildModel
@@ -176,6 +180,21 @@ local function publish()
 end
 M.publish = publish
 datasvc.onProgress = function() publish() end          -- what the service is busy with changes: the menu shows it
+
+-- The station whose next departures the menu shows: the one of the lines screen, else the stop picked on the map of towns
+function M.boardSpec()
+  if S.screen == 'lines' and S.sel.station then
+    local st = stationRef(S.sel.station)
+    if st then
+      local pts = {}
+      for _, p in ipairs(st.platforms or {}) do pts[#pts + 1] = { lat = p.lat, lon = p.lon } end
+      return { name = st.name, lat = st.lat, lon = st.lon, pts = pts }
+    end
+  end
+  local sel = S.map and S.map.sel
+  if sel and S.screen == 'nearby' then return { name = sel.name, lat = sel.lat, lon = sel.lon } end
+  return nil
+end
 
 -- ---- data ----------------------------------------------------------------------------------------------------------
 
@@ -1754,6 +1773,7 @@ function M.onUpdate(dtReal, dtSim)
   if S.trip then tripFrame(dtSim or 0) end
   if S.armed and not S.trip and not S.starting then armedFrame(dtReal or 0) end
   shiftrun.frame(dtReal or 0, dtSim or 0)
+  busnetrun.frame(dtReal or 0)
   -- keep the cell around the player ready, so the menu opens at once
   S.prefetchTimer = S.prefetchTimer - (dtReal or 0)
   if S.prefetchTimer <= 0 and not S.trip and not S.starting then
@@ -1799,6 +1819,7 @@ function M.onBeamNGEarthTeleported()
   if S.armed then M.uiCancelArmed(true) world.toast('Drive-to-start cancelled: you were teleported', 4) guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
   if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you were teleported', 4) end
   shiftrun.onTeleport()
+  busnetrun.onTeleport()
 end
 
 function M.onVehicleSwitched()
@@ -1812,6 +1833,7 @@ function M.onExtensionUnloaded()
 end
 
 -- Shifts with a dispatcher (plan 006 B): the logic is in shift.lua, the game side in shiftrun.lua; main lends it what it needs.
+busnetrun.attach(M, S, { publish = publish })
 shiftrun.attach(M, S, { publish = publish, loadRoute = loadRoute, beginTrip = beginTrip, buildPlan = buildPlan, currentTrips = currentTrips,
   goPlay = goPlay, endClockAndGps = endClockAndGps })
 

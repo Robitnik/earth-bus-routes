@@ -1359,6 +1359,143 @@ class Connections(unittest.TestCase):
     def test_without_timetables_it_is_an_empty_answer(self):
         out = d.gtfs_connections(d.Gtfs(None), 25800, 3, sid="S2")
         self.assertEqual((out["arrivals"], out["lines"]), ([], 0))
+
+
+# ---- departures (plan 007 stage T1) ---------------------------------------------------------------------------------------------
+
+class Departures(unittest.TestCase):
+    """hub_gtfs: line 361 (S1 Alpha 50.00, S2 Beta 50.01, S3 Gamma 50.02) leaves Alpha at 07:00 and 09:00 on weekdays (stops at
+    +0, +600, +1500 s) and at 25:00 on Sundays; line 42 calls at the stop near Beta at 07:14 and 08:20; 55 leaves it at 07:12."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = pathlib.Path(cls.tmp.name)
+        hub_gtfs(cls.dir / "feed.zip")
+        d.build_gtfs_index(cls.dir / "feed.zip", cls.dir / "gtfs_XX.db", TODAY)
+        cls.gtfs = d.Gtfs(cls.dir, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+        cls.gtfs.preload()
+        cls.svc = d.Service(d.Cache(cls.dir / "cache"), upstream=lambda q: "{}", gtfs=cls.gtfs)
+        cls.httpd = d.QuietServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
+        cls.port = cls.httpd.server_address[1]
+        cls.httpd.RequestHandlerClass = d.make_handler(cls.svc, cls.port)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.gtfs.dbs["XX"].close()
+        cls.tmp.cleanup()
+
+    def get(self, path):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.putrequest("GET", path, skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.port}")
+        c.endheaders()
+        r = c.getresponse()
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+    def dep(self, **kw):
+        a = dict(lat=50.01, lon=16.0, t=7 * 3600 - 300, day=3, radius=3000, mins=30)
+        a.update(kw)
+        return d.gtfs_departures(self.gtfs, **a)
+
+    def listing(self, out):
+        by = {p["pid"]: p for p in out["patterns"]}
+        return [(by[tr["pid"]]["ref"], tr["start"]) for tr in out["trips"]]
+
+    def test_the_trips_in_the_window_come_with_their_pattern(self):
+        out = self.dep()                                         # Wednesday 06:55 + 30 min
+        self.assertEqual(self.listing(out), [("361", 7 * 3600), ("42", 7 * 3600), ("55", 7 * 3600 + 12 * 60)])
+        p361 = [p for p in out["patterns"] if p["ref"] == "361"][0]
+        self.assertEqual((p361["offs"], p361["from"], p361["to"]), ([0, 600, 1500], "Alpha, aut.st.", "Gamma"))
+        self.assertEqual(p361["id"], d.GTFS_ROUTE + p361["pid"])
+        self.assertEqual((out["source"], out["truncated"]), ("gtfs", False))
+        self.assertEqual(len({p["pid"] for p in out["patterns"]}), 3)
+
+    def test_the_window_has_two_ends(self):
+        # 09:00 is too late for a 30 minute window at 07:00 and the 06:00 trip of the expired service is not in the feed at all
+        self.assertNotIn(("361", 9 * 3600), self.listing(self.dep()))
+        self.assertIn(("361", 9 * 3600), self.listing(self.dep(t=8 * 3600 + 1800 + 600, mins=30)))
+        # the 07:00 trip called at Beta at 07:10; at 07:14 it is just gone (5 min back), at 07:16 it is not near any more
+        self.assertIn(("361", 7 * 3600), self.listing(self.dep(radius=300, t=7 * 3600 + 14 * 60, mins=1)))
+        self.assertNotIn(("361", 7 * 3600), self.listing(self.dep(radius=300, t=7 * 3600 + 16 * 60, mins=1)))
+
+    def test_the_radius_decides_which_stops_count(self):
+        # round Alpha (50.00) with 300 m: only the lines that call there
+        out = self.dep(lat=50.0, radius=300, t=7 * 3600, mins=5)
+        self.assertEqual(self.listing(out), [("361", 7 * 3600)])
+        self.assertEqual(out["stops"], 1)
+        far = d.gtfs_departures(self.gtfs, 55.0, 20.0, 7 * 3600, 3)
+        self.assertEqual((far["trips"], far["patterns"], far["stops"]), ([], [], 0))
+
+    def test_the_day_decides_and_trips_run_past_midnight(self):
+        self.assertEqual(self.dep(day=6)["trips"], [])            # Saturday: nothing
+        # Monday 01:05: Sunday's 25:00 run left at 01:00 Monday: start -86400 + 90000 = 3600 on Monday's clock
+        got = self.listing(self.dep(day=1, t=3900, mins=10))
+        self.assertIn(("361", 3600), got)
+        self.assertIn(("9", 3600), got)
+        # Sunday 24:55: the same run is still ahead, starting at 90000 on Sunday's clock
+        self.assertIn(("361", 90000), self.listing(self.dep(day=7, t=90000 - 300, mins=30)))
+        # Saturday: Sunday's run is tomorrow's, 90000 + 86400 on Saturday's clock
+        self.assertIn(("361", 90000 + 86400), self.listing(self.dep(day=6, t=90000 + 86400 - 300, mins=30)))
+
+    def test_trips_come_by_start(self):
+        out = self.dep(t=7 * 3600, mins=130)
+        starts = [tr["start"] for tr in out["trips"]]
+        self.assertEqual(starts, sorted(starts))
+        self.assertIn(("361", 9 * 3600), self.listing(out))
+        none = d.gtfs_departures(d.Gtfs(None), 50.0, 16.0, 7 * 3600, 3)
+        self.assertEqual((none["trips"], none["patterns"]), ([], []))
+
+    def test_the_answer_is_capped(self):
+        old = d.DEP_MAX_TRIPS
+        d.DEP_MAX_TRIPS = 1
+        try:
+            out = self.dep(t=7 * 3600, mins=130)
+            self.assertEqual((len(out["trips"]), len(out["patterns"]), out["truncated"]), (1, 1, True))
+        finally:
+            d.DEP_MAX_TRIPS = old
+        old = d.DEP_MAX_PATTERNS
+        d.DEP_MAX_PATTERNS = 2
+        try:
+            out = self.dep()
+            self.assertEqual((len(out["patterns"]), out["truncated"]), (2, True))
+            self.assertTrue(all(tr["pid"] in {p["pid"] for p in out["patterns"]} for tr in out["trips"]))
+        finally:
+            d.DEP_MAX_PATTERNS = old
+
+    def test_the_endpoint(self):
+        s, j = self.get("/v1/departures?lat=50.01&lon=16.0&t=25500&day=3&mins=30")
+        self.assertEqual((s, j["ok"], j["data"]["ready"]), (200, True, True))
+        self.assertEqual([tr["start"] for tr in j["data"]["trips"]], [25200, 25200, 25920])
+        pid = j["data"]["trips"][0]["pid"]
+        self.assertIn(d.GTFS_ROUTE + pid, [p["id"] for p in j["data"]["patterns"]])
+        self.assertIn("departures", self.get("/v1/info")[1]["features"])
+        s, j = self.get("/v1/departures?lat=50.2&lon=16.0&t=25500&day=3&r=500")             # nothing within 500 m
+        self.assertEqual((s, j["data"]["trips"]), (200, []))
+        self.assertEqual(self.get("/v1/departures?lat=50&lon=16&t=1&day=9")[0], 400)
+        self.assertEqual(self.get("/v1/departures?lat=99&lon=16&t=1&day=3")[0], 400)
+        self.assertEqual(self.get("/v1/departures?lat=50&lon=16&day=3")[0], 400)             # no t
+        self.assertEqual(self.get("/v1/departures?lat=50&lon=16&t=abc&day=3")[0], 400)
+
+    def test_without_timetables_the_endpoint_says_not_ready(self):
+        svc = d.Service(d.Cache(self.dir / "cache3"), upstream=lambda q: "{}")
+        httpd, _ = d.serve(0, service=svc)
+        port = httpd.server_address[1]
+        httpd.RequestHandlerClass = d.make_handler(svc, port)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            c.putrequest("GET", "/v1/departures?lat=50&lon=16&t=100&day=2", skip_host=True)
+            c.putheader("Host", f"127.0.0.1:{port}")
+            c.endheaders()
+            j = json.loads(c.getresponse().read().decode("utf-8"))
+            self.assertEqual((j["data"]["trips"], j["data"]["ready"]), ([], False))
+        finally:
+            httpd.shutdown()
+
+
 class SpeedLimits(unittest.TestCase):
     """The towns round a road, for the built-up / outside speed limit of the mod."""
 
