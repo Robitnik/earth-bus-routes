@@ -63,6 +63,73 @@ function M.gpsClear()
   if a and a.gpsClear then try(a.gpsClear) end
 end
 
+-- ---- markers in the world ----------------------------------------------------------------------------------------------
+-- A yellow zone on the road at the next stops, a pole and a text over it. Needs BeamNG.Earth 1.6 (toGame: lat/lon to the
+-- game's coordinates) and the game's debug drawer; without them, or when the first draw fails, no markers (the GPS line stays).
+local markersOff = false
+
+function M.markersAvailable()
+  local a = api()
+  return not markersOff and a ~= nil and a.has ~= nil and a.has('transform') == true and rawget(_G, 'debugDrawer') ~= nil
+end
+
+local function xyz(a, b, c)
+  if type(a) == 'number' then return a, b, c end
+  if a ~= nil then return a.x, a.y, a.z end
+end
+
+-- lat, lon to the game's x, y and the ground under it (z)
+local function toGround(lat, lon, refZ)
+  local x, y, z = xyz(api().toGame(lat, lon, 0))
+  if not x then return nil end
+  local gz = z
+  local be = rawget(_G, 'be')
+  if be and be.getSurfaceHeightBelow then
+    local h = be:getSurfaceHeightBelow(vec3(x, y, (refZ or z or 0) + 40))
+    if type(h) == 'number' and h > -1e5 then gz = h end
+  end
+  return x, y, gz or 0
+end
+
+-- items from markers.lua; refZ: the height of the player's vehicle (the ground is looked for from above it)
+function M.drawMarkers(items, refZ)
+  if not M.markersAvailable() or #items == 0 then return end
+  local ok, err = pcall(function()
+    local dd = debugDrawer
+    for _, it in ipairs(items) do
+      local pts = {}
+      for k, c in ipairs(it.zone.corners) do
+        local x, y, z = toGround(c[1], c[2], refZ)
+        if not x then return end
+        pts[k] = vec3(x, y, z + 0.08)
+      end
+      local near = it.kind == 'next'
+      local fill = near and ColorI(255, 200, 0, 120) or ColorI(255, 200, 0, 45)
+      local edge = near and ColorF(1, 0.8, 0, 1) or ColorF(1, 0.8, 0, 0.5)
+      if dd.drawTriangle then
+        dd:drawTriangle(pts[1], pts[2], pts[3], fill)
+        dd:drawTriangle(pts[1], pts[3], pts[4], fill)
+      end
+      for k = 1, 4 do dd:drawLine(pts[k], pts[k % 4 + 1], edge) end
+      -- the pole and the text over the middle of the zone
+      local mid = (pts[1] + pts[2] + pts[3] + pts[4]) * 0.25
+      local top = vec3(mid.x, mid.y, mid.z + (near and 7 or 4))
+      dd:drawLine(mid, top, edge)
+      dd:drawSphere(top, near and 0.4 or 0.25, edge)
+      local text = require('earthBusRoutes/markers').label(it)
+      if dd.drawTextAdvanced then
+        dd:drawTextAdvanced(top + vec3(0, 0, 0.8), text, ColorF(1, 1, 1, 1), true, false, ColorI(0, 0, 0, near and 170 or 110))
+      elseif dd.drawText then
+        dd:drawText(top + vec3(0, 0, 0.8), String(text), ColorF(1, 1, 1, 1))
+      end
+    end
+  end)
+  if not ok then
+    markersOff = true
+    log('W', TAG, 'world: markers off: ' .. tostring(err))
+  end
+end
+
 function M.toast(text, seconds)
   local a = api()
   if a and a.notify then try(a.notify, text, seconds or 5) return end

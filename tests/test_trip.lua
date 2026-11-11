@@ -288,4 +288,40 @@ function T.the_timetable_follows_the_road_not_one_speed()
   assert(cm > 40 and cm < 90, cm)
 end
 
+function T.markers_lay_out_a_zone_on_the_right_of_the_road()
+  local markers = require('earthBusRoutes/markers')
+  local r = route()
+  local st = r.stops[3]
+  local z = assert(markers.zone(r, st.along))
+  assert(#z.corners == 4 and z.centre)
+  -- the zone is a rectangle of the wanted size, on the right of the way of travel, near the road
+  local function d(a, b) return geo.dist(a[1], a[2], b[1], b[2]) end
+  assert(math.abs(d(z.corners[1], z.corners[2]) - markers.LENGTH_M) < 0.5)
+  assert(math.abs(d(z.corners[2], z.corners[3]) - markers.WIDTH_M) < 0.5)
+  local a, off = geo.along(r.path, r.cum, z.centre[1], z.centre[2], st.along - 50, st.along + 50)
+  assert(math.abs(off - markers.LANE_OFFSET_M) < 0.8 and math.abs(a - st.along) < 5, off)
+  assert(geo.sideOf(r.path, r.cum, st.along, z.centre[1], z.centre[2]) > 0, 'on the right')
+  assert(markers.zone({ path = {} }, 0) == nil)
+end
+
+function T.markers_follow_the_trip_and_show_only_what_is_near()
+  local markers = require('earthBusRoutes/markers')
+  local r = route()
+  local t = newTrip(r)
+  local items = markers.plan(t)
+  assert(#items >= 1 and items[1].kind == 'next' and items[1].index == 1)
+  for _, it in ipairs(items) do assert(it.ahead <= markers.SHOW_M) end
+  t.idx, t.along = 4, r.stops[4].along - 300
+  local items2 = markers.plan(t)
+  assert(items2[1].index == 4 and items2[1].kind == 'next')
+  for k = 2, #items2 do assert(items2[k].kind == 'soon') end
+  t.idx, t.along = #r.stops, r.stops[#r.stops].along - 100
+  assert(#markers.plan(t) == 1, 'the last stop: nothing after it')
+  t.idx, t.along = 4, r.stops[4].along - 5000
+  assert(#markers.plan(t) == 0, 'too far to mark')
+  local text = markers.label({ kind = 'next', ref = '305', to = 'Hradec', name = 'Šimkova', waiting = 3 })
+  assert(text:find('305') and text:find('Šimkova') and text:find('3 waiting'))
+  assert(markers.label({ kind = 'soon', name = 'X' }) == 'X')
+end
+
 return T

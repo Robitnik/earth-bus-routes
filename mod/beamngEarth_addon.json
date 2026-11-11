@@ -34,6 +34,17 @@
       "help": "1 = real speed. Higher values make the trip clock (and the sky) run faster."
     },
     {
+      "key": "markers",
+      "label": "Stop markers in the world",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "A yellow zone on the road at the next stops, with the line and the stop over it."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

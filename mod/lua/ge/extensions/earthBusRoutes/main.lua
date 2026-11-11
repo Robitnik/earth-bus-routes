@@ -23,6 +23,7 @@ local schedule = require('earthBusRoutes/schedule')
 local trip = require('earthBusRoutes/trip')
 local menu = require('earthBusRoutes/menu')
 local builder = require('earthBusRoutes/builder')
+local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
 
@@ -1278,6 +1279,28 @@ local function startingFrame(dt)
       publish()
     end
   end
+end
+
+-- The markers of the next stops (every frame: the debug drawer shows what is drawn in the frame)
+function M.onPreRender()
+  if not S.earth or S.opts.markers == 'off' then return end
+  local items
+  if S.trip and not S.trip.finished then
+    items = markers.plan(S.trip)
+  elseif S.armed then
+    local route = S.routes[S.armed.routeId]
+    if route and S.armed.stop.along then
+      items = markers.planStart(route, { along = S.armed.stop.along, name = S.armed.stop.name, index = 1 })
+    end
+  end
+  if not items or #items == 0 then return end
+  local veh = world.vehicle()
+  local z
+  if veh and veh.getPosition then
+    local ok, p = pcall(function() return veh:getPosition() end)
+    if ok and p then z = p.z end
+  end
+  world.drawMarkers(items, z)
 end
 
 function M.onUpdate(dtReal, dtSim)
