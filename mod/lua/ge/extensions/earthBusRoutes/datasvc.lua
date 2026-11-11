@@ -93,7 +93,8 @@ function M.lines(ref, lat, lon, cb, fast)
 end
 -- the cities, towns and villages round a point (the map of towns)
 function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
-function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
+-- low: a background load (the virtual bus network): an urgent request of the player may cancel it
+function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id), cb, low and { low = true } or nil) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
 function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
@@ -107,6 +108,13 @@ function M.depot(lat, lon, cb) M.get(('/v1/depot?lat=%.4f&lon=%.4f'):format(lat,
 function M.connections(lat, lon, t, day, ref, cb)
   local path = ('/v1/connections?lat=%.5f&lon=%.5f&t=%d&day=%d&win=8'):format(lat, lon, t, day)
   if ref and ref ~= '' then path = path .. '&ref=' .. http.urlencode(tostring(ref)) end
+  M.get(path, cb, { fast = true, total = 10 })
+end
+
+-- the trips of the timetables that call within r metres of a point between t - 5 min and t + mins (t: s from midnight, day: 1 Monday
+-- .. 7 Sunday): { patterns = { {pid, id, ref, head, from, to, offs} }, trips = { {pid, start} } } (plan 007: the virtual buses)
+function M.departures(lat, lon, t, day, mins, cb)
+  local path = ('/v1/departures?lat=%.4f&lon=%.4f&r=3000&t=%d&day=%d&mins=%d'):format(lat, lon, math.floor(t), math.floor(day), math.floor(mins or 30))
   M.get(path, cb, { fast = true, total = 10 })
 end
 

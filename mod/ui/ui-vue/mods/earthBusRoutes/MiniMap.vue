@@ -56,6 +56,21 @@
     <text v-if="hoverDot" :x="hoverDot.x > W - 190 ? hoverDot.x - 10 : hoverDot.x + 10" :y="hoverDot.y - 8" class="tip"
           :text-anchor="hoverDot.x > W - 190 ? 'end' : 'start'">{{ short(hoverDot.name) }}</text>
 
+    <!-- the buses of the lines round you (plan 007): a dot in the line's colour, pointing the way it goes -->
+    <g v-for="b in busDots" :key="'b' + b.key" class="bus" :class="[b.state, { sel: selectedBus === b.key }]" @click.stop="emit('bus', b.key)">
+      <circle :cx="b.x" :cy="b.y" r="12" class="hit" />
+      <circle v-if="selectedBus === b.key" :cx="b.x" :cy="b.y" r="11" class="ring" />
+      <path :transform="`translate(${b.x} ${b.y}) rotate(${b.heading})`" d="M0 -9.5 L5 -3 L-5 -3 Z" class="nose" :fill="b.colour" />
+      <circle :cx="b.x" :cy="b.y" r="6" class="body" :fill="b.colour" />
+    </g>
+    <g v-if="busChip" class="bchip" :transform="`translate(${busChip.x} ${busChip.y})`" @click.stop="emit('bus', null)">
+      <rect :width="busChip.w" :height="busChip.h" rx="6" class="chip" />
+      <rect :width="busChip.pw" :height="busChip.h - 8" x="4" y="4" rx="4" :fill="busChip.colour" />
+      <text :x="4 + busChip.pw / 2" y="17.5" class="ref" :style="{ fill: busChip.ink }">{{ busChip.ref }}</text>
+      <text :x="busChip.pw + 10" y="17.5" class="to">→ {{ busChip.head }}</text>
+      <text :x="busChip.pw + 10" y="33" class="nx">{{ busChip.sub }}</text>
+    </g>
+
     <!-- stations already chosen -->
     <g v-for="(p, i) in pointDots" :key="'p' + i" class="chosen">
       <circle :cx="p.x" :cy="p.y" r="11" class="ring" />
@@ -67,6 +82,8 @@
 
 <script setup>
 import { computed, ref } from "vue"
+import { plateInk } from "./store.js"
+import { t } from "./i18n.js"
 
 const props = defineProps({
   points: { type: Array, default: () => [] },     // chosen stations: { lat, lon, name }
@@ -83,8 +100,10 @@ const props = defineProps({
   selected: { type: [Number, String], default: null },
   tracks: { type: Array, default: () => [] },     // lines driven: { ref, pts: [[lat, lon], ...] }
   visited: { type: Object, default: null },       // { towns: [{ name, lat, lon }], stations: [{ name, lat, lon }] }: stopped there before
+  buses: { type: Array, default: () => [] },      // buses of the lines: { key, ref, colour, head, lat, lon, heading, state, next, nextIn, late }
+  selectedBus: { type: String, default: null },
 })
-const emit = defineEmits(["pick", "hover", "place", "stop"])
+const emit = defineEmits(["pick", "hover", "place", "stop", "bus"])
 const hoverStop = ref(null)
 
 const W = 460
@@ -169,6 +188,32 @@ const candDots = computed(() => props.cands
   .map(c => ({ ...project(c.lat, c.lon), id: c.id, name: c.name, station: c.station, ahead: c.ahead }))
   .filter(c => c.x > 8 && c.x < W - 8 && c.y > 8 && c.y < H - 8))
 const stopDots = computed(() => props.stops.map(s => ({ ...project(s.lat, s.lon), chosen: s.chosen, on: s.on })))
+
+const busDots = computed(() => props.buses
+  .map(b => ({ ...project(b.lat, b.lon), key: b.key, colour: b.colour || "#8aa", heading: b.heading || 0, state: b.state }))
+  .filter(b => b.x > 3 && b.x < W - 3 && b.y > 3 && b.y < H - 3))
+const sBus = computed(() => (props.selectedBus ? props.buses.find(b => b.key === props.selectedBus) : null))
+// the chip of the chosen bus: "305 → Hradec Králové" and the stop it is heading for / standing at
+const busChip = computed(() => {
+  const b = sBus.value
+  if (!b) return null
+  const d = busDots.value.find(x => x.key === b.key)
+  if (!d) return null
+  const next = b.next ? b.next : ""
+  const sub = !next ? "" : (b.state === "stop" ? t("bus.at", { stop: next }) : t("bus.next", { stop: next }))
+  const head = shorten(b.head, 24)
+  const pw = Math.max(30, String(b.ref).length * 9 + 14)
+  const w = pw + 18 + Math.max(String(head).length + 2, shorten(sub, 34).length) * 6.6
+  const h = 42
+  let x = d.x + 12, y = d.y - h - 6
+  if (x + w > W - 2) x = d.x - 12 - w
+  if (y < 2) y = d.y + 14
+  return { x, y, w, h, pw, ref: b.ref, head, colour: b.colour, ink: plateInk(b.colour), sub: shorten(sub, 34) }
+})
+function shorten(n, max) {
+  n = String(n || "")
+  return n.length > max ? n.slice(0, max - 1) + "…" : n
+}
 
 const youDot = computed(() => (props.you ? project(props.you.lat, props.you.lon) : null))
 const FS = { city: 17, town: 14, village: 11.5 }
@@ -278,6 +323,15 @@ function short(n) {
   .lbl { fill: var(--ink); text-anchor: middle; font-weight: 700; pointer-events: none; }
   &:hover .chip, &.sel .chip { fill: var(--line); stroke: var(--line); }
   &:hover .lbl, &.sel .lbl { fill: var(--ink-on-line); } }
+.bus { cursor: pointer;
+  .hit { fill: transparent; }
+  .body { stroke: #0b1519; stroke-width: 1.8; } .nose { stroke: #0b1519; stroke-width: 1.2; stroke-linejoin: round; }
+  .ring { fill: none; stroke: #fff; stroke-width: 1.8; }
+  &.stop .body { stroke: #fff; stroke-width: 1.4; } &.wait { opacity: 0.6; }
+  &:hover .body { stroke: #fff; } }
+.bchip { cursor: pointer;
+  .chip { fill: #16252d; fill-opacity: 0.96; stroke: rgba(255, 255, 255, 0.45); stroke-width: 1; }
+  .ref { text-anchor: middle; font-size: 13px; font-weight: 800; } .to { fill: var(--ink); font-size: 12.5px; font-weight: 700; } .nx { fill: var(--muted); font-size: 11.5px; } }
 .you { .halo { fill: rgba(255, 255, 255, 0.3); stroke: #fff; stroke-width: 1.5; } .core { fill: #fff; stroke: #0b1519; stroke-width: 2; } }
 .chosen {
   .ring { fill: var(--line); stroke: #0b1519; stroke-width: 2.5; }

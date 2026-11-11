@@ -266,3 +266,38 @@ Object.assign(MENU_STATES, {
   mapdriven: { ...common2, screen: "nearby", stations, tab: "map", career: { on: true }, profile, map: { towns, stops: mapStops, sel: null } },
   resultcareer: { ...MENU_STATES.result, career: { on: true }, result: { ...MENU_STATES.result.result, career: { earned: 148, unlocked: ["first_s", "km_100_trip"], rankUp: "driver" } } },
 })
+
+// ---- plan 007 T1: the buses of the lines on the map and the live board of a station
+const BC = { "305": "#2f9e8f", "360": "#d8a02b", "361": "#4a6fc7", "363": "#c0572b", "375": "#8a4fb0" }
+const bus = (key, ref, head, lat, lon, heading, state, next, late = 0) => ({ key, ref, colour: BC[ref], head, lat, lon, heading, state, next, nextIn: 120, late })
+const buses = [
+  bus("305@1", "305", "Hradec Králové", 50.5351, 16.2328, 80, "stop", "Police n.Met.,aut.st."),
+  bus("305@2", "305", "Broumov", 50.5111, 16.2084, 20, "run", "Velké Petrovice,hlavní silnice", 2),
+  bus("305@3", "305", "Hradec Králové", 50.5462, 16.2661, 245, "run", "Hlavňov,most"),
+  bus("360@1", "360", "Hlavňov, točna", 50.5398, 16.2301, 350, "run", "Police n.Met.,nákupní centrum"),
+  bus("361@1", "361", "Police nad Metují, aut. st.", 50.5364, 16.2369, 100, "run", "Police n.Met.,škola"),
+  bus("361@2", "361", "Náchod", 50.5199, 16.2125, 215, "run", "Velké Petrovice,hlavní silnice"),
+  bus("363@1", "363", "Hlavňov, chata Hvězda", 50.5468, 16.2618, 60, "run", "Hlavňov,most"),
+  bus("375@1", "375", "Nové Město nad Metují", 50.5297, 16.2294, 190, "run", "Police n.Met.,Ostašská", 5),
+  bus("375@2", "375", "Broumov", 50.5568, 16.2142, 330, "wait", "Bukovice"),
+]
+const board = {
+  name: "Police n.Met.,aut.st.", lines: 6, loading: false,
+  rows: [
+    { key: "a", ref: "305", colour: BC["305"], head: "Hradec Králové", time: "07:36", inMin: 0, late: 0, state: "stop" },
+    { key: "b", ref: "361", colour: BC["361"], head: "Náchod", time: "07:41", inMin: 5, late: 2, state: "run" },
+    { key: "c", ref: "360", colour: BC["360"], head: "Hlavňov, točna", time: "07:48", inMin: 12, late: 0, state: "run" },
+    { key: "d", ref: "375", colour: BC["375"], head: "Broumov, aut. nádraží", time: "07:55", inMin: 19, late: 0, state: "sched" },
+    { key: "e", ref: "363", colour: BC["363"], head: "Hlavňov, chata Hvězda", time: "08:10", inMin: 34, late: 0, state: "sched" },
+  ],
+}
+Object.assign(MENU_STATES, {
+  mapbuses: { ...common2, screen: "nearby", stations, tab: "map", buses, busNet: { lines: 6, loading: false, buses: buses.length },
+    map: { towns, stops: mapStops, focus: { id: 7, name: "Police nad Metují", lat: 50.5351, lon: 16.2328, radius: 3500 }, focusStops: policeStops, sel: null } },
+  mapboard: { ...common2, screen: "nearby", stations, tab: "map", buses, busNet: { lines: 6, loading: false, buses: buses.length }, board,
+    map: { towns, stops: mapStops, focus: { id: 7, name: "Police nad Metují", lat: 50.5351, lon: 16.2328, radius: 3500 }, focusStops: policeStops,
+      sel: { id: 1, name: "Police n.Met.,aut.st.", kind: "stop", dist: 12400, lat: 50.5351, lon: 16.2328,
+        lines: ["305", "360", "361", "363", "375"].map(r => ({ ref: r, colour: BC[r] })) } } },
+  linesboard: { ...common2, screen: "lines", stations, ...sel, board, buses, busNet: { lines: 6, loading: false, buses: buses.length } },
+  linesboardwait: { ...common2, screen: "lines", stations, ...sel, board: { name: "Police n.Met.,aut.st.", rows: [], lines: 0, loading: true }, busNet: { lines: 0, loading: true, buses: 0 } },
+})

@@ -85,4 +85,25 @@ function T.an_urgent_request_takes_the_lane_of_a_prefetch()
   cleanup()
 end
 
+function T.departures_ask_the_timetables_on_the_second_lane_and_a_background_route_is_low()
+  local ds, answer, running, reqs = setup()
+  local got
+  ds.departures(50.01234, 16.0, 25200.7, 3, 30, function(d) got = d end)
+  ds.update(0.1)
+  assert(#reqs == 1 and reqs[1].path == '/v1/departures?lat=50.0123&lon=16.0000&r=3000&t=25200&day=3&mins=30', reqs[1].path)
+  answer(reqs[1].path, '{"patterns":[],"trips":[{"pid":1,"start":25200}]}')
+  ds.update(0.1)
+  assert(got and got.trips[1].start == 25200)
+  -- a background route gives way to an urgent request
+  for i = 1, 3 do ds.route(100 + i, function() end, true) end
+  ds.update(0.1)
+  assert(running() == 3)
+  ds.towns(50.5, 16.2, function() end)
+  ds.update(0.1)
+  local cancelled = 0
+  for _, r in ipairs(reqs) do if r.state == 'cancelled' then cancelled = cancelled + 1 end end
+  assert(cancelled == 1, 'one background route gave way')
+  cleanup()
+end
+
 return T

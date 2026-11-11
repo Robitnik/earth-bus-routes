@@ -166,6 +166,17 @@
       "help": "Points for the indicator when you pull out of a stop and for keeping to the speed limit (+10 km/h allowed), and the limit sign on the HUD."
     },
     {
+      "key": "busNet",
+      "label": "Buses of the lines on the map",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "The buses of the lines round you run to their timetables: moving dots on the map in the menu and a live board of the next departures at a station. Nothing is spawned in the world."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

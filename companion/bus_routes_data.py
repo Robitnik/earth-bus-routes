@@ -28,6 +28,10 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
                                         the lines arriving at a stop (and the stops within 150 m of it) within +-win minutes of
                                         t (seconds from midnight) on weekday day (1 Monday .. 7 Sunday), for transfers; the
                                         line `ref` itself is left out. From the timetables on this computer only.
+  GET /v1/departures?lat=..&lon=..&t=..&day=..[&r=3000&mins=30]
+                                        the trips of the timetables that call at a stop within r metres between t - 5 min and
+                                        t + mins (t in seconds from midnight of weekday day): {"patterns": [{pid, id (for
+                                        /v1/route), ref, head, from, to, offs}], "trips": [{pid, start}]}. Timetables only.
 
 Every answer is {"ok": true, "cached": bool, "data": <Overpass JSON>} or {"ok": false, "error": "..."}.
 Run it from BeamNG.Earth's Add-ons page (a "companion"), or by hand: python bus_routes_data.py [--port N] [--cache DIR]
@@ -1680,6 +1684,83 @@ def gtfs_connections(gtfs, t, day, win_min=8, sid=None, lat=None, lon=None, ref=
     return out
 
 
+# ---- departures (plan 007, stage T1) -------------------------------------------------------------------------------------------
+# The trips of the timetables that run round a point in the next minutes: the mod's virtual bus network (busnet.lua) puts a moving
+# dot on the map for each and a station board from them. A trip is listed when it calls at a stop within the radius at a time in
+# [t - DEP_BACK_S, t + mins]. The road of a pattern comes from /v1/route?id=<id> (GTFS_ROUTE + pid), as for any line. No network.
+DEP_RADIUS_M = 3000
+DEP_BACK_S = 300             # a bus that called at a stop of the area this long ago is still near it
+DEP_MAX_TRIPS = 600
+DEP_MAX_PATTERNS = 160
+FEATURES.append("departures")
+
+
+def gtfs_departures(gtfs, lat, lon, t, day, radius=DEP_RADIUS_M, mins=30):
+    """{"patterns": [{pid, id (relation id for /v1/route), ref, head, from, to, offs: [s from the start, one per stop]}],
+    "trips": [{pid, start}] by start, "stops": n stops in the area, "source": "gtfs", "truncated": bool}. `start` is in seconds
+    from midnight of weekday `day` (1 Monday .. 7 Sunday) and may be negative (last night's trips that run on past midnight) or
+    pass 86400 (tomorrow's first ones). Empty lists when no timetables cover the point."""
+    radius = max(200.0, min(10000.0, float(radius)))
+    mins = max(1, min(120, int(mins)))
+    lo, hi = t - DEP_BACK_S, t + mins * 60
+    out = {"patterns": [], "trips": [], "stops": 0, "source": "gtfs", "truncated": False}
+    days = ((0, day), (-86400, (day - 2) % 7 + 1), (86400, day % 7 + 1))      # (shift, weekday of the service)
+    found = []                                                          # (pid, start)
+    info = {}
+    with gtfs._lock:
+        for db in gtfs.dbs.values():
+            near = gtfs._stops_near(db, lat, lon, radius)
+            if not near:
+                continue
+            out["stops"] += len(near)
+            meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
+            sids = [r[0] for r in near]
+            hits = {}
+            for i in range(0, len(sids), 400):
+                chunk = sids[i:i + 400]
+                q = ("SELECT sp.pid, sp.pos, p.ref, p.head, p.stops, p.offs FROM sp JOIN patterns p USING(pid) "
+                     f"WHERE sp.sid IN ({','.join('?' * len(chunk))})")
+                for pid, pos, ref, head, stops, offs in db.execute(q, chunk).fetchall():
+                    h = hits.setdefault(pid, [ref, head, stops, offs, []])
+                    h[4].append(pos)
+            names = {}
+            for pid, (ref, head, stops, offs, poss) in hits.items():
+                ol = [int(x) for x in offs.split(",")]
+                here = sorted({ol[p] for p in poss if p < len(ol)})
+                if not here:
+                    continue
+                starts = Gtfs._starts(db, pid, meta)
+                got = False
+                for shift, dd in days:
+                    for st in starts.get(str(dd), []):
+                        s0 = st + shift
+                        if s0 + here[-1] < lo:
+                            continue
+                        if s0 + here[0] > hi:
+                            break
+                        if any(lo <= s0 + o <= hi for o in here):
+                            found.append((pid, s0))
+                            got = True
+                if got:
+                    sl = stops.split(",")
+                    info[pid] = {"pid": pid, "id": GTFS_ROUTE + pid, "ref": ref, "head": head or "",
+                                 "from": gtfs._name_of(db, sl[0], names), "to": gtfs._name_of(db, sl[-1], names), "offs": ol}
+    found.sort(key=lambda f: (f[1], f[0]))
+    if len(found) > DEP_MAX_TRIPS:
+        found, out["truncated"] = found[:DEP_MAX_TRIPS], True
+    used = []
+    for pid, s0 in found:
+        out["trips"].append({"pid": pid, "start": s0})
+        if pid not in used:
+            used.append(pid)
+    if len(used) > DEP_MAX_PATTERNS:
+        keep = set(used[:DEP_MAX_PATTERNS])
+        out["trips"] = [tr for tr in out["trips"] if tr["pid"] in keep]
+        used, out["truncated"] = used[:DEP_MAX_PATTERNS], True
+    out["patterns"] = [info[pid] for pid in used]
+    return out
+
+
 def default_cache_dir():
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     return pathlib.Path(base) / "earth-bus-routes" / "cache"
@@ -2334,6 +2415,14 @@ def make_handler(service, port):
                         return self.fail(400, "sid or lat / lon needed")
                     ans = gtfs_connections(service.gtfs, float(q["t"][0]), day, int(q.get("win", ["8"])[0]), sid, lat, lon,
                                            clean_ref(q["ref"][0]) if q.get("ref") else None)
+                    return self.send_json(200, b'{"ok":true,"cached":true,"data":' + json.dumps(ans, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"}")
+                if u.path == "/v1/departures":
+                    lat, lon = float(q["lat"][0]), float(q["lon"][0])
+                    t, day = float(q["t"][0]), int(q["day"][0])
+                    if not (-85 <= lat <= 85 and -180 <= lon <= 180) or not 1 <= day <= 7 or not -86400 <= t <= 3 * 86400:
+                        return self.fail(400, "lat / lon / t / day out of range")
+                    ans = gtfs_departures(service.gtfs, lat, lon, t, day, float(q.get("r", [DEP_RADIUS_M])[0]), int(q.get("mins", ["30"])[0]))
+                    ans["ready"] = service.gtfs.ready()
                     return self.send_json(200, b'{"ok":true,"cached":true,"data":' + json.dumps(ans, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"}")
                 if u.path == "/v1/nearby":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
