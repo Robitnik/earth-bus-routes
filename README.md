@@ -9,7 +9,11 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 ## What you get
 
 - **Stops near you**: the bus stops and stations within 600 m, with the lines that call at each.
-- **Map and towns**: a map tab with a chip for every town round you; a town opens its stations; the route builder can add a town's main station with one click.
+- **Real timetables (Czechia)**: every bus line of the country from the state's timetable register, with its real departures
+  and the time at every stop, also the lines OpenStreetMap lacks. Elsewhere the timetable is generated.
+- **Map, towns, stations and stops**: a map tab with a chip for every town round you and the stations and stops as chips and
+  dots; a town brings the map closer with all its stops; a stop gives you the GPS route there, a teleport or its lines. The
+  route builder can add a town's main station with one click.
 - **Stop markers** in the world at the next stops, and a progress bar for everything slow.
 - **Search**: type a station name or a line number (363, N1); results appear as you type from the data service's own index, and the public servers fill in the rest.
 - **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
@@ -42,6 +46,10 @@ English and Ukrainian; the menu follows the game language and has a switch.
 
 The first visit to a place fetches its data from a public OpenStreetMap server, which can take up to a minute when that server is
 busy. Everything is kept on disk, so the next time it is instant.
+
+The data service also downloads, once, the towns of the countries round you (GeoNames, a few MB) and, when you play in Czechia,
+the national bus timetables (about 124 MB, refreshed weekly, kept as a 65 MB index); the progress line in the menu shows it.
+To go without the timetables, start the service with the environment variable `BNE_BUSDATA_GTFS=0`.
 
 ## How it is built
 

@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 node_modules/
 tools/hud_preview/dist/
+tools/preview/dist/
