@@ -452,6 +452,7 @@
 
       <footer class="foot">
         <span class="muted">{{ t("credit") }}</span>
+        <span v-if="s && s.fleet" class="muted" :title="JSON.stringify(s.fleet)">{{ t("fleet.diag", s.fleet) }}</span>
         <span class="svc" :class="{ ok: s && s.service && s.service.up, bad: s && s.service && s.service.up === false }">
           <i></i>{{ svcText }}
         </span>

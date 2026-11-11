@@ -1230,4 +1230,106 @@ function M.reroute(arg, blocked, graph, opts)
   return out, { from = i, to = bestJ, extra = bestExtra }
 end
 
+-- ---------------------------------------------------------------------------------------------------------------- detour
+-- A build result with a LOCAL detour round a blocked edge (the fleet's answer to a `reroute` report): the old path up to the bus,
+-- a detour that starts at the bus's node (so a bypass that leaves the road BEFORE the blocked edge is used), then the old path
+-- again from the cheapest node past the edge where it can rejoin. Matching the route again with the edge avoided (M.reroute with a
+-- result) would turn back at the edge when the hole is longer than the join limit. A detour that has to turn round at the bus is
+-- returned too, with `problems.uturn` set: the caller decides (the fleet takes it for a stuck bus).
+-- opts: at = path index of the bus, maxDetourM, avoidEdges. Returns res (with .detoured = {from, to, extra}) | nil, why.
+-- The stops on the replaced stretch are dropped (a stop that cannot be reached is skipped); the blocked edge stays avoided for
+-- extend().
+function M.detour(res, blocked, graph, opts)
+  opts = opts or {}
+  local ix = M.index(graph)
+  local bkey
+  if type(blocked) == 'string' then
+    local a, b = blocked:match('^(.-)|(.*)$')
+    bkey = a and M.edgeKey(a, b)
+  elseif type(blocked) == 'table' then
+    local a, b = blocked[1] or blocked.a or blocked.inNode, blocked[2] or blocked.b or blocked.outNode
+    bkey = a and b and M.edgeKey(a, b)
+  end
+  if not bkey then return nil, 'blocked' end
+  local path = res.path
+  local at = clamp(opts.at or 1, 1, #path - 1)
+  local bi
+  for k = at, #path - 1 do
+    if M.edgeKey(path[k], path[k + 1]) == bkey then bi = k break end
+  end
+  if not bi then return nil, 'not on the path' end
+  if not ix.adj[path[at]] then return nil, 'missing' end
+  local ocum = res.cum
+  local blockedSet = {}
+  for k in pairs(asAvoid(opts.avoidEdges)) do blockedSet[k] = true end
+  for k in pairs(res._ctx.avoid or {}) do blockedSet[k] = true end
+  blockedSet[bkey] = true
+  local limit = min(opts.maxDetourM or 1500, 3 * (ocum[#path] - ocum[at]) + 250)
+  local dist, prev = search(ix, path[at], nil, limit, true, blockedSet)
+  local extras, minExtra = {}, nil
+  for j = bi + 1, #path do
+    local d = dist[path[j]]
+    if d then
+      extras[j] = d - (ocum[j] - ocum[at])
+      if not minExtra or extras[j] < minExtra then minExtra = extras[j] end
+    end
+  end
+  if not minExtra then return nil, 'no detour' end
+  local bestJ
+  for j = bi + 1, #path do
+    if extras[j] and extras[j] <= minExtra + 30 then bestJ = j break end
+  end
+  local mid = unwind(prev, path[at], path[bestJ])
+  if not mid then return nil, 'no detour' end
+  local names = {}
+  for k = 1, at do names[#names + 1] = path[k] end
+  for k = 2, #mid do names[#names + 1] = mid[k] end
+  for k = bestJ + 1, #path do names[#names + 1] = path[k] end
+  local info = { from = at, to = bestJ, extra = extras[bestJ] }
+  local pts, cum = {}, { 0 }
+  for i, nm in ipairs(names) do
+    local n = ix.nodes[nm]
+    if not n then return nil, 'missing' end
+    pts[i] = n.pos
+    if i > 1 then
+      local E = ix.pair[names[i - 1]] and ix.pair[names[i - 1]][nm]
+      cum[i] = cum[i - 1] + (E and E.len or dist3(pts[i - 1], pts[i]))
+    end
+  end
+  -- the anchors that are still on the new path (within 3 m), at their new path metres
+  local ar, ap = {}, {}
+  for k = 1, #res.anchors.ar do
+    local x, y = M.pointAt(res, res.anchors.ap[k])
+    if x then
+      local bestA, bestD
+      for i = 1, #names - 1 do
+        local a, b = pts[i], pts[i + 1]
+        local ex, ey = b.x - a.x, b.y - a.y
+        local l2 = ex * ex + ey * ey
+        local t = l2 > 1e-9 and clamp(((x - a.x) * ex + (y - a.y) * ey) / l2, 0, 1) or 0
+        local d = sqrt((x - (a.x + ex * t)) ^ 2 + (y - (a.y + ey * t)) ^ 2)
+        if not bestD or d < bestD then bestD, bestA = d, cum[i] + t * (cum[i + 1] - cum[i]) end
+      end
+      if bestD and bestD <= 3 and (#ap == 0 or (bestA > ap[#ap] + 1e-6 and res.anchors.ar[k] > ar[#ar])) then
+        ar[#ar + 1], ap[#ap + 1] = res.anchors.ar[k], bestA
+      end
+    end
+  end
+  if #ar < 2 then return nil, 'anchors' end
+  local ctx = {}
+  for k, v in pairs(res._ctx) do ctx[k] = v end
+  local avoid = {}
+  for k in pairs(res._ctx.avoid or {}) do avoid[k] = true end
+  avoid[bkey] = true
+  ctx.avoid = avoid
+  local o = {}
+  for k, v in pairs(res._ctx.opts or {}) do o[k] = v end
+  o.avoidEdges = avoid
+  ctx.opts = o
+  local out = finalize(ix, ctx, names, { ar = ar, ap = ap })
+  out.detoured = info
+  M.setDetours(out, (res.detours or 0) + 1)
+  return out
+end
+
 return M

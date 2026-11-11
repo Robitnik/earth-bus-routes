@@ -501,6 +501,176 @@ function M.weekday()
   return (w + 5) % 7 + 1                 -- 1 = Monday .. 7 = Sunday
 end
 
+-- ---- the AI fleet (plan 007 T4) ------------------------------------------------------------------------------------------
+-- The buses of the pool: spawned hidden, put on the road by the fleet, driven by the vehicle extension busdriver.lua. ALL of
+-- this is unverified in the game (stage T0 checks it): the spawn call and its options, setActive for hiding, safeTeleport, the
+-- camera calls of the visibility test, map.getMap().nodes as the graph the AI drives on, the serialize of a command. Every call
+-- is under pcall; a missing function makes M.fleetAvailable() false and the fleet stays off.
+M.FLEET_MODEL = 'citybus'
+M.VISIBLE_NEAR_M = 150         -- nearer than this with a clear line of sight counts as seen
+M.VISIBLE_FRUSTUM_M = 700      -- in the camera's cone and nearer than this counts as seen (walls are not looked through: conservative)
+M.VISIBLE_HALF_DEG = 75        -- the cone is wider than any field of view
+
+local function quiet(fn, ...)
+  local ok, a, b, c = pcall(fn, ...)
+  if ok then return a, b, c end
+  return nil
+end
+
+local function gameObject(id)
+  local be = rawget(_G, 'be')
+  return be and id and quiet(function() return be:getObjectByID(id) end) or nil
+end
+
+function M.fleetAvailable()
+  local cv, be = rawget(_G, 'core_vehicles'), rawget(_G, 'be')
+  local mp, cam = rawget(_G, 'map'), rawget(_G, 'core_camera')
+  return cv ~= nil and cv.spawnNewVehicle ~= nil and be ~= nil and mp ~= nil and mp.getMap ~= nil and cam ~= nil and cam.getPosition ~= nil
+    and api() ~= nil and api().toGame ~= nil and rawget(_G, 'vec3') ~= nil
+end
+
+-- The graph the game's AI drives on (nodes[name] = { pos, radius, links }), or nil
+function M.navgraph()
+  local mp = rawget(_G, 'map')
+  local gm = mp and mp.getMap and quiet(mp.getMap)
+  if type(gm) == 'table' and type(gm.nodes) == 'table' then return gm.nodes end
+  return nil
+end
+
+-- A cheap signature of the graph (node count and the sum of the x's): changes when the graph window moves
+function M.navgraphSig()
+  local g = M.navgraph()
+  if not g then return nil end
+  local n, sx = 0, 0
+  for _, node in pairs(g) do
+    n = n + 1
+    local p = type(node) == 'table' and node.pos
+    if p then sx = sx + (p.x or 0) end
+  end
+  return ('%d:%.1f'):format(n, sx)
+end
+
+-- lat, lon -> the game's x, y (z when Earth gives one)
+function M.toGame(lat, lon)
+  local a = api()
+  if not (a and a.toGame) then return nil end
+  local ok, x, y, z = pcall(function() return xyz(a.toGame(lat, lon, 0)) end)
+  if ok then return x, y, z end
+  return nil
+end
+
+-- The player's vehicle: { x, y, z, lat, lon, speed, id } in game metres, or nil
+function M.fleetPlayer()
+  local veh = M.vehicle()
+  if not veh then return nil end
+  local p = quiet(function() return veh:getPosition() end)
+  if not p then return nil end
+  local v = quiet(function() return veh:getVelocity() end)
+  local pose = M.pose()
+  return { x = p.x, y = p.y, z = p.z, speed = v and quiet(function() return v:length() end) or 0, lat = pose and pose.lat, lon = pose and pose.lon,
+    id = quiet(function() return veh:getID() end) }
+end
+
+-- Could the player see a bus standing at (x, y, z)? Conservative: any doubt (no camera, a failed call) says yes.
+function M.fleetVisibleToPlayer(x, y, z)
+  local cam = rawget(_G, 'core_camera')
+  if not (cam and cam.getPosition) then return true end
+  local ok, seen = pcall(function()
+    local cp = cam.getPosition()
+    local dx, dy, dz = x - cp.x, y - cp.y, (z or cp.z) - cp.z
+    local d = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if d < 40 then return true end
+    -- in the camera's cone
+    local fwd = cam.getForward and cam.getForward()
+    if fwd and d < M.VISIBLE_FRUSTUM_M then
+      local dot = (dx * fwd.x + dy * fwd.y + dz * fwd.z) / d
+      if dot > math.cos(math.rad(M.VISIBLE_HALF_DEG)) then return true end
+    elseif not fwd then
+      return true
+    end
+    -- close, behind or beside the camera: seen unless something solid is in the way
+    if d < M.VISIBLE_NEAR_M then
+      local ray = rawget(_G, 'castRayStatic')
+      if not ray then return true end
+      local hit = ray(cp, vec3(dx / d, dy / d, dz / d), d)
+      return not (type(hit) == 'number' and hit < d - 3)
+    end
+    return false
+  end)
+  if not ok then return true end
+  return seen == true
+end
+
+function M.fleetSpawn()
+  local cv = rawget(_G, 'core_vehicles')
+  if not (cv and cv.spawnNewVehicle) then return nil end
+  local pl = M.fleetPlayer()
+  local ok, veh = pcall(function()
+    local pos = pl and vec3(pl.x, pl.y, pl.z + 400) or vec3(0, 0, 400)       -- in the sky: it is hidden at once
+    return cv.spawnNewVehicle(M.FLEET_MODEL, { pos = pos, rot = quat(0, 0, 0, 1), autoEnterVehicle = false, centerRotation = false })
+  end)
+  if not ok or not veh then
+    log('W', TAG, 'world: fleet spawn failed: ' .. tostring(veh))
+    return nil
+  end
+  local id = quiet(function() return veh:getID() end)
+  quiet(function() veh.playerUsable = false end)
+  quiet(function() veh:setActive(0) end)
+  return id
+end
+
+function M.fleetAlive(id) return gameObject(id) ~= nil end
+
+function M.fleetPos(id)
+  local veh = gameObject(id)
+  local p = veh and quiet(function() return veh:getPosition() end)
+  if p then return p.x, p.y, p.z end
+  return nil
+end
+
+-- Puts the bus on the road at pose = { x, y, z, dirX, dirY } and shows it. fresh (default true): repaired and still.
+function M.fleetPlace(id, pose, fresh)
+  local veh = gameObject(id)
+  if not (veh and pose) then return false end
+  local ok, err = pcall(function()
+    quiet(function() veh:setActive(1) end)
+    local pos = vec3(pose.x, pose.y, (pose.z or 0) + 0.3)
+    local rot = quatFromDir(vec3(pose.dirX or 0, pose.dirY or 1, 0), vec3(0, 0, 1))
+    spawn.safeTeleport(veh, pos, rot, nil, nil, fresh ~= false)
+  end)
+  if not ok then log('W', TAG, 'world: fleet place failed: ' .. tostring(err)) end
+  return ok
+end
+
+function M.fleetHide(id)
+  local veh = gameObject(id)
+  if not veh then return false end
+  quiet(function() veh:setActive(0) end)
+  return true
+end
+
+function M.fleetRemove(id)
+  local veh = gameObject(id)
+  if not veh then return false end
+  quiet(function() veh:delete() end)
+  return true
+end
+
+-- a command table to the driver extension of a bus; the extension is loaded by fleetLoad
+function M.fleetSend(id, cmd)
+  local be = rawget(_G, 'be')
+  if not (be and id) then return false end
+  local ok, err = pcall(function() be:queueObjectLua(id, 'if earthBusRoutes_busdriver then earthBusRoutes_busdriver.cmd(' .. serialize(cmd) .. ') end') end)
+  if not ok then log('W', TAG, 'world: fleet send failed: ' .. tostring(err)) end
+  return ok
+end
+
+function M.fleetLoad(id)
+  local be = rawget(_G, 'be')
+  if not (be and id) then return false end
+  return pcall(function() be:queueObjectLua(id, "extensions.load('earthBusRoutes_busdriver')") end)
+end
+
 -- ---- the HUD app and the menu page --------------------------------------------------------------------------------
 
 M.HUD_APP = 'EarthBusHud'

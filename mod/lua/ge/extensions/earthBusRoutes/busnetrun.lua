@@ -252,6 +252,10 @@ function M.frame(dt)
   end
 end
 
+-- The net the fleet (plan 007 T4) takes its trips from, and the clock it was last computed for: nil while there is none
+function M.net() if enabled() then return st.net end end
+function M.clock() return st.clock end
+
 function M.onTeleport() st.builtAt = -1e9 end
 
 -- ---- attach ----------------------------------------------------------------------------------------------------------------------

@@ -33,6 +33,7 @@ local connections = require('earthBusRoutes/connections')
 local ghostrun = require('earthBusRoutes/ghostrun')     -- the ghost of the best trip (plan 006 D)
 local careersvc = require('earthBusRoutes/careersvc')       -- the profile, ranks, achievements, the driven-lines layer (plan 006, stage E)
 local busnetrun = require('earthBusRoutes/busnetrun')       -- the virtual bus network: moving dots on the map, a live station board (plan 007 T1)
+local fleetrun = require('earthBusRoutes/fleetrun')         -- the physical AI buses that take trips of the net over (plan 007 T4/T5)
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -171,6 +172,7 @@ local function buildModel()
   -- plan 007 T1: the buses of the lines round you (moving dots) and the board of the station on screen; nil when the option is off
   model.buses, model.busNet = busnetrun.buses(), busnetrun.info()
   model.board = busnetrun.boardModel(M.boardSpec())
+  model.fleet = fleetrun.info()                       -- plan 007 T4: { n, pool, physical, stuck, ... } for a small diagnostics line; nil when off
   return model
 end
 M.model = buildModel
@@ -1774,6 +1776,7 @@ function M.onUpdate(dtReal, dtSim)
   if S.armed and not S.trip and not S.starting then armedFrame(dtReal or 0) end
   shiftrun.frame(dtReal or 0, dtSim or 0)
   busnetrun.frame(dtReal or 0)
+  fleetrun.frame(dtReal or 0)
   -- keep the cell around the player ready, so the menu opens at once
   S.prefetchTimer = S.prefetchTimer - (dtReal or 0)
   if S.prefetchTimer <= 0 and not S.trip and not S.starting then
@@ -1820,13 +1823,23 @@ function M.onBeamNGEarthTeleported()
   if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you were teleported', 4) end
   shiftrun.onTeleport()
   busnetrun.onTeleport()
+  fleetrun.onTeleport()
 end
 
 function M.onVehicleSwitched()
   if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you changed vehicle', 4) end
 end
 
+-- The vehicle-side driver of an AI bus reports (extensions.hook('onEarthBusDriverEvent', vehId, name, data), busdriver.lua)
+function M.onEarthBusDriverEvent(vehId, name, data)
+  fleetrun.onBusDriverEvent(vehId, name, data)
+end
+
+-- (if the game or Earth tells the graph was loaded again: the fleet also notices a change by itself)
+function M.onNavgraphReloaded() fleetrun.onGraphReload() end
+
 function M.onExtensionUnloaded()
+  pcall(fleetrun.shutdown)
   endClockAndGps()
   datasvc.reset()
   S.trip, S.starting, S.shift = nil, nil, nil
@@ -1834,6 +1847,7 @@ end
 
 -- Shifts with a dispatcher (plan 006 B): the logic is in shift.lua, the game side in shiftrun.lua; main lends it what it needs.
 busnetrun.attach(M, S, { publish = publish })
+fleetrun.attach(M, S, { publish = publish })
 shiftrun.attach(M, S, { publish = publish, loadRoute = loadRoute, beginTrip = beginTrip, buildPlan = buildPlan, currentTrips = currentTrips,
   goPlay = goPlay, endClockAndGps = endClockAndGps })
 
