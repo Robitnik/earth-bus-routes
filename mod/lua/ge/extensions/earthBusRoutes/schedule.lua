@@ -122,6 +122,17 @@ end
 -- `reverse` shifts the phase so the two directions do not leave their ends at the same minute.
 function M.generate(route, day, ctx)
   local kind = M.kindOf(route, ctx)
+  -- the real timetable (a line of the national feed): its departures of this weekday, each stop at its own time
+  local real = route.gtfsOffs and route.gtfsStarts and route.gtfsStarts[tostring(day)]
+  if real and #real > 0 and #route.gtfsOffs == #route.stops then
+    local trips = {}
+    for _, st in ipairs(real) do
+      local arr, dep = {}, {}
+      for i, o in ipairs(route.gtfsOffs) do arr[i], dep[i] = o, o end
+      trips[#trips + 1] = { id = #trips + 1, start = st, arr = arr, dep = dep }
+    end
+    return trips, kind
+  end
   local weekend = M.isWeekend(day)
   local seed = hash((route.ref or '') .. '|' .. tostring(route.id or '') .. '|' .. (route.network or ''))
   local winFrom, winTo = 0, 24 * 3600

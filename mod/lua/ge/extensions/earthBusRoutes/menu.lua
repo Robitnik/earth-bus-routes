@@ -122,7 +122,7 @@ function M.routeModel(route, trips, day, ctx)
     network = route.network, operator = route.operator, kind = route.kind, loop = route.loop,
     km = math.floor(route.length / 100 + 0.5) / 10, stopCount = #route.stops, minutes = minutes,
     incomplete = route.incomplete or false, gaps = route.gaps, stops = stops, periods = periods,
-    custom = route.custom or false, straight = route.straight or false,
+    custom = route.custom or false, straight = route.straight or false, timetable = route.timetable,
     tripsToday = #trips, first = trips[1] and M.clockLabel(trips[1].start) or nil,
     last = trips[#trips] and M.clockLabel(trips[#trips].start) or nil,
   }

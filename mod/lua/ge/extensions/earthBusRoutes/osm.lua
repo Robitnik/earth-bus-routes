@@ -475,6 +475,8 @@ function M.parseRoute(data)
 
   -- 2. the stops --------------------------------------------------------------------------------------------------
   local plats, poss = {}, {}
+  local gt = type(rel.gtfs) == 'table' and rel.gtfs or nil      -- a line of the timetables: the stops come with their times
+  local nth = 0
   for _, m in ipairs(rel.members or {}) do
     if m.type == 'node' or (m.type == 'way' and (m.role or ''):sub(1, 8) == 'platform') then
       local el = byId[m.type .. m.ref]
@@ -485,7 +487,11 @@ function M.parseRoute(data)
       local kind = nodeKind(etags, m.role)
       if lat and kind then
         local s = { id = m.ref, name = etags.name, lat = lat, lon = lon, role = m.role or '' }
-        if kind == 'platform' then plats[#plats + 1] = s else poss[#poss + 1] = s end
+        if kind == 'platform' then
+          nth = nth + 1
+          s.gtfsOff = gt and gt.offs and tonumber(gt.offs[nth]) or nil
+          plats[#plats + 1] = s
+        else poss[#poss + 1] = s end
       end
     end
   end
@@ -582,7 +588,7 @@ function M.parseRoute(data)
   local loop = M.normName(first.name) == M.normName(last.name) and geo.dist(first.lat, first.lon, last.lat, last.lon) < 150
   local rotated = false
   -- a circular line starts where the map says it does ("from" names the bus station, the relation lists the school first)
-  if loop and #stops >= 4 and tags.from and geo.dist(path[1].lat, path[1].lon, path[#path].lat, path[#path].lon) < M.LOOP_CLOSED_M then
+  if loop and not gt and #stops >= 4 and tags.from and geo.dist(path[1].lat, path[1].lon, path[#path].lat, path[#path].lon) < M.LOOP_CLOSED_M then
     for i = 2, #stops - 1 do
       if M.sameStopName(stops[i].name, tags.from) then
         path, cum, length, stops = rotateLoop(path, cum, length, stops, i)
@@ -597,6 +603,19 @@ function M.parseRoute(data)
   head.stops, head.path, head.cum, head.length = stops, path, cum, length
   head.gaps, head.loop = gaps, loop
   head.rotated = rotated or nil
+  -- the real timetable: every stop has its time from the start, in order (a stop left out would make the times lie)
+  if gt and type(gt.starts) == 'table' then
+    local offs, ok = {}, #stops >= 2
+    for i, s in ipairs(stops) do
+      if not s.gtfsOff or (i > 1 and s.gtfsOff < offs[i - 1]) then ok = false break end
+      offs[i] = s.gtfsOff
+    end
+    if ok then
+      local base = offs[1]
+      for i = 1, #offs do offs[i] = offs[i] - base end
+      head.gtfsOffs, head.gtfsStarts, head.timetable = offs, gt.starts, 'gtfs'
+    end
+  end
   head.shuffled = shuffled or nil
   head.incomplete = gaps > 0 or #stops < 2 or (tags.complete == 'no')
   head.kind = M.kind(head)
@@ -658,6 +677,7 @@ function M.reversed(route)
   r.id, r.name, r.from, r.to = -route.id, name, route.to, route.from
   r.stops, r.path, r.cum, r.length = stops, path, cum, length
   r.reversedOf, r.synthetic = route.id, true
+  r.gtfsOffs, r.gtfsStarts, r.timetable = nil, nil, nil
   return r
 end
 

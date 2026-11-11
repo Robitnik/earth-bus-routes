@@ -15,6 +15,7 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
                                         computer, answered in milliseconds; else the geocoder too, ~1 s)
   GET /v1/towns?lat=..&lon=..           the cities, towns and villages within 40 km of a point (for the map; from GeoNames
                                         files kept on this computer, else Overpass)
+  GET /v1/gtfs?lat=..&lon=..            the state of the national timetables (downloads them in the background the first time)
   GET /v1/progress                      what the service is waiting for right now (for a progress bar)
   GET /v1/lines?ref=..&lat=..&lon=..    the bus lines with this number within 40 km (&local=1 likewise)
   GET /v1/status                        what it did lately (for the Add-ons page's log)
@@ -42,7 +43,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.7.0"
+VERSION = "0.8.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -66,7 +67,7 @@ PHOTON_COOLDOWN_S = 60          # after a failure the geocoder is left alone thi
 _photon_down_until = 0.0
 PLACE_KINDS = {"city": 5, "town": 4, "municipality": 3, "village": 3, "borough": 2, "suburb": 2, "hamlet": 2, "quarter": 1,
                "neighbourhood": 1, "locality": 1}
-FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer"]
+FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer", "gtfs"]
 STATIONS_M = 25000
 STATIONS_CELL_DEG = 0.05
 OSRM = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"]
@@ -724,7 +725,8 @@ def parse_geonames(lines, keep_alt=False):
     return out
 
 
-def download_file(url, dest, max_bytes=GEONAMES_MAX_BYTES):
+def download_file(url, dest, max_bytes=GEONAMES_MAX_BYTES, progress=None):
+    """Download to dest (through dest.part); progress(done, total) about every megabyte."""
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=60) as r:
         size = int(r.headers.get("Content-Length") or 0)
@@ -741,6 +743,8 @@ def download_file(url, dest, max_bytes=GEONAMES_MAX_BYTES):
                 if got > max_bytes:
                     raise ValueError("too big")
                 f.write(b)
+                if progress and got // 1048576 != (got - len(b)) // 1048576:
+                    progress(got, size)
     os.replace(tmp, dest)
 
 
@@ -767,6 +771,7 @@ class Gazetteer:
         self._grid = {}
         self._near = {}
         self._words = {}
+        self.after = None             # called with (lat, lon) when the countries round a point are loaded
 
     @property
     def enabled(self):
@@ -853,6 +858,8 @@ class Gazetteer:
                 self.countries.add(cc)
                 self._add(rows)
                 say(f"towns: {cc} loaded, {len(rows)} places")
+        if self.after:
+            self.after(lat, lon)
         return True
 
     def preload(self):
@@ -877,6 +884,8 @@ class Gazetteer:
         """ensure() in the background (a search answers with what is loaded now)."""
         if self.enabled and not self._busy.locked() and not self.ready(lat, lon):
             threading.Thread(target=self.ensure, args=(lat, lon), daemon=True).start()
+        elif self.after and self.base:
+            self.after(lat, lon)
 
     def ready(self, lat, lon):
         return bool(self.base) and all(cc in self.countries for cc in self.countries_near(lat, lon))
@@ -958,6 +967,533 @@ class Gazetteer:
                         out.append(self._row(p, d))
         out.sort(key=lambda t: (-TOWN_RANK[t["kind"]], -t["population"], t["name"]))
         return out
+
+
+# ---- timetables from this computer: GTFS (every line of a country with its real timetable, downloaded once) ----------------
+
+GTFS_FEEDS = {
+    # country -> its national feed. CZ: every bus line except Prague (PID), Brno (IDS JMK), Flixbus and Plzeň, made from the
+    # state's timetable register (CIS JR) by the JrUtil project; the data of CIS JR carry no conditions, stop positions come
+    # from OpenStreetMap (ODbL) and open data of towns (CC BY / CC BY-SA / CC0).
+    "CZ": {"url": "https://data.jr.ggu.cz/results/latest/JDF_merged_GTFS.zip", "label": "CIS JR (JrUtil)", "mb": 130},
+}
+GTFS_DAYS = 28                       # the days from the build day that the index knows the running trips of
+GTFS_REFRESH_S = 7 * 86400
+GTFS_MAX_BYTES = 600 * 1024 * 1024
+GTFS_ROUTE = 10 ** 12                # relation ids of lines made from GTFS: GTFS_ROUTE + pattern
+GTFS_NODE = 2 * 10 ** 12             # node ids of stops that OpenStreetMap does not have: GTFS_NODE + stop
+GTFS_SAME_STOP_M = 40                # a GTFS stop this near an OpenStreetMap bus stop is that stop
+GTFS_VARIANTS = 5                    # lines of one number shown at a place (most trips first)
+BUS_ROUTE_TYPES = ("", "3", "11")
+
+
+def gtfs_secs(t):
+    """Seconds of "07:05:00" (hours may pass 24: a trip after midnight), None when empty."""
+    try:
+        h, m, s = t.strip().split(":")
+        return int(h) * 3600 + int(m) * 60 + int(s)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _bus_route(t):
+    """Buses, trolleybuses, coaches: route_type 3, 11 and the extended 200s (coach), 700s (bus), 800s (trolleybus)."""
+    t = (t or "").strip()
+    return t in BUS_ROUTE_TYPES or (t.isdigit() and (200 <= int(t) < 300 or 700 <= int(t) < 900))
+
+
+def gtfs_ref(short, long_name):
+    """The number the public knows a line by. A national JDF feed has a 6-digit register code as the short name (641361) and
+    the number first in the long name ("361 Police n.Met.-Machov"); when the name has none, the last three digits of the code
+    ("000512" is line 512). Other feeds' short names are the numbers."""
+    short, long_name = (short or "").strip(), (long_name or "").strip()
+    first = long_name.split()[0].rstrip(":") if long_name else ""
+    if short.isdigit() and len(short) >= 6:
+        if first and re.fullmatch(r"[\w/\-]{1,8}", first) and re.search(r"\d", first):
+            return first
+        return short[-3:].lstrip("0") or short
+    return short or first
+
+
+def fold_words(text):
+    """"Police n.Met.,aut.st." -> "police n met aut st": the folded words, one space between."""
+    return " ".join(re.findall(r"\w+", fold(text)))
+
+
+def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None):
+    """Index a GTFS zip into an sqlite file: stops, the patterns (one line's one way of going: its stops with their times
+    from the start) with how many trips run on the next `days` days from `today` (a datetime.date), and the departures with a
+    bit per day. Streams the files: stop_times.txt is a gigabyte for a country. Returns {stops, patterns, trips}."""
+    import csv
+    import datetime
+    import sqlite3
+    say_p = progress or (lambda *_: None)
+    z = zipfile.ZipFile(zip_path)
+
+    def reader(name):
+        f = io.TextIOWrapper(z.open(name), encoding="utf-8-sig", newline="")
+        r = csv.reader(f)
+        head = next(r, [])
+        return r, {h.strip(): i for i, h in enumerate(head)}
+
+    def col(idx, row, name, default=""):
+        i = idx.get(name)
+        return row[i] if i is not None and i < len(row) else default
+
+    agencies = {}
+    if "agency.txt" in z.namelist():
+        r, ix = reader("agency.txt")
+        for row in r:
+            agencies[col(ix, row, "agency_id")] = col(ix, row, "agency_name")
+    say_p("routes", 0.02)
+    routes = {}
+    r, ix = reader("routes.txt")
+    for row in r:
+        if _bus_route(col(ix, row, "route_type")):
+            ref = gtfs_ref(col(ix, row, "route_short_name"), col(ix, row, "route_long_name"))
+            routes[col(ix, row, "route_id")] = (ref, col(ix, row, "route_long_name"), agencies.get(col(ix, row, "agency_id"), ""))
+    say_p("trips", 0.04)
+    trips, services = {}, set()
+    r, ix = reader("trips.txt")
+    for row in r:
+        rid = col(ix, row, "route_id")
+        if rid in routes:
+            sid = col(ix, row, "service_id")
+            trips[col(ix, row, "trip_id")] = (rid, sys.intern(sid), col(ix, row, "trip_headsign"))
+            services.add(sid)
+    say_p("calendar", 0.08)
+    dates = [today + datetime.timedelta(days=i) for i in range(days)]
+    keys = [d.strftime("%Y%m%d") for d in dates]
+    mask = {}
+    if "calendar.txt" in z.namelist():
+        r, ix = reader("calendar.txt")
+        wd = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+        for row in r:
+            sid = col(ix, row, "service_id")
+            if sid not in services:
+                continue
+            a, b = col(ix, row, "start_date"), col(ix, row, "end_date")
+            m = 0
+            for i, d in enumerate(dates):
+                if a <= keys[i] <= b and col(ix, row, wd[d.weekday()]) == "1":
+                    m |= 1 << i
+            if m:
+                mask[sid] = m
+    if "calendar_dates.txt" in z.namelist():
+        r, ix = reader("calendar_dates.txt")
+        where = {k: i for i, k in enumerate(keys)}
+        for row in r:
+            sid = col(ix, row, "service_id")
+            i = where.get(col(ix, row, "date"))
+            if i is None or sid not in services:
+                continue
+            if col(ix, row, "exception_type") == "1":
+                mask[sid] = mask.get(sid, 0) | (1 << i)
+            elif col(ix, row, "exception_type") == "2" and sid in mask:
+                mask[sid] &= ~(1 << i)
+    trips = {t: v for t, v in trips.items() if mask.get(v[1])}
+    say_p("times", 0.12)
+
+    patterns, deps = {}, []                # (route, stops) -> [pid, offsets]; (pid, start, mask)
+    counts = {}
+    n_trips = 0
+
+    def finish(tid, rows):
+        nonlocal n_trips
+        t = trips.get(tid)
+        if t is None or len(rows) < 2:
+            return
+        if any(rows[i][0] > rows[i + 1][0] for i in range(len(rows) - 1)):
+            rows.sort(key=lambda x: x[0])
+        times = [x[2] if x[2] is not None else x[3] for x in rows]
+        if times[0] is None:
+            return
+        t0 = times[0]
+        offs, last = [], 0
+        for tm in times:
+            tm = last if tm is None else tm - t0
+            last = max(last, tm)
+            offs.append(last)
+        key = (t[0], tuple(x[1] for x in rows))
+        p = patterns.get(key)
+        if p is None:
+            p = patterns[key] = [len(patterns) + 1, offs, t[2]]
+        deps.append((p[0], t0, mask[t[1]]))
+        counts[p[0]] = counts.get(p[0], 0) + 1
+        n_trips += 1
+
+    size = max(1, sum(i.file_size for i in z.infolist() if i.filename == "stop_times.txt"))
+    r, ix = reader("stop_times.txt")
+    i_t, i_s, i_a, i_d, i_q = (ix.get(n, -1) for n in ("trip_id", "stop_id", "arrival_time", "departure_time", "stop_sequence"))
+    cur, rows, nrow = None, [], 0
+    for row in r:
+        tid = row[i_t]
+        if tid != cur:
+            if cur is not None:
+                finish(cur, rows)
+            cur, rows = tid, []
+        try:
+            seq = int(row[i_q])
+        except (ValueError, IndexError):
+            seq = len(rows)
+        rows.append((seq, row[i_s], gtfs_secs(row[i_a]) if i_a >= 0 else None, gtfs_secs(row[i_d]) if i_d >= 0 else None))
+        nrow += 1
+        if nrow % 500000 == 0:
+            say_p("times", 0.12 + 0.7 * min(1.0, nrow * 85 / size))
+    if cur is not None:
+        finish(cur, rows)
+    say_p("writing", 0.85)
+
+    tmp = pathlib.Path(str(db_path) + ".part")
+    if tmp.exists():
+        tmp.unlink()
+    db = sqlite3.connect(str(tmp))
+    db.executescript("""
+        CREATE TABLE stops(sid TEXT PRIMARY KEY, name TEXT, fname TEXT, lat REAL, lon REAL);
+        CREATE TABLE patterns(pid INTEGER PRIMARY KEY, ref TEXT, name TEXT, agency TEXT, head TEXT, n INTEGER,
+                              stops TEXT, offs TEXT, trips INTEGER);
+        CREATE TABLE sp(sid TEXT, pid INTEGER, pos INTEGER);
+        CREATE TABLE deps(pid INTEGER, start INTEGER, mask INTEGER);
+        CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);
+    """)
+    used = set()
+    for (rid, stops), (pid, offs, head) in patterns.items():
+        ref, lname, agency = routes[rid]
+        used.update(stops)
+        db.execute("INSERT INTO patterns VALUES (?,?,?,?,?,?,?,?,?)",
+                   (pid, ref, lname, agency, head, len(stops), ",".join(stops), ",".join(map(str, offs)), counts.get(pid, 0)))
+        db.executemany("INSERT INTO sp VALUES (?,?,?)", [(s, pid, k) for k, s in enumerate(stops)])
+    db.executemany("INSERT INTO deps VALUES (?,?,?)", deps)
+    r, ix = reader("stops.txt")
+    n_stops = 0
+    for row in r:
+        sid = col(ix, row, "stop_id")
+        if sid not in used:
+            continue
+        try:
+            lat, lon = float(col(ix, row, "stop_lat")), float(col(ix, row, "stop_lon"))
+        except ValueError:
+            continue
+        name = col(ix, row, "stop_name")
+        db.execute("INSERT INTO stops VALUES (?,?,?,?,?)", (sid, name, fold_words(name), lat, lon))
+        n_stops += 1
+    db.executescript("CREATE INDEX stops_lat ON stops(lat); CREATE INDEX sp_sid ON sp(sid); CREATE INDEX sp_pid ON sp(pid);"
+                     "CREATE INDEX deps_pid ON deps(pid); CREATE INDEX patterns_ref ON patterns(ref);")
+    db.execute("INSERT INTO meta VALUES ('today', ?)", (today.strftime("%Y%m%d"),))
+    db.execute("INSERT INTO meta VALUES ('days', ?)", (str(days),))
+    db.commit()
+    db.close()
+    os.replace(tmp, db_path)
+    say_p("ready", 1.0)
+    return {"stops": n_stops, "patterns": len(patterns), "trips": n_trips}
+
+
+class Gtfs:
+    """The national timetables on this computer: lines near a place (made to look like OpenStreetMap's route relations, so
+    the mod needs nothing new), stops by name, the departures of a line. Each country's feed is downloaded once (130 MB for
+    Czechia), indexed in a few minutes in the background (progress shown in the menu) and refreshed weekly. Without a folder
+    it knows nothing and downloads nothing."""
+
+    def __init__(self, directory=None, fetch=download_file, clock=time.time, feeds=None, today=None):
+        import datetime
+        self.dir = pathlib.Path(directory) if directory else None
+        self.fetch, self.clock = fetch, clock
+        self.feeds = GTFS_FEEDS if feeds is None else feeds
+        self.today = today or datetime.date.today
+        self.dbs = {}                        # country -> sqlite connection
+        self.state = {}                      # country -> {"state": "downloading|indexing|ready|failed", "pct", "error"}
+        self.failed = {}
+        self._lock = threading.RLock()       # one reader at a time (the connections are shared), and a rebuild swaps under it
+        self._building = set()
+
+    @property
+    def enabled(self):
+        return self.dir is not None
+
+    def _path(self, cc):
+        return self.dir / f"gtfs_{cc}.db"
+
+    def preload(self):
+        if not self.enabled or not self.dir.is_dir():
+            return
+        for cc in self.feeds:
+            if self._path(cc).is_file():
+                self._open(cc)
+
+    def _open(self, cc):
+        import sqlite3
+        with self._lock:
+            old = self.dbs.pop(cc, None)
+            if old is not None:
+                old.close()
+            try:
+                db = sqlite3.connect(str(self._path(cc)), check_same_thread=False)
+                db.execute("SELECT 1 FROM meta LIMIT 1")
+            except sqlite3.Error as e:
+                say(f"timetables: {cc} unreadable: {e}")
+                return False
+            self.dbs[cc] = db
+            self.state[cc] = {"state": "ready", "pct": 1.0}
+            say(f"timetables: {cc} ready ({db.execute('SELECT COUNT(*) FROM patterns').fetchone()[0]} lines' ways)")
+            return True
+
+    def ready(self, cc=None):
+        return bool(self.dbs) if cc is None else cc in self.dbs
+
+    def stale(self, cc):
+        p = self._path(cc)
+        return not p.is_file() or self.clock() - p.stat().st_mtime > GTFS_REFRESH_S
+
+    def want(self, countries):
+        """Start getting (or refreshing) the feeds of these countries, in the background; those without a feed are skipped."""
+        if not self.enabled:
+            return
+        for cc in countries:
+            if cc in self.feeds and self.stale(cc) and cc not in self._building \
+                    and self.clock() - self.failed.get(cc, -1e9) > 3600:
+                self._building.add(cc)
+                threading.Thread(target=self._build, args=(cc,), daemon=True).start()
+
+    def _build(self, cc):
+        feed = self.feeds[cc]
+        token = ACTIVITY.begin("gtfs", f"timetables {cc}")
+        zip_path = self.dir / f"gtfs_{cc}.zip"
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            self.state[cc] = {"state": "downloading", "pct": 0.0}
+            ACTIVITY.update(token, state="running", mirror=1, of=2, label=f"timetables {cc}: downloading {feed.get('mb', '?')} MB")
+
+            def got(done, total):
+                pct = (done / total) if total else 0.0
+                self.state[cc] = {"state": "downloading", "pct": round(pct, 3)}
+                ACTIVITY.update(token, stage="download", done=done // 1048576, total=total // 1048576,
+                                label=f"timetables {cc}: downloading {done // 1048576} of {total // 1048576} MB")
+            self.fetch(feed["url"], zip_path, GTFS_MAX_BYTES, got)
+
+            def step(what, pct):
+                self.state[cc] = {"state": "indexing", "pct": round(pct, 3)}
+                ACTIVITY.update(token, mirror=2, stage="index", pct=int(pct * 100),
+                                label=f"timetables {cc}: indexing ({what}, {int(pct * 100)} %)")
+            r = build_gtfs_index(zip_path, self._path(cc), self.today(), progress=step)
+            say(f"timetables: {cc} indexed: {r['stops']} stops, {r['patterns']} ways, {r['trips']} trips")
+            self._open(cc)
+        except (urllib.error.URLError, OSError, ValueError, TimeoutError, zipfile.BadZipFile, KeyError) as e:
+            self.failed[cc] = self.clock()
+            self.state[cc] = {"state": "failed", "error": f"{type(e).__name__}: {str(e)[:100]}", "pct": 0.0}
+            say(f"timetables: {cc} failed: {type(e).__name__} {str(e)[:120]}")
+        finally:
+            ACTIVITY.end(token)
+            self._building.discard(cc)
+            try:
+                zip_path.unlink()
+            except OSError:
+                pass
+
+    def status(self):
+        return {"countries": sorted(self.feeds), "state": self.state, "ready": sorted(self.dbs)}
+
+    # -- queries --
+
+    def _stops_near(self, db, lat, lon, radius):
+        dlat = radius / 110574.0
+        dlon = radius / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+        rows = db.execute("SELECT sid, name, lat, lon, rowid FROM stops WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+                          (lat - dlat, lat + dlat, lon - dlon, lon + dlon)).fetchall()
+        return [r for r in rows if _dist_m(lat, lon, r[2], r[3]) <= radius]
+
+    def _patterns_at(self, db, sids):
+        out = {}
+        sids = list(sids)
+        for i in range(0, len(sids), 400):
+            chunk = sids[i:i + 400]
+            q = ("SELECT p.pid, p.ref, p.name, p.agency, p.head, p.n, p.stops, p.trips FROM sp JOIN patterns p USING(pid) "
+                 f"WHERE sp.sid IN ({','.join('?' * len(chunk))}) GROUP BY p.pid")
+            for r in db.execute(q, chunk):
+                out[r[0]] = r
+        return list(out.values())
+
+    def _name_of(self, db, sid, cache):
+        if sid not in cache:
+            r = db.execute("SELECT name FROM stops WHERE sid=?", (sid,)).fetchone()
+            cache[sid] = r[0] if r else ""
+        return cache[sid]
+
+    def lines_near(self, lat, lon, radius):
+        """({"stops": [(sid, name, lat, lon, rowid)], "lines": [relation]}) of the lines calling within `radius` of a point:
+        per number and way (first and last stop) the pattern with most trips, at most GTFS_VARIANTS per number."""
+        with self._lock:
+            out = {"stops": [], "lines": []}
+            for cc, db in self.dbs.items():
+                near = self._stops_near(db, lat, lon, radius)
+                if not near:
+                    continue
+                by_sid = {s[0]: s for s in near}
+                names = {}
+                best = {}
+                for pid, ref, lname, agency, head, n, stops, trips in self._patterns_at(db, by_sid):
+                    sl = stops.split(",")
+                    first, last = self._name_of(db, sl[0], names), self._name_of(db, sl[-1], names)
+                    k = (fold(ref), first, last)
+                    if k not in best or trips > best[k][0]:
+                        best[k] = (trips, pid, ref, lname, agency, sl, first, last)
+                per_ref = {}
+                for k, v in sorted(best.items(), key=lambda kv: -kv[1][0]):
+                    per_ref.setdefault(k[0], []).append(v)
+                used = set()
+                for ref_key, variants in per_ref.items():
+                    for trips, pid, ref, lname, agency, sl, first, last in variants[:GTFS_VARIANTS]:
+                        members, places = [], {}
+                        for pos, sid in enumerate(sl):
+                            if sid in by_sid:
+                                places.setdefault(sid, []).append(pos + 1)
+                        for sid, ps in places.items():
+                            m = {"type": "node", "ref": sid, "role": "platform", "i": ps[0]}
+                            if len(ps) > 1:
+                                m["j"] = ps[-1]
+                            members.append(m)
+                            used.add(sid)
+                        out["lines"].append({
+                            "type": "relation", "id": GTFS_ROUTE + pid, "n": len(sl), "ordered": True, "members": members,
+                            "tags": {"type": "route", "route": "bus", "ref": ref, "name": f"{ref}: {first} - {last}",
+                                     "from": first, "to": last, "operator": agency, "public_transport:version": "2",
+                                     "bus_routes:source": "gtfs", "bus_routes:trips": str(trips)}})
+                out["stops"] += [by_sid[s] for s in used]
+            return out
+
+    def stops_named(self, text, lat, lon, radius=SEARCH_M, limit=40):
+        """[(sid, name, lat, lon, rowid)] whose name's words start with the words typed, nearest first."""
+        words = fold(text).split()
+        if not words:
+            return []
+        with self._lock:
+            out = []
+            for db in self.dbs.values():
+                dlat = radius / 110574.0
+                dlon = radius / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+                words = fold_words(text).split() or words
+                sql = ("SELECT sid, name, lat, lon, rowid FROM stops WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?"
+                       + "".join(" AND (fname LIKE ? OR fname LIKE ?)" for _ in words))
+                args = [lat - dlat, lat + dlat, lon - dlon, lon + dlon]
+                for w in words:
+                    args += [w + "%", "% " + w + "%"]
+                out += db.execute(sql, args).fetchall()
+        out = [(r, _dist_m(lat, lon, r[2], r[3])) for r in out]
+        out.sort(key=lambda x: x[1])
+        return [r for r, d in out if d <= radius][:limit]
+
+    def lines_numbered(self, ref, lat, lon, radius=SEARCH_M):
+        """Relation heads of the lines with this number having a stop within `radius` (most trips first, per way)."""
+        want = fold(ref).strip()
+        if not want:
+            return []
+        with self._lock:
+            out = []
+            for db in self.dbs.values():
+                dlat = radius / 110574.0
+                dlon = radius / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+                rows = db.execute(
+                    "SELECT DISTINCT p.pid, p.ref, p.agency, p.stops, p.trips FROM patterns p JOIN sp ON sp.pid=p.pid "
+                    "JOIN stops s ON s.sid=sp.sid WHERE lower(p.ref)=? AND s.lat BETWEEN ? AND ? AND s.lon BETWEEN ? AND ?",
+                    (want, lat - dlat, lat + dlat, lon - dlon, lon + dlon)).fetchall()
+                names, best = {}, {}
+                for pid, ref, agency, stops, trips in rows:
+                    sl = stops.split(",")
+                    k = (self._name_of(db, sl[0], names), self._name_of(db, sl[-1], names))
+                    if k not in best or trips > best[k][0]:
+                        best[k] = (trips, pid, ref, agency, k)
+                for trips, pid, ref, agency, (first, last) in sorted(best.values(), key=lambda v: -v[0])[:GTFS_VARIANTS * 2]:
+                    out.append({"type": "relation", "id": GTFS_ROUTE + pid, "members": [],
+                                "tags": {"type": "route", "route": "bus", "ref": ref, "name": f"{ref}: {first} - {last}",
+                                         "from": first, "to": last, "operator": agency, "public_transport:version": "2",
+                                         "bus_routes:source": "gtfs"}})
+            return out
+
+    def pattern(self, rid):
+        """{ref, name, agency, head, stops: [{sid, name, lat, lon, rowid, off}], today: [...], ...} of a GTFS_ROUTE id, or None."""
+        pid = rid - GTFS_ROUTE
+        with self._lock:
+            for db in self.dbs.values():
+                p = db.execute("SELECT ref, name, agency, head, stops, offs FROM patterns WHERE pid=?", (pid,)).fetchone()
+                if p is None:
+                    continue
+                sl, offs = p[4].split(","), [int(x) for x in p[5].split(",")]
+                got = {}
+                for i in range(0, len(sl), 400):
+                    chunk = list(dict.fromkeys(sl[i:i + 400]))
+                    for r in db.execute(f"SELECT sid, name, lat, lon, rowid FROM stops WHERE sid IN ({','.join('?' * len(chunk))})", chunk):
+                        got[r[0]] = r
+                stops = [{"sid": s, "name": got[s][1], "lat": got[s][2], "lon": got[s][3], "rowid": got[s][4], "off": offs[k]}
+                         for k, s in enumerate(sl) if s in got]
+                meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
+                starts = self._starts(db, pid, meta)
+                return {"ref": p[0], "name": p[1], "agency": p[2], "head": p[3], "stops": stops, "starts": starts}
+        return None
+
+    @staticmethod
+    def _starts(db, pid, meta):
+        """{"1": [start seconds], ... "7": [...]} of a way: its departures on a Monday (1) .. Sunday (7). Of the two such days in
+        the next two weeks the busier one (a public holiday runs a Sunday timetable). A start may pass 86400 (after midnight)."""
+        import datetime
+        day0 = datetime.datetime.strptime(meta.get("today", "19700101"), "%Y%m%d").date()
+        bits = {}
+        for i in range(min(int(meta.get("days", "0")), 14)):
+            bits.setdefault(str((day0 + datetime.timedelta(days=i)).isoweekday()), []).append(i)
+        per_day = {}
+        for start, mask in db.execute("SELECT start, mask FROM deps WHERE pid=? ORDER BY start", (pid,)):
+            for wd, bs in bits.items():
+                for b in bs:
+                    if mask >> b & 1:
+                        per_day.setdefault((wd, b), []).append(start)
+        out = {}
+        for wd, bs in bits.items():
+            best = max((per_day.get((wd, b), []) for b in bs), key=len)
+            out[wd] = best
+        return out
+
+
+def gtfs_node(row):
+    """An Overpass-like node of a GTFS stop that OpenStreetMap does not have."""
+    sid, name, lat, lon, rowid = row
+    return {"type": "node", "id": GTFS_NODE + rowid, "lat": lat, "lon": lon,
+            "tags": {"name": name, "highway": "bus_stop", "public_transport": "platform", "bus": "yes",
+                     "bus_routes:source": "gtfs"}}
+
+
+NEARBY_WAIT_S = 1.5                  # how long a nearby answer waits for the map server when the timetables have it already
+
+
+def merge_gtfs(osm_text, found, partial=False):
+    """The nearby answer of OpenStreetMap (text, or None when no server answered) with the lines of the timetables: a GTFS
+    stop within 40 m of an OpenStreetMap bus stop is that stop (its id is used in the lines), the others are added as stops;
+    an OpenStreetMap line whose number the timetables have is dropped (the timetable's line has all its stops, and in the
+    right order). Returns the text."""
+    data = json.loads(osm_text) if osm_text else {"elements": []}
+    elements = data.get("elements", [])
+    osm_stops = [e for e in elements if e.get("type") == "node" and e.get("lat") is not None
+                 and ((e.get("tags") or {}).get("highway") == "bus_stop" or (e.get("tags") or {}).get("public_transport") == "platform")]
+    ref_of = {}
+    for sid, name, lat, lon, rowid in found["stops"]:
+        hit, best = None, GTFS_SAME_STOP_M
+        for e in osm_stops:
+            d = _dist_m(lat, lon, e["lat"], e["lon"])
+            if d <= best:
+                hit, best = e, d
+        if hit is not None:
+            ref_of[sid] = hit["id"]
+        else:
+            n = gtfs_node((sid, name, lat, lon, rowid))
+            elements.append(n)
+            ref_of[sid] = n["id"]
+    have = {fold(ln["tags"]["ref"]) for ln in found["lines"]}
+    out = [e for e in elements if not (e.get("type") == "relation" and fold((e.get("tags") or {}).get("ref")) in have)]
+    for ln in found["lines"]:
+        for m in ln["members"]:
+            m["ref"] = ref_of.get(m["ref"], m["ref"])
+        out.append(ln)
+    data["elements"] = out
+    if partial:
+        data["partial"] = True
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
 
 
 def merge_places(first, more, near_m=3000):
@@ -1088,9 +1624,11 @@ def _fetch_osrm(pts, bases, getter, sleep, token):
 
 
 class Service:
-    def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm, geocoder=geo_search, places=None):
+    def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm, geocoder=geo_search, places=None, gtfs=None):
         self.cache, self.upstream, self.ttl, self.router, self.geocoder = cache, upstream, ttl, router, geocoder
         self.places = places or Gazetteer(None)
+        self.gtfs = gtfs or Gtfs(None)
+        self.places.after = self.want_timetables
         # the stops along a road are a big query: one round of mirrors, so the answer comes (or fails) before the mod stops waiting
         self.upstream_once = (lambda q: fetch_upstream(q, rounds=1)) if upstream is fetch_upstream else upstream
         self.started = time.time()
@@ -1109,10 +1647,113 @@ class Service:
                 ACTIVITY.end(token)
         return self.get(geo_key(q, lat, lon), (q, lat, lon), upstream=ask)
 
+    def want_timetables(self, lat, lon):
+        """Start fetching the timetables of the countries round a point (once; in the background)."""
+        if not self.gtfs.enabled:
+            return
+        if self.places.base:
+            self.gtfs.want(self.places.countries_near(lat, lon))
+        else:
+            self.places.want(lat, lon)          # (the countries are not known yet: it calls back when they are)
+
     def local_search(self, q, lat, lon):
         """Only what is on this computer, in milliseconds: {"elements": stops, "places": towns, "local": true}."""
         self.places.want(lat, lon)
-        return {"elements": self.index.search(q, lat, lon), "places": self.places.search(q, lat, lon), "local": True}
+        self.want_timetables(lat, lon)
+        elements = self.index.search(q, lat, lon)
+        if self.gtfs.ready():
+            for row in self.gtfs.stops_named(q, lat, lon):
+                if not any(_dist_m(row[2], row[3], e["lat"], e["lon"]) < 60 for e in elements if e.get("lat") is not None):
+                    elements.append(gtfs_node(row))
+        return {"elements": elements, "places": self.places.search(q, lat, lon), "local": True}
+
+    def nearby(self, lat, lon):
+        """(text, cached): the stops and lines around a point: OpenStreetMap's (kept per cell) with the timetables' lines
+        merged in; the timetables alone while no map server answers."""
+        self.want_timetables(lat, lon)
+        found = self.gtfs.lines_near(snap(lat), snap(lon), RADIUS_M) if self.gtfs.ready() else None
+        key, query = nearby_key(lat, lon), nearby_query(snap(lat), snap(lon))
+        have, age = self.cache.get(key)
+        partial = False
+        if not found or not found["lines"] or (have is not None and age is not None and age < self.ttl):
+            text, cached = self.get(key, query, post=slim_nearby)
+        else:
+            # the timetables are here, the map server may be slow: wait for it a few seconds, then answer with the timetables
+            # alone (marked "partial": the mod does not keep such an answer) while the map's answer goes on being fetched
+            box = {}
+
+            def work():
+                try:
+                    box["v"] = self.get(key, query, post=slim_nearby)
+                except RuntimeError as e:
+                    box["e"] = e
+            th = threading.Thread(target=work, daemon=True)
+            th.start()
+            th.join(NEARBY_WAIT_S)
+            if "v" in box:
+                text, cached = box["v"]
+            else:
+                say("nearby: the map server is slow or down; the timetables first")
+                text, cached, partial = None, False, True
+        if found and found["lines"]:
+            text = merge_gtfs(text, found, partial)
+        return text, cached
+
+    def lines(self, ref, lat, lon, local=False):
+        """(text, cached): the lines with this number: those the timetables know, then OpenStreetMap's."""
+        gt = self.gtfs.lines_numbered(ref, lat, lon) if self.gtfs.ready() else []
+        if local:
+            found = self.index.find_lines(ref, lat, lon)
+            have = {fold(e["tags"].get("ref")) for e in gt}
+            elements = gt + [e for e in found if fold(e["tags"].get("ref")) not in have]
+            return json.dumps({"elements": elements, "local": True}, separators=(",", ":"), ensure_ascii=False), True
+        try:
+            text, cached = self.get(lines_key(ref, lat, lon), lines_query(ref, lat, lon))
+        except RuntimeError:
+            if not gt:
+                raise
+            return json.dumps({"elements": gt}, separators=(",", ":"), ensure_ascii=False), False
+        if not gt:
+            return text, cached
+        data = json.loads(text)
+        data["elements"] = gt + [e for e in data.get("elements", []) if e.get("type") != "relation"]
+        return json.dumps(data, separators=(",", ":"), ensure_ascii=False), cached
+
+    def gtfs_route(self, rid):
+        """The text of a route answer for a line of the timetables: a relation with one way (the road through its stops, asked
+        of the routing servers in windows of 24 stops) and its stops with their times from the start, as the mod reads
+        an OpenStreetMap route."""
+        pat = self.gtfs.pattern(rid)
+        if pat is None:
+            raise RuntimeError("no such line in the timetables")
+        stops = pat["stops"]
+        road, window = [], 24
+        i = 0
+        while i < len(stops) - 1:
+            chunk = stops[i:i + window]
+            pts = [(round(x["lat"], 6), round(x["lon"], 6)) for x in chunk]
+            if len(pts) >= 2 and all(hav(a, b) <= MAX_LEG_M for a, b in zip(pts, pts[1:])):
+                p, _ = self.path(pts)
+                seg = [(a, b) for a, b in p["points"]]
+            else:
+                seg = pts
+            road += seg if not road else seg[1:]
+            i += window - 1
+        way = {"type": "way", "ref": GTFS_ROUTE + rid % GTFS_ROUTE, "role": "",
+               "geometry": [{"lat": a, "lon": b} for a, b in road]}
+        members = [way] + [{"type": "node", "ref": GTFS_NODE + x["rowid"], "role": "platform", "lat": x["lat"], "lon": x["lon"]}
+                           for x in stops]
+        first, last = (stops[0]["name"], stops[-1]["name"]) if stops else ("", "")
+        rel = {"type": "relation", "id": rid, "members": members,
+               "tags": {"type": "route", "route": "bus", "ref": pat["ref"], "name": f"{pat['ref']}: {first} - {last}", "from": first,
+                        "to": last, "operator": pat["agency"], "public_transport:version": "2", "bus_routes:source": "gtfs"},
+               "gtfs": {"offs": [x["off"] for x in stops], "starts": pat["starts"]}}
+        seen, nodes = set(), []
+        for x in stops:
+            if x["rowid"] not in seen:
+                seen.add(x["rowid"])
+                nodes.append(gtfs_node((x["sid"], x["name"], x["lat"], x["lon"], x["rowid"])))
+        return json.dumps({"elements": [rel] + nodes}, separators=(",", ":"), ensure_ascii=False)
 
     def search(self, q, lat, lon):
         """(text, cached): the towns and stops on this computer first, the geocoder's (one request, ~1 s) after them; the
@@ -1228,6 +1869,10 @@ def make_handler(service, port):
             try:
                 if u.path == "/v1/info":
                     return self.send_json(200, json.dumps({"ok": True, "api": 1, "app": APP, "version": VERSION, "features": FEATURES}))
+                if u.path == "/v1/gtfs":
+                    if q.get("lat") and q.get("lon"):
+                        service.want_timetables(float(q["lat"][0]), float(q["lon"][0]))
+                    return self.send_json(200, json.dumps({"ok": True, "data": service.gtfs.status()}))
                 if u.path == "/v1/progress":
                     return self.send_json(200, json.dumps({"ok": True, "data": ACTIVITY.snapshot()}))
                 if u.path == "/v1/status":
@@ -1239,10 +1884,12 @@ def make_handler(service, port):
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
                         return self.fail(400, "lat / lon out of range")
-                    slat, slon = snap(lat), snap(lon)
-                    text, cached = service.get(nearby_key(lat, lon), nearby_query(slat, slon), post=slim_nearby)
+                    text, cached = service.nearby(lat, lon)
                 elif u.path == "/v1/route":
                     rid = int(q["id"][0])
+                    if GTFS_ROUTE <= rid < GTFS_NODE:
+                        text, cached = service.gtfs_route(rid), False
+                        return self.send_json(200, b'{"ok":true,"cached":false,"data":' + text.encode("utf-8") + b"}")
                     if not 0 < rid < 10 ** 12:
                         return self.fail(400, "id out of range")
                     try:
@@ -1292,11 +1939,7 @@ def make_handler(service, port):
                     ref = clean_ref(q["ref"][0])
                     if ref is None:
                         return self.fail(400, "not a line number")
-                    if q.get("local"):
-                        found = service.index.find_lines(ref, lat, lon)
-                        text, cached = json.dumps({"elements": found, "local": True}, separators=(",", ":"), ensure_ascii=False), True
-                    else:
-                        text, cached = service.get(lines_key(ref, lat, lon), lines_query(ref, lat, lon))
+                    text, cached = service.lines(ref, lat, lon, local=bool(q.get("local")))
                 else:
                     return self.fail(404, "unknown path")
             except (KeyError, IndexError, ValueError):
@@ -1321,12 +1964,15 @@ class QuietServer(ThreadingHTTPServer):
 def serve(port=PORT, cache_dir=None, service=None):
     if service is None:
         cache = Cache(cache_dir or default_cache_dir())
-        service = Service(cache, places=Gazetteer(pathlib.Path(cache.dir).parent / "places"))
+        base = pathlib.Path(cache.dir).parent
+        no_gtfs = os.environ.get("BNE_BUSDATA_GTFS") == "0"
+        service = Service(cache, places=Gazetteer(base / "places"), gtfs=Gtfs(None if no_gtfs else base / "timetables"))
     httpd = QuietServer(("127.0.0.1", port), make_handler(service, port))
     httpd.daemon_threads = True
     say(f"{APP} {VERSION} listening on 127.0.0.1:{port}, cache {service.cache.dir}")
     threading.Thread(target=service.load_index, daemon=True).start()
     threading.Thread(target=service.places.preload, daemon=True).start()
+    threading.Thread(target=service.gtfs.preload, daemon=True).start()
     return httpd, service
 
 

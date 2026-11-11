@@ -200,4 +200,29 @@ function T.words_that_disagree_say_nothing()
   assert(osm.placeAt(st, r) == 'through')
 end
 
+-- Police nad Metují with the timetables only (the map server was down; recorded answer of service 0.8.0): the bus station
+-- has the lines the map lacks (361, 375) and each in the right tab.
+function T.timetable_lines_fill_the_tabs_of_the_bus_station()
+  local a = osm.parseAround(H.fixture('police_gtfs_nearby'))
+  local st
+  for _, g in ipairs(osm.groupStops(a.stops)) do
+    if g.name == 'Police n.Met.,aut.st.' then st = g end
+  end
+  assert(st, 'the bus station is in the answer')
+  local lines = menu.linesModel(st, a.routes)
+  local seen = {}
+  for _, ln in ipairs(lines) do
+    for _, v in ipairs(ln.variants) do
+      seen[ln.ref] = seen[ln.ref] or {}
+      seen[ln.ref][v.place] = true
+    end
+  end
+  for _, ref in ipairs({ '360', '361', '363', '375' }) do assert(seen[ref], 'line ' .. ref .. ' is missing') end
+  assert(seen['363'].loop, '363 starts and ends at the station')
+  assert(seen['360'].from and seen['360'].to, '360 both ways')
+  assert(seen['375'].from and seen['375'].to and seen['375'].through, '375 starts, ends and passes')
+  local c = menu.tabCounts(lines)
+  assert(c.from >= 4 and c.to >= 3, ('from %d to %d'):format(c.from, c.to))
+end
+
 return T

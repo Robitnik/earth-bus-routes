@@ -252,7 +252,7 @@
               <span class="plate huge" :style="{ background: s.route.colour, color: ink(s.route.colour) }">{{ s.route.ref }}</span>
               <div>
                 <div class="from-to">{{ s.route.from }}<span class="arrow"> → </span>{{ s.route.to }}</div>
-                <div class="muted small"><span v-if="s.route.custom" class="own">{{ t("route.own") }}</span>{{ kindText }}<template v-if="s.route.loop"> · {{ t("route.loop") }}</template></div>
+                <div class="muted small"><span v-if="s.route.custom" class="own">{{ t("route.own") }}</span><span v-if="s.route.timetable === 'gtfs'" class="own real" :title="t('route.realHint')">{{ t("route.real") }}</span>{{ kindText }}<template v-if="s.route.loop"> · {{ t("route.loop") }}</template></div>
               </div>
             </div>
             <dl class="facts">
@@ -713,6 +713,7 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .own-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .extend { margin-top: 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; small { font-weight: 400; color: var(--muted); } }
 .own { display: inline-block; white-space: nowrap; margin-right: 8px; padding: 1px 8px; border-radius: 4px; background: var(--panel-3); color: var(--ink); font-weight: 700; font-size: 12px; }
+.own.real { background: var(--line); color: var(--ink-on-line); }
 
 // ---- lines
 .line-row { display: flex; gap: 16px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; background: var(--panel-2); }

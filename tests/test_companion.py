@@ -1,4 +1,5 @@
 """Tests of companion/bus_routes_data.py: python -m unittest discover -s tests -p "test_companion.py" (from the repo root)."""
+import datetime
 import http.client
 import json
 import pathlib
@@ -295,6 +296,207 @@ class Towns2(unittest.TestCase):
                                  {"name": "Police", "lat": 49.9, "lon": 17.2, "kind": "village"}]})
             names = [p["name"] for p in json.loads(svc2.search("Police", 50.53, 16.23)[0])["places"]]
             self.assertEqual(names, ["Police nad Metují", "Police"])
+
+
+def tiny_gtfs(path):
+    """A small GTFS zip: one bus line (a weekday and a Sunday service, 3 stops), a tram line, a second way of the line."""
+    files = {
+        "agency.txt": 'agency_id,agency_name\n"A1","Bus Co"\n',
+        "routes.txt": 'route_id,agency_id,route_short_name,route_long_name,route_type\n'
+                      '"R1","A1","641361","361 Alpha-Gamma","701"\n"R2","A1","7","Tram","900"\n',
+        "trips.txt": 'route_id,service_id,trip_id,trip_headsign\n'
+                     '"R1","WK","T1","Gamma"\n"R1","WK","T2","Gamma"\n"R1","SUN","T3","Gamma"\n"R2","WK","T4","x"\n"R1","OLD","T5","Gamma"\n',
+        "calendar.txt": 'service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n'
+                        '"WK","1","1","1","1","1","0","0","20200101","20991231"\n'
+                        '"SUN","0","0","0","0","0","0","1","20200101","20991231"\n'
+                        '"OLD","1","1","1","1","1","1","1","20200101","20201231"\n',
+        "calendar_dates.txt": 'service_id,date,exception_type\n"WK","20261112","2"\n"SUN","20261117","1"\n',
+        "stops.txt": 'stop_id,stop_name,stop_lat,stop_lon\n"S1","Alpha, aut.st.",50.0000,16.0000\n'
+                     '"S2","Beta, n.Met.",50.0100,16.0000\n"S3","Gamma",50.0200,16.0000\n"S4","Unused",51.0,17.0\n',
+        "stop_times.txt": 'trip_id,arrival_time,departure_time,stop_id,stop_sequence\n'
+                          '"T1","07:00:00","07:00:00","S1","1"\n"T1","07:10:00","07:10:00","S2","2"\n"T1","07:25:00","07:25:00","S3","3"\n'
+                          '"T2","09:00:00","09:00:00","S1","1"\n"T2","09:11:00","09:11:00","S2","2"\n"T2","09:26:00","09:26:00","S3","3"\n'
+                          '"T3","25:00:00","25:00:00","S1","1"\n"T3","25:12:00","25:12:00","S2","2"\n"T3","25:30:00","25:30:00","S3","3"\n'
+                          '"T4","08:00:00","08:00:00","S1","1"\n"T4","08:05:00","08:05:00","S2","2"\n'
+                          '"T5","06:00:00","06:00:00","S1","1"\n"T5","06:10:00","06:10:00","S2","2"\n',
+    }
+    with zipfile.ZipFile(path, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+
+
+TODAY = datetime.date(2026, 11, 11)             # a Wednesday
+
+
+class Timetables(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = pathlib.Path(cls.tmp.name)
+        tiny_gtfs(cls.dir / "feed.zip")
+        cls.stats = d.build_gtfs_index(cls.dir / "feed.zip", cls.dir / "gtfs_XX.db", TODAY)
+        cls.gtfs = d.Gtfs(cls.dir, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+        cls.gtfs.preload()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.gtfs.dbs["XX"].close()
+        cls.tmp.cleanup()
+
+    def test_ref_is_the_number_the_public_knows(self):
+        self.assertEqual(d.gtfs_ref("641361", "361 Police n.Met.-Machov"), "361")
+        self.assertEqual(d.gtfs_ref("000512", "Praha -Svaljava"), "512")
+        self.assertEqual(d.gtfs_ref("119", "Letiště - Nádraží"), "119")
+        self.assertEqual(d.gtfs_ref("", "N1 Centrum"), "N1")
+        self.assertEqual(d.gtfs_ref("641305", "17. listopadu-Hradec"), "305")
+
+    def test_index_counts_running_trips_of_buses_only(self):
+        # T1 and T2 (weekdays), T3 (Sunday); the tram, and the trip of the service that ended in 2020, are out
+        self.assertEqual(self.stats, {"stops": 3, "patterns": 1, "trips": 3})
+
+    def test_lines_near_a_stop_look_like_osm_relations(self):
+        f = self.gtfs.lines_near(50.0, 16.0, 300)
+        self.assertEqual([s[1] for s in f["stops"]], ["Alpha, aut.st."])
+        (ln,) = f["lines"]
+        self.assertEqual((ln["tags"]["ref"], ln["tags"]["from"], ln["tags"]["to"]), ("361", "Alpha, aut.st.", "Gamma"))
+        self.assertEqual((ln["n"], ln["ordered"], ln["members"][0]["i"]), (3, True, 1))
+        self.assertGreaterEqual(ln["id"], d.GTFS_ROUTE)
+        self.assertEqual(self.gtfs.lines_near(50.5, 16.5, 300)["lines"], [])
+
+    def test_pattern_has_times_and_a_weekday_list(self):
+        pat = self.gtfs.pattern(d.GTFS_ROUTE + 1)
+        self.assertEqual([s["off"] for s in pat["stops"]], [0, 600, 1500])
+        self.assertEqual(pat["starts"]["3"], [7 * 3600, 9 * 3600])          # Wednesday: both weekday trips
+        self.assertEqual(pat["starts"]["7"], [25 * 3600])                    # Sunday: the night trip after midnight
+        self.assertEqual(pat["starts"]["6"], [])                             # Saturday: nothing
+        # Thursday 12 Nov is cancelled in calendar_dates, the next Thursday runs: the busier of the two counts
+        self.assertEqual(pat["starts"]["4"], [7 * 3600, 9 * 3600])
+
+    def test_search_stops_by_words_and_lines_by_number(self):
+        self.assertEqual([r[1] for r in self.gtfs.stops_named("alpha aut", 50.0, 16.0)], ["Alpha, aut.st."])
+        self.assertEqual([r[1] for r in self.gtfs.stops_named("be", 50.0, 16.0)], ["Beta, n.Met."])
+        self.assertEqual(self.gtfs.stops_named("zzz", 50.0, 16.0), [])
+        (ln,) = self.gtfs.lines_numbered("361", 50.0, 16.0)
+        self.assertEqual(ln["tags"]["to"], "Gamma")
+        self.assertEqual(self.gtfs.lines_numbered("362", 50.0, 16.0), [])
+
+    def test_merge_uses_the_osm_stop_and_drops_the_osm_line_with_the_same_number(self):
+        f = self.gtfs.lines_near(50.0, 16.0, 300)
+        osm = {"elements": [
+            {"type": "node", "id": 77, "lat": 50.00015, "lon": 16.0, "tags": {"highway": "bus_stop", "name": "Alpha, autobusové stanoviště"}},
+            {"type": "node", "id": 78, "lat": 50.0, "lon": 16.0001, "tags": {"public_transport": "stop_position"}},
+            {"type": "relation", "id": 5, "tags": {"type": "route", "ref": "361"}, "members": []},
+            {"type": "relation", "id": 6, "tags": {"type": "route", "ref": "9"}, "members": []}]}
+        out = json.loads(d.merge_gtfs(json.dumps(osm), f))
+        rels = [e for e in out["elements"] if e["type"] == "relation"]
+        self.assertEqual(sorted(e["id"] for e in rels if e["id"] < d.GTFS_ROUTE), [6])     # the OSM 361 is gone, the OSM 9 stays
+        gt = [e for e in rels if e["id"] >= d.GTFS_ROUTE][0]
+        self.assertEqual(gt["members"][0]["ref"], 77)                                      # the OSM stop, not a second one
+        self.assertEqual([e for e in out["elements"] if e["id"] >= d.GTFS_NODE], [])
+        self.assertNotIn("partial", out)
+        # no map answer: the timetable's own stop, and the answer says it is partial
+        only = json.loads(d.merge_gtfs(None, self.gtfs.lines_near(50.0, 16.0, 300), partial=True))
+        self.assertTrue(only["partial"])
+        self.assertEqual(only["elements"][0]["tags"]["name"], "Alpha, aut.st.")
+
+    def service(self, upstream, cache="cache", **kw):
+        return d.Service(d.Cache(self.dir / cache), upstream=upstream, gtfs=self.gtfs, **kw)
+
+    def test_nearby_does_not_wait_for_a_slow_map_server(self):
+        release = threading.Event()
+        saved, d.NEARBY_WAIT_S = d.NEARBY_WAIT_S, 0.2
+
+        def slow(query):
+            release.wait(5)
+            return json.dumps({"elements": [{"type": "node", "id": 1, "lat": 50.0, "lon": 16.0, "tags": {"highway": "bus_stop", "name": "A"}}]})
+        try:
+            svc = self.service(slow)
+            t0 = time.time()
+            text, cached = svc.nearby(50.0001, 16.0001)
+            self.assertLess(time.time() - t0, 2)
+            out = json.loads(text)
+            self.assertTrue(out["partial"])
+            self.assertTrue([e for e in out["elements"] if e["type"] == "relation"])
+            release.set()
+            time.sleep(0.3)                                                 # the fetch finished in the background and was kept
+            text, cached = svc.nearby(50.0001, 16.0001)
+            self.assertNotIn("partial", json.loads(text))
+            self.assertTrue(cached)
+        finally:
+            d.NEARBY_WAIT_S = saved
+            release.set()
+
+    def test_nearby_without_a_map_server_or_timetables(self):
+        def down(query):
+            raise RuntimeError("all down")
+        svc = self.service(down, cache="cache_down")
+        saved, d.NEARBY_WAIT_S = d.NEARBY_WAIT_S, 0.5
+        try:
+            self.assertTrue(json.loads(svc.nearby(50.0, 16.0)[0])["partial"])
+            with self.assertRaises(RuntimeError):                          # nowhere near a timetable stop: the error stays
+                svc.nearby(50.7, 16.7)
+        finally:
+            d.NEARBY_WAIT_S = saved
+
+    def test_route_of_a_timetable_line_has_a_road_and_times(self):
+        svc = self.service(lambda q: "{}", router=lambda pts: json.dumps(d.straight_path(pts)))
+        out = json.loads(svc.gtfs_route(d.GTFS_ROUTE + 1))
+        rel = out["elements"][0]
+        way = [m for m in rel["members"] if m["type"] == "way"][0]
+        self.assertEqual((way["geometry"][0]["lat"], way["geometry"][-1]["lat"]), (50.0, 50.02))
+        self.assertEqual([m["ref"] for m in rel["members"] if m["type"] == "node"], [e["id"] for e in out["elements"][1:]])
+        self.assertEqual(rel["gtfs"]["offs"], [0, 600, 1500])
+        self.assertEqual(len(out["elements"]) - 1, 3)
+        with self.assertRaises(RuntimeError):
+            svc.gtfs_route(d.GTFS_ROUTE + 999)
+
+    def test_local_search_adds_timetable_stops_but_not_a_second_copy(self):
+        svc = self.service(lambda q: "{}")
+        out = svc.local_search("alpha", 50.0, 16.0)
+        self.assertEqual([e["tags"]["name"] for e in out["elements"]], ["Alpha, aut.st."])
+        svc.index.add({"elements": [{"type": "node", "id": 9, "lat": 50.00002, "lon": 16.0,
+                                     "tags": {"name": "Alpha, autobusové stanoviště", "highway": "bus_stop"}}]})
+        out = svc.local_search("alpha", 50.0, 16.0)
+        self.assertEqual([e["id"] for e in out["elements"]], [9])
+
+    def test_a_missing_feed_is_nothing(self):
+        g = d.Gtfs(None)
+        self.assertFalse(g.ready())
+        self.assertEqual(g.status()["ready"], [])
+        g.want(["CZ"])                                  # no folder: nothing downloaded
+
+    def test_the_feed_is_downloaded_indexed_and_opened(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def fetch(url, dest, max_bytes, progress):
+                tiny_gtfs(dest)
+                progress(5 * 1048576, 10 * 1048576)
+            g = d.Gtfs(tmp, fetch=fetch, feeds={"XX": {"url": "x", "mb": 1}}, today=lambda: TODAY)
+            self.assertTrue(g.stale("XX"))
+            g.want(["XX", "YY"])
+            for _ in range(100):
+                if g.ready("XX"):
+                    break
+                time.sleep(0.05)
+            self.assertTrue(g.ready("XX"))
+            self.assertFalse(g.stale("XX"))
+            self.assertEqual(len(g.lines_near(50.0, 16.0, 300)["lines"]), 1)
+            self.assertFalse((pathlib.Path(tmp) / "gtfs_XX.zip").exists())          # the 130 MB archive is not kept
+            g.dbs["XX"].close()
+
+    def test_a_failed_download_is_remembered_and_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def fetch(url, dest, max_bytes, progress):
+                raise urllib.error.URLError("offline")
+            g = d.Gtfs(tmp, fetch=fetch, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+            g.want(["XX"])
+            for _ in range(100):
+                if g.state.get("XX", {}).get("state") == "failed":
+                    break
+                time.sleep(0.05)
+            self.assertEqual(g.state["XX"]["state"], "failed")
+            self.assertFalse(g.ready())
+            g.want(["XX"])                              # not tried again within the hour
+            self.assertNotIn("XX", g._building)
 
 
 class Progress(unittest.TestCase):

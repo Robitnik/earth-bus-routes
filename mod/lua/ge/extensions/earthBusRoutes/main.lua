@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.7.0'
+M.VERSION = '0.8.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -91,6 +91,12 @@ local function startIndexFor(route)
   local st = S.sel.station and stationRef(S.sel.station)
   if S.sel.mode == 'first' or not st then return 1 end
   return (menu.nearestStopIndex(route, st.lat, st.lon))
+end
+
+-- leaving the menu: the service need not be asked what it is busy with any more
+local function goPlay()
+  datasvc.watching = false
+  world.navigate('play')
 end
 
 local function currentRoute() return S.sel.routeId and S.routes[S.sel.routeId] or nil end
@@ -1020,12 +1026,12 @@ function M.uiOpen()
   if datasvc.state.features == nil then datasvc.ping(function() publish() end) end
   S.screen = S.trip and 'trip' or ((S.result and S.result.show) and 'result') or 'nearby'
   if S.screen == 'nearby' then loadNearby(false) else publish() end
-  world.navigate('earthBusRoutes')
+  datasvc.watching = true world.navigate('earthBusRoutes')
 end
 
 function M.toggleMenu() M.uiOpen() end
 
-function M.uiClose() world.navigate('play') end
+function M.uiClose() goPlay() end
 
 function M.uiState() publish() end
 
@@ -1188,7 +1194,7 @@ local function beginTrip(plan, rotate)
   world.busDisplay(veh, plan.route, stopsAhead(S.trip))
   gpsAhead(S.trip)
   S.screen = 'trip'
-  world.navigate('play')
+  goPlay()
   publish()
   M.sendHud()
   log('I', TAG, ('trip started: %s %s -> %s from stop %d, clock %s'):format(plan.route.ref, tostring(plan.route.from), tostring(plan.route.to),
@@ -1208,7 +1214,7 @@ function M.uiStart()
   if not ok then S.err = 'Could not take you to the stop: ' .. tostring(err) publish() return end
   S.starting = { plan = plan, t = 0, seenTeleport = false }
   publish()
-  world.navigate('play')
+  goPlay()
   world.toast('Taking you to ' .. tostring(stop.name) .. '…', 5)
 end
 
@@ -1242,7 +1248,7 @@ function M.uiDriveToStart()
   S.err = nil
   world.gpsRoute({ { lat = stop.lat, lon = stop.lon, name = stop.name } })
   world.toast('Drive to ' .. tostring(stop.name) .. ': the trip begins there.', 6)
-  world.navigate('play')
+  goPlay()
   publish()
 end
 
@@ -1338,7 +1344,7 @@ local function finishTrip(t)
   endClockAndGps()
   S.screen = 'result'
   publish()
-  world.navigate('earthBusRoutes')
+  datasvc.watching = true world.navigate('earthBusRoutes')
   guihooks.trigger('EarthBusRoutesHud', { finished = true, result = S.result })
 end
 

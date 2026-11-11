@@ -17,6 +17,8 @@ local memo = {}              -- path -> decoded data, for this game session
 M.state = { up = nil, error = nil, version = nil, lastDown = nil, features = nil, progress = nil }
 M.onProgress = nil           -- called when what the service is busy with changes (the menu shows it)
 local pollTimer = 0
+M.watching = false           -- the menu is open: ask what the service is busy with even when no request of ours is waiting
+local idleTimer = 0
 
 local function finish(job, data, info)
   for _, cb in ipairs(job.cbs) do pcall(cb, data, info) end
@@ -149,11 +151,17 @@ local function pollProgress(dt)
   if pollTimer < 1 then return end
   pollTimer = 0
   if active == nil then
-    if M.state.progress ~= nil then
-      M.state.progress = nil
-      if M.onProgress then pcall(M.onProgress) end
+    -- nothing of ours is waiting; the service may still be downloading the timetables (a minute, once): look every 3 s
+    -- while the menu is open
+    idleTimer = idleTimer + 1
+    if not M.watching or idleTimer < 3 then
+      if not M.watching and M.state.progress ~= nil then
+        M.state.progress = nil
+        if M.onProgress then pcall(M.onProgress) end
+      end
+      return
     end
-    return
+    idleTimer = 0
   end
   if M.has('progress') ~= true then return end
   M.get('/v1/progress', function(data)
@@ -184,7 +192,8 @@ function M.update(dt)
     M.state.up, M.state.error = true, nil
     learn(data)
     local payload = data.data or data
-    if job.path:find('/v1/info', 1, true) == nil then memo[job.path] = { data = payload } end
+    -- (an answer marked partial has the timetables only, the map's part is still coming: not kept for the session)
+    if job.path:find('/v1/info', 1, true) == nil and not (type(payload) == 'table' and payload.partial) then memo[job.path] = { data = payload } end
     finish(job, payload, { cached = data.cached == true })
   elseif req.state == 'error' then
     local job = active.job

@@ -28,10 +28,14 @@ const text = computed(() => {
     parts.push(t("prog.osrm"))
   } else if (b.what === "photon") {
     parts.push(t("prog.photon"))
+  } else if (b.what === "gtfs") {
+    parts.push(b.stage === "index" ? t("prog.gtfs.index", { pct: b.pct || 0 }) : t("prog.gtfs.download", { done: b.done || 0, total: b.total || 0 }))
+  } else if (b.what === "geonames") {
+    parts.push(t("prog.geonames"))
   } else {
     parts.push(label)
   }
-  parts.push(t("prog.seconds", { n: Math.floor(b.elapsed || 0) }))
+  if (b.what !== "gtfs") parts.push(t("prog.seconds", { n: Math.floor(b.elapsed || 0) }))
   const more = p.value.busy.length - 1
   if (more > 0) parts.push(t("prog.more", { n: more }))
   return parts.join(" · ")

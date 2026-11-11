@@ -215,6 +215,36 @@ function T.shuffled_stops_go_by_the_road()
   assert(not loop.shuffled)
 end
 
+-- A line of the national timetables (service 0.8.0 asks the routing server for the road through the stops): the mod reads it
+-- like a relation, and the stops carry their real times.
+function T.a_line_of_the_timetables_is_a_route_with_real_times()
+  local r = assert(osm.parseRoute(H.fixture('route_gtfs_360')))
+  assert(#r.stops == 12 and r.stops[1].name == 'Police n.Met.,aut.st.', 'first: ' .. tostring(r.stops[1].name))
+  assert(r.timetable == 'gtfs' and #r.gtfsOffs == 12 and r.gtfsOffs[1] == 0 and r.gtfsOffs[12] == 1320)
+  for i = 2, #r.stops do
+    assert(r.stops[i].along >= r.stops[i - 1].along - 30, ('stop %d goes backwards'):format(i))
+    assert(r.gtfsOffs[i] >= r.gtfsOffs[i - 1])
+  end
+  local sched = require('earthBusRoutes/schedule')
+  local trips = sched.generate(r, 3)                                  -- a Wednesday
+  assert(#trips >= 3 and trips[1].start == 19500 and trips[2].start == 23100 and trips[3].start == 26520, 'the real departures: ' .. #trips)
+  assert(sched.scheduled(trips[1], 12) == 19500 + 1320, 'the last stop 22 minutes after the start')
+  -- a Saturday has its own list
+  local sat = sched.generate(r, 6)
+  assert(#sat >= 2 and sat[1].start == 27660)
+  -- the made-up opposite direction has no real times (they would be the wrong way round)
+  local back = osm.reversed(r)
+  assert(back.timetable == nil and back.gtfsOffs == nil)
+  assert(#sched.generate(back, 3) > 5, 'generated instead')
+end
+
+function T.a_loop_of_the_timetables_keeps_its_first_stop()
+  local r = assert(osm.parseRoute(H.fixture('route_gtfs_363')))
+  assert(r.stops[1].name == 'Police n.Met.,aut.st.' and r.stops[#r.stops].name == r.stops[1].name)
+  assert(not r.rotated, 'the timetable says where it starts')
+  assert(r.timetable == 'gtfs' and r.gtfsOffs[#r.stops] > 1500)
+end
+
 function T.same_stop_name_reads_abbreviations()
   assert(osm.sameStopName('Police nad Metují, aut.st.', 'Police nad Metují, autobusové stanoviště'))
   assert(osm.sameStopName('Náchod, aut. nádraží', 'Náchod, autobusové nádraží'))

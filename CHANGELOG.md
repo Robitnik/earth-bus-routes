@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.7.0 (not released yet)
+## 0.8.0 (not released yet)
+
+- **Every bus line of the country, with its real timetable (Czechia first).** The data service downloads the national timetable register once (CIS JŘ through the JrUtil project: 13 000 lines, 37 000 stops; 124 MB, about a minute to download and prepare, shown in the progress line), keeps it on this computer and refreshes it weekly. Lines the map lacks now appear: at Police nad Metují bus station 361 and 375 (and 360, 363, 305, each both ways) are listed under From here / To here / Through. A line made from the timetable has all its stops in the right order; the road through them comes from the routing server.
+- **The real timetable is used**: the departures of the line on that weekday (the first shown is the real first bus) and the time at every stop, instead of the generated ones. A "Real timetable" badge marks such a line. The made-up opposite direction of a line is still generated.
+- **The stops and lines of a place come at once** from the timetable even when the map server is slow or down (waits for it 1.5 s, then answers; the map's lines and stations are added the next time). Stops by name and lines by number are found in the timetable too.
+- Off switch: start the service with the environment variable `BNE_BUSDATA_GTFS=0`. Timetables © CIS JŘ (the Ministry of Transport; no conditions), stop positions © OpenStreetMap contributors / open data of towns (see the footer).
+- Data service 0.8.0 (update it on the Add-ons page too).
+
+## 0.7.0
 
 - **Towns are found as you type, in milliseconds.** The data service keeps the towns and villages of the countries round you on this computer (GeoNames: Czechia 1.6 MB, Poland 2 MB, plus the world's big towns, downloaded once in the background and refreshed monthly). Typing "Pol" shows Police nad Metují at once (2 to 30 ms); Enter adds the geocoder's answer in one request (under a second, was three requests and up to two minutes when it fell back to Overpass). The map database is asked only when neither knows the name.
 - **The map of towns opens at once** from the same files (8 ms; was an Overpass query that often failed after minutes).
