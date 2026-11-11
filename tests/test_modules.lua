@@ -6,7 +6,7 @@ function T.all_modules_load()
   H.reset()
   for _, n in ipairs({ 'geomath', 'osm', 'schedule', 'demand', 'scoring', 'http', 'datasvc', 'trip', 'menu', 'world', 'main',
     'builder', 'markers', 'quick', 'cabin', 'shift', 'shiftrun', 'connections', 'dispatch', 'ghost', 'ghostrun', 'career', 'careersvc',
-    'speedlimit', 'rules', 'busnet', 'busnetrun' }) do
+    'speedlimit', 'rules', 'busnet', 'busnetrun', 'routegraph' }) do
     package.loaded['earthBusRoutes/' .. n] = nil
     local ok, m = pcall(require, 'earthBusRoutes/' .. n)
     assert(ok, n .. ': ' .. tostring(m))
@@ -17,7 +17,7 @@ end
 -- the game's LuaJIT is Lua 5.1: no goto-free integer division, bit operators or integer literals of 5.3
 function T.no_lua53_only_syntax()
   local dir = 'mod/lua/ge/extensions/earthBusRoutes/'
-  for _, n in ipairs({ 'geomath', 'osm', 'schedule', 'demand', 'scoring', 'http', 'datasvc', 'trip', 'menu', 'world', 'main' }) do
+  for _, n in ipairs({ 'geomath', 'osm', 'schedule', 'demand', 'scoring', 'http', 'datasvc', 'trip', 'menu', 'world', 'main', 'routegraph' }) do
     local src = readFileText(dir .. n .. '.lua')
     src = src:gsub('%-%-[^\n]*', ''):gsub('"[^"\n]*"', '""'):gsub("'[^'\n]*'", "''")   -- comments and strings out
     assert(not src:find('//'), n .. ': integer division //')
