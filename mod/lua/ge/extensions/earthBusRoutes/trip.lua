@@ -4,6 +4,9 @@
 local geo = require('earthBusRoutes/geomath')
 local demand = require('earthBusRoutes/demand')
 local scoring = require('earthBusRoutes/scoring')
+local schedule = require('earthBusRoutes/schedule')
+local dispatch = require('earthBusRoutes/dispatch')
+local connections = require('earthBusRoutes/connections')
 local M = {}
 
 M.ZONE_M = 35            -- the bus is "at" a stop this near its platform ...
@@ -19,6 +22,11 @@ M.STOP_SPEED = 1.0       -- m/s: slower than this the bus stands
 M.GO_SPEED = 2.0         -- m/s: faster than this after standing it has left
 M.NO_DOORS_DWELL_S = 3   -- a vehicle without doors: standing this long counts as doors open
 M.END_DWELL_S = 3        -- at the terminus the trip ends this long after the last passenger is out
+-- tickets sold by the driver (suburban and intercity lines only; short on purpose, no mini-game)
+M.TICKET_SHARE = 0.25    -- of those who board buy a ticket from the driver
+M.TICKET_S = 1.5         -- each one holds the doors this much longer
+M.TICKET_MAX_S = 12      -- the dwell at one stop grows by at most this much
+M.TICKET_FARE_K = 2      -- the price of a ticket in fares
 
 -- plan = { route, trips (timetable) or nil, entry (the chosen scheduled trip) or nil, startIndex, day, clock (s),
 --          opts = { density, difficulty, timeScale, weather }, vehicle = { bus, seats, standing } }
@@ -36,10 +44,15 @@ function M.new(plan)
     timer = 0, standing = 0, doorWasOpen = false, doorOpenedHere = false, minDist = math.huge, inZone = false,
     arrivedAt = nil, finished = false, along = (route.stops[plan.startIndex or 1] or {}).along or 0, off = 0, alongTimer = 0, dist = nil, lastDeparture = nil,
     events = {}, departedStops = 0, notes = {},
+    conn = {}, offered = {}, announced = {}, connCount = 0, connOffers = 0, waived = 0,   -- transfers (connections.lua)
+    ticketExtra = 0,                                                                      -- seconds of ticket selling at this stop
   }
   t.score = scoring.new({ difficulty = t.opts.difficulty, bus = not plan.vehicle or plan.vehicle.bus ~= false,
     planned = #route.stops - t.startIndex + 1 })
   t.phase = 'start'                                     -- begins standing at the chosen first stop
+  local kind = schedule.kindOf(route, plan.ctx)
+  t.tickets = t.opts.tickets ~= false and kind ~= 'city' and kind ~= 'main'
+  dispatch.start(t, plan.ctx, function(i) return M.scheduledArrival(t, i) end)
   return t
 end
 
@@ -112,7 +125,7 @@ local function makeWaiting(t)
   local i = t.idx
   local n = demand.waiting(t.route, t.w, t.central, i, hour(t), weekend(t), sinceLast(t, i),
     { tripId = t.entry and t.entry.trip.id or 0, day = t.day, density = t.opts.density, weather = t.opts.weather })
-  t.waiting = n
+  t.waiting = dispatch.adjustWaiting(t, i, n)
 end
 
 local function onboardFor(t, i)
@@ -123,13 +136,15 @@ end
 
 -- Does the next stop need the bus? (somebody gets off, or people wait)
 local function needed(t)
-  return onboardFor(t, t.idx) > 0 or (t.waiting or 0) > 0 or t.idx == #t.route.stops
+  if dispatch.closed(t, t.idx) then return false end             -- a stop out of service: driving past is no fault
+  return dispatch.requested(t, t.idx) or onboardFor(t, t.idx) > 0 or (t.waiting or 0) > 0 or t.idx == #t.route.stops
 end
 
 local function startStopping(t, sample)
   t.phase = 'atStop'
   t.arrivedAt = t.clock
   t.timer, t.standing, t.doorOpenedHere = 0, 0, false
+  t.ticketExtra = 0
   t.alightLeft = onboardFor(t, t.idx)
   if t.idx == #t.route.stops then t.alightLeft = #t.onboard end
   if t.waiting == nil then makeWaiting(t) end
@@ -137,9 +152,11 @@ local function startStopping(t, sample)
   t.lastBoard, t.lastAlight = 0, 0
   local sched = M.scheduledArrival(t, t.idx)
   local delta = sched and (t.clock - sched) or nil
+  if delta and delta > 0 then delta = math.max(0, delta - t.waived) end   -- time spent waiting for a connection is not lateness
   t.arrivalDelta = delta
   scoring.arrived(t.score, delta)
   t.requested = false
+  connections.arrive(t)
   emit(t, 'arrived', { index = t.idx, stop = M.stop(t), delta = delta })
 end
 
@@ -153,6 +170,8 @@ local function depart(t)
   local i = t.idx
   local sched = M.scheduledDeparture(t, i)
   local early = sched and math.max(0, sched - t.clock) or 0
+  connections.leave(t)
+  dispatch.leave(t, i)
   scoring.departed(t.score, early, t.lastBoard, t.lastAlight, math.max(0, t.boardLeft or 0))
   emit(t, 'departed', { index = i, stop = M.stop(t, i), early = early, boarded = t.lastBoard, alighted = t.lastAlight })
   t.lastDeparture = t.clock
@@ -187,6 +206,13 @@ local function serve(t, dt, doorsOpen)
       t.boardLeft = t.boardLeft - 1
       t.boarded = t.boarded + 1
       t.lastBoard = t.lastBoard + 1
+      -- some of them buy a ticket from the driver: a moment longer at the doors, capped per stop
+      if t.tickets and t.ticketExtra < M.TICKET_MAX_S and rand() < M.TICKET_SHARE then
+        local s = math.min(M.TICKET_S, M.TICKET_MAX_S - t.ticketExtra)
+        t.ticketExtra = t.ticketExtra + s
+        t.timer = t.timer - s
+        scoring.ticket(t.score, t.score.fare * M.TICKET_FARE_K)
+      end
     else
       return
     end
@@ -235,19 +261,21 @@ function M.update(t, dt, s)
       t.waiting, t.inZone, t.minDist = nil, false, math.huge
       if t.idx > #t.route.stops then finish(t) end
     end
-    t.requested = onboardFor(t, t.idx) > 0
+    t.requested = onboardFor(t, t.idx) > 0 or dispatch.requested(t, t.idx)
   elseif t.phase == 'atStop' then
     serve(t, dt, doorsOpen)
     local done = t.alightLeft <= 0 and t.boardLeft <= 0
     if t.idx == #t.route.stops then
       if done and (t.doorOpenedHere or #t.onboard == 0) then
         t.endTimer = (t.endTimer or 0) + dt
-        if t.endTimer >= M.END_DWELL_S then finish(t) end
+        if t.endTimer >= M.END_DWELL_S and dispatch.canFinish(t) then finish(t) end
       end
     elseif speed > M.GO_SPEED then
       depart(t)
     end
   end
+  dispatch.step(t, dt, doorsOpen)
+  connections.step(t, dt, doorsOpen)
 end
 
 -- The numbers the HUD shows
@@ -283,6 +311,9 @@ function M.hud(t)
     notes = M.recentNotes(t), noteSeq = t.score.noteSeq or 0,
     atStop = t.phase == 'atStop' and { alightLeft = t.alightLeft, boardLeft = t.boardLeft, doorsHint = not t.doorOpenedHere } or nil,
     finished = t.finished,
+    dispatch = dispatch.current(t),                                              -- the dispatcher's message: { key, params, kind, seq }
+    hold = t.hold and { ref = t.hold.ref, left = math.max(0, t.hold.at - t.clock), approx = t.hold.approx } or nil,
+    selling = t.ticketExtra > 0 and t.timer < 0 and t.phase == 'atStop' or nil,   -- the driver is selling tickets
   }
 end
 

@@ -101,6 +101,9 @@ const DICT = {
     "lang": "Language", "units.m": "m", "units.km": "km",
     "day.1": "Monday", "day.2": "Tuesday", "day.3": "Wednesday", "day.4": "Thursday", "day.5": "Friday", "day.6": "Saturday", "day.7": "Sunday",
     "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
+    "note.Connection made": "Connection made", "note.Missed connection": "Missed connection", "note.Wheelchair passenger helped": "Wheelchair passenger helped",
+    "note.Wheelchair passenger left behind": "Wheelchair passenger left behind", "note.Bag handed in": "Bag handed in", "note.Group served": "Group served",
+    "res.tickets": "Tickets sold", "res.connections": "Connections made",
   },
   uk: {
     "title": "Автобусні маршрути",
@@ -200,6 +203,9 @@ const DICT = {
     "lang": "Мова", "units.m": "м", "units.km": "км",
     "day.1": "Понеділок", "day.2": "Вівторок", "day.3": "Середа", "day.4": "Четвер", "day.5": "П'ятниця", "day.6": "Субота", "day.7": "Неділя",
     "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
+    "note.Connection made": "Пересадку дочекалися", "note.Missed connection": "Пропущена пересадка", "note.Wheelchair passenger helped": "Пасажиру на візку допомогли",
+    "note.Wheelchair passenger left behind": "Пасажира на візку залишили", "note.Bag handed in": "Сумку віддано", "note.Group served": "Групу обслужено",
+    "res.tickets": "Продано квитків", "res.connections": "Пересадок дочекалися",
   },
 }
 

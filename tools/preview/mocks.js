@@ -15,6 +15,9 @@ export const HUD_STATES = {
   armed: { armed: { ref: "305", colour: "#2f9e8f", to: "Hradec Králové", stop: "Náchod, aut. nádraží", dist: 3420, units: "km/h" } },
   done: { finished: true, result: { grade: "A", points: 874 } },
   mph: { ...clone(base), units: "mph" },
+  radio: { ...clone(base), dispatch: { key: "school", params: { stop: "Náchod, ZŠ Plhov", n: 11 }, kind: "event", seq: 1 } },
+  transfer: { ...clone(base), dispatch: { key: "connection", params: { stop: "Náchod, aut. nádraží", ref: "360", time: "14:31", mins: 3 }, kind: "transfer", seq: 2 } },
+  hold: { ...clone(base), phase: "atStop", atStop: { alightLeft: 0, boardLeft: 0, doorsHint: false }, hold: { ref: "360", left: 95 } },
 }
 
 const lines = [

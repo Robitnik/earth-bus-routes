@@ -26,6 +26,7 @@ local builder = require('earthBusRoutes/builder')
 local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
+local connections = require('earthBusRoutes/connections')
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -1244,7 +1245,9 @@ local function buildPlan()
   return {
     route = route, trips = c.trips, entry = entry, startIndex = idx, day = c.day, clock = clock, ctx = c.ctx,
     opts = { density = S.opts.density or 'normal', difficulty = S.opts.difficulty or 'normal', timeScale = S.opts.timeScale or 1,
-      weather = world.weather() },
+      weather = world.weather(),
+      -- the dispatcher's events, tickets sold by the driver and transfers: on unless the player turned them off
+      events = S.opts.events ~= 'off', tickets = S.opts.tickets ~= 'off', transfers = S.opts.transfers ~= 'off' },
     vehicle = { bus = veh.bus }, vehicleName = veh.name,
   }
 end
@@ -1263,6 +1266,59 @@ local function stopsAhead(t, n)
   local out = {}
   for i = t.idx, math.min(#t.route.stops, t.idx + (n or 8) - 1) do out[#out + 1] = t.route.stops[i] end
   return out
+end
+
+-- ---- transfers (plan 006 stage C): what arrives at the stops ahead ------------------------------------------------------------------
+
+-- The lines of the map's cell that call at a stop (for a guess where the timetables do not reach): { { ref, to, kind } }, and
+-- whether the stop is a bus station
+local function linesAtStop(stop)
+  if not (S.cell and S.cell.stations) then return nil end
+  local st, best = nil, connections.NEAR_M
+  for _, c in ipairs(S.cell.stations) do
+    local d = geo.dist(stop.lat, stop.lon, c.lat, c.lon)
+    if d <= best then st, best = c, d end
+  end
+  if not st then return nil end
+  local out = {}
+  for _, ln in ipairs(menu.linesAt(st, S.cell.routes)) do
+    out[#out + 1] = { ref = ln.ref, to = ln.variants[1] and ln.variants[1].to, kind = 'city' }
+  end
+  return out, st.station
+end
+
+-- Asks for the arrivals at the next three stops (once each). Real timetables: the data service; elsewhere a guess from the
+-- lines of the map. Never an error for the trip: whatever fails, there is simply no transfer.
+local function askConnections(t)
+  if not t or t.finished or t.opts.transfers == false then return end
+  t.connAsked = t.connAsked or {}
+  local stops = t.route.stops
+  for i = t.idx, math.min(#stops - 1, t.idx + 2) do
+    if not t.connAsked[i] then
+      t.connAsked[i] = true
+      local stop = stops[i]
+      local eta = trip.scheduledArrival(t, i) or (t.clock + math.max(0, (stop.along or 0) - (t.along or 0)) / connections.SPEED_M_S)
+      local tq = math.floor(eta) % 86400
+      local function guess()
+        local lines, station = linesAtStop(stop)
+        if not lines then return end
+        local others = {}
+        for _, ln in ipairs(lines) do if tostring(ln.ref) ~= tostring(t.route.ref) then others[#others + 1] = ln end end
+        local tt = connections.approx(others, tq, t.day, connections.WIN_MIN * 60)
+        connections.store(t, i, eta, tq, { arrivals = tt, lines = #lines + (station and connections.HUB_LINES or 0), approx = true })
+      end
+      if t.route.gtfsOffs then
+        if datasvc.has('connections') ~= false then
+          datasvc.connections(stop.lat, stop.lon, tq, t.day, t.route.ref, function(data)
+            if S.trip == t and data and data.arrivals then pcall(connections.store, t, i, eta, tq, data) end
+          end)
+        end
+      else
+        local ok, err = pcall(guess)
+        if not ok then log('W', TAG, 'transfers: ' .. tostring(err)) end
+      end
+    end
+  end
 end
 
 local function beginTrip(plan, rotate)
@@ -1284,6 +1340,7 @@ local function beginTrip(plan, rotate)
   end
   world.busDisplay(veh, plan.route, stopsAhead(S.trip))
   gpsAhead(S.trip)
+  pcall(askConnections, S.trip)
   S.screen = 'trip'
   goPlay()
   publish()
@@ -1422,7 +1479,7 @@ local function finishTrip(t)
   local back = S.reverseOf[t.route.id]
   S.result = {
     show = true, points = res.points, grade = res.grade, stars = res.stars, parts = res.parts, passengers = res.passengers,
-    revenue = res.revenue, served = res.served, planned = res.planned, missed = res.missed, notes = res.notes,
+    revenue = res.revenue, tickets = res.tickets, counts = res.counts, served = res.served, planned = res.planned, missed = res.missed, notes = res.notes,
     ref = t.route.ref, colour = t.route.colour, from = t.route.from, to = t.route.to, record = record, previous = previous,
     minutes = math.floor((t.clock - t.clock0) / 60 + 0.5), canReverse = back ~= nil and back ~= false,
     totals = { trips = stats.trips, passengers = stats.passengers, points = stats.points },
@@ -1513,9 +1570,11 @@ local function handleEvents(t)
       world.busDisplay(t.veh, t.route, stopsAhead(t))
       gpsAhead(t)
       S.doneStop = { index = e.data.index, at = S.markerClock or 0 }     -- its bay turns green and fades
+      pcall(askConnections, t)
     elseif e.name == 'missed' then
       world.toast('Missed stop: ' .. tostring(e.data.stop.name), 4)
       gpsAhead(t)
+      pcall(askConnections, t)
     elseif e.name == 'finished' then
       finishTrip(t)
       return true

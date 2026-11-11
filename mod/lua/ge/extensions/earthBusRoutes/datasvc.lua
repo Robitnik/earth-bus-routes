@@ -97,6 +97,13 @@ function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
 function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
+-- the lines arriving at the stop at (lat, lon) within a few minutes of `t` (s from midnight) on weekday `day`, `ref` left out
+-- (transfers: from the service's timetables, answered at once)
+function M.connections(lat, lon, t, day, ref, cb)
+  local path = ('/v1/connections?lat=%.5f&lon=%.5f&t=%d&day=%d&win=8'):format(lat, lon, t, day)
+  if ref and ref ~= '' then path = path .. '&ref=' .. http.urlencode(tostring(ref)) end
+  M.get(path, cb, { fast = true, total = 10 })
+end
 
 local function startNext()
   local job = table.remove(queue, 1)

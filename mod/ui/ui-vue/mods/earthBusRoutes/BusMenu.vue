@@ -414,6 +414,8 @@
             <div><dt>{{ t("res.stops") }}</dt><dd>{{ s.result.served }} / {{ s.result.planned }}</dd></div>
             <div><dt>{{ t("res.time") }}</dt><dd>{{ t("route.min", { n: s.result.minutes }) }}</dd></div>
             <div><dt>{{ t("res.income") }}</dt><dd>{{ s.result.revenue.toFixed(2) }}</dd></div>
+            <div v-if="s.result.tickets > 0"><dt>{{ t("res.tickets") }}</dt><dd>{{ s.result.tickets }}</dd></div>
+            <div v-if="s.result.counts && s.result.counts.connections > 0"><dt>{{ t("res.connections") }}</dt><dd>{{ s.result.counts.connections }}</dd></div>
           </dl>
           <ul v-if="s.result.notes && s.result.notes.length" class="notes">
             <li v-for="(n, i) in s.result.notes" :key="i"><span>{{ noteText(n.text) }}</span><b>{{ n.points }}</b></li>

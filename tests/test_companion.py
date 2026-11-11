@@ -1,6 +1,7 @@
 """Tests of companion/bus_routes_data.py: python -m unittest discover -s tests -p "test_companion.py" (from the repo root)."""
 import datetime
 import http.client
+import http.server
 import json
 import pathlib
 import sys
@@ -1015,6 +1016,109 @@ class Http(unittest.TestCase):
         s, j = self.get("/v1/status")
         self.assertEqual(s, 200)
         self.assertIn("served", j)
+
+
+# ---- connections (plan 006 stage C) ----------------------------------------------------------------------------------------
+
+def hub_gtfs(path):
+    """tiny_gtfs plus a second stop 89 m from Beta (S2, line 361's second stop) and three more lines: 42 arrives there at 07:14 and
+    08:20 on weekdays, 55 starts there (no arrivals), 9 arrives at 25:05 on the Sunday service."""
+    tiny_gtfs(path)
+    with zipfile.ZipFile(path) as z:
+        files = {n: z.read(n).decode("utf-8") for n in z.namelist()}
+    files["routes.txt"] += ('"R3","A1","42","42 Delta-Beta","701"\n"R5","A1","55","55 Beta-Gamma","701"\n'
+                            '"R6","A1","9","9 Delta-Beta","701"\n')
+    files["trips.txt"] += '"R3","WK","T6","Beta"\n"R3","WK","T7","Beta"\n"R5","WK","T8","Gamma"\n"R6","SUN","T9","Beta"\n'
+    files["stops.txt"] += '"S5","Delta",50.0300,16.0500\n"S6","Beta, nam.",50.0108,16.0000\n'
+    files["stop_times.txt"] += ('"T6","07:00:00","07:00:00","S5","1"\n"T6","07:14:00","07:14:00","S6","2"\n'
+                                '"T7","08:05:00","08:05:00","S5","1"\n"T7","08:20:00","08:20:00","S6","2"\n'
+                                '"T8","07:12:00","07:12:00","S6","1"\n"T8","07:30:00","07:30:00","S3","2"\n'
+                                '"T9","25:00:00","25:00:00","S5","1"\n"T9","25:05:00","25:05:00","S6","2"\n')
+    with zipfile.ZipFile(path, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+
+
+class Connections(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = pathlib.Path(cls.tmp.name)
+        hub_gtfs(cls.dir / "feed.zip")
+        d.build_gtfs_index(cls.dir / "feed.zip", cls.dir / "gtfs_XX.db", TODAY)
+        cls.gtfs = d.Gtfs(cls.dir, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+        cls.gtfs.preload()
+        cls.svc = d.Service(d.Cache(cls.dir / "cache"), upstream=lambda q: "{}", gtfs=cls.gtfs)
+        cls.httpd = d.QuietServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
+        cls.port = cls.httpd.server_address[1]
+        cls.httpd.RequestHandlerClass = d.make_handler(cls.svc, cls.port)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.gtfs.dbs["XX"].close()
+        cls.tmp.cleanup()
+
+    def get(self, path):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.putrequest("GET", path, skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.port}")
+        c.endheaders()
+        r = c.getresponse()
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+    def conn(self, **kw):
+        a = dict(t=7 * 3600 + 600, day=3, win_min=8, sid="S2", ref="361")
+        a.update(kw)
+        return d.gtfs_connections(self.gtfs, **a)
+
+    def test_the_other_line_of_the_hub_arrives_four_minutes_after_ours_and_ours_is_left_out(self):
+        out = self.conn()
+        self.assertEqual([(a["ref"], a["at"], a["to"], a["stop"]) for a in out["arrivals"]], [("42", 7 * 3600 + 14 * 60, "Beta, nam.", "Beta, nam.")])
+        self.assertEqual(out["stops"], 2)                         # Beta and the stop 89 m from it
+        self.assertEqual(out["lines"], 4)                         # 361, 42, 55 (starts there) and 9
+        self.assertEqual(out["source"], "gtfs")
+
+    def test_without_a_line_to_leave_out_ours_is_there_too_and_the_window_decides(self):
+        refs = [a["ref"] for a in self.conn(ref=None)["arrivals"]]
+        self.assertEqual(refs, ["361", "42"])                     # 07:10 then 07:14
+        refs = [a["ref"] for a in self.conn(ref=None, win_min=2)["arrivals"]]
+        self.assertEqual(refs, ["361"])                           # 07:14 is 4 minutes off
+        self.assertEqual(self.conn(t=12 * 3600)["arrivals"], [])
+
+    def test_a_way_that_starts_at_the_hub_has_no_arrivals(self):
+        out = self.conn(t=7 * 3600 + 12 * 60, win_min=1)          # line 55 leaves the hub at 07:12
+        self.assertEqual(out["arrivals"], [])
+
+    def test_the_hub_can_be_a_point_and_far_from_any_stop_it_is_nothing(self):
+        out = self.conn(sid=None, lat=50.0108, lon=16.0, ref=None)
+        self.assertEqual([a["ref"] for a in out["arrivals"]], ["361", "42"])
+        out = self.conn(sid=None, lat=55.0, lon=20.0)
+        self.assertEqual((out["arrivals"], out["stops"], out["lines"]), ([], 0, 0))
+        self.assertEqual(self.conn(sid="nope")["arrivals"], [])
+
+    def test_a_trip_of_last_nights_service_that_runs_on_past_midnight_is_found_today(self):
+        # line 9 runs 25:00-25:05 on the Sunday service: on Monday morning it arrives at 01:05
+        out = self.conn(day=1, t=3900, ref="361")
+        self.assertEqual([(a["ref"], a["at"]) for a in out["arrivals"]], [("9", 3900)])
+        self.assertEqual(self.conn(day=4, t=3900, ref="361")["arrivals"], [])      # (the feed adds a Sunday timetable to Tuesday 17th only)
+
+    def test_the_endpoint(self):
+        s, j = self.get("/v1/connections?sid=S2&t=25800&day=3&win=8&ref=361")
+        self.assertEqual((s, j["ok"]), (200, True))
+        self.assertEqual([a["ref"] for a in j["data"]["arrivals"]], ["42"])
+        s, j = self.get("/v1/connections?lat=50.0108&lon=16.0&t=25800&day=3")
+        self.assertEqual([a["ref"] for a in j["data"]["arrivals"]], ["361", "42"])
+        self.assertIn("connections", self.get("/v1/info")[1]["features"])
+        self.assertEqual(self.get("/v1/connections?t=1&day=3")[0], 400)             # no stop
+        self.assertEqual(self.get("/v1/connections?sid=S2&t=1&day=9")[0], 400)
+        self.assertEqual(self.get("/v1/connections?sid=S2&t=abc&day=3")[0], 400)
+        self.assertEqual(self.get("/v1/connections?lat=99&lon=1&t=1&day=3")[0], 400)
+
+    def test_without_timetables_it_is_an_empty_answer(self):
+        out = d.gtfs_connections(d.Gtfs(None), 25800, 3, sid="S2")
+        self.assertEqual((out["arrivals"], out["lines"]), ([], 0))
 
 
 if __name__ == "__main__":
