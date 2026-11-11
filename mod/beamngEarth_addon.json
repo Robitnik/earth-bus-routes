@@ -45,6 +45,39 @@
       "help": "The stop's bay on the road as in the game's bus mode: corner markers red while you come, orange in the bay, green when done; its name and who waits over it."
     },
     {
+      "key": "quickStart",
+      "label": "Next trip from here card",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "A card at the top of the Stops tab: the next departure from the stop you stand at, one press to start it."
+    },
+    {
+      "key": "ledBoard",
+      "label": "LED board in the bus",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "The HUD's LED board with the next stop and 'on request', and the bell when a passenger asks for a stop."
+    },
+    {
+      "key": "liveComfort",
+      "label": "Live comfort",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Standing passengers and the cup on the HUD; a hard brake with people standing makes one fall (-30 comfort)."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

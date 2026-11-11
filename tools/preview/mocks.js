@@ -15,6 +15,16 @@ export const HUD_STATES = {
   armed: { armed: { ref: "305", colour: "#2f9e8f", to: "Hradec Králové", stop: "Náchod, aut. nádraží", dist: 3420, units: "km/h" } },
   done: { finished: true, result: { grade: "A", points: 874 } },
   mph: { ...clone(base), units: "mph" },
+  // plan 006 A: the LED board and the live comfort (data under `cabin`)
+  ledrequest: { ...clone(base), requested: false, cabin: { led: { stop: base.next.name, line: "305", dest: "Hradec Králové", onRequest: true, requested: false, bellSeq: 0, last: false, here: false },
+    comfort: { standing: 0, seats: 25, cup: 3.2, spill: false, falls: 0, fallSeq: 0 } } },
+  ledasked: { ...clone(base), cabin: { led: { stop: base.next.name, line: "305", dest: "Hradec Králové", onRequest: false, requested: true, bellSeq: 1, last: false, here: false },
+    comfort: { standing: 9, seats: 25, cup: -11.5, spill: false, falls: 0, fallSeq: 0 } } },
+  standing: { ...clone(base), onboard: 52, capacity: 80, cabin: { led: { stop: base.next.name, line: "305", dest: "Hradec Králové", onRequest: false, requested: false, bellSeq: 0, last: false, here: false },
+    comfort: { standing: 27, seats: 25, cup: 24, spill: true, falls: 1, fallSeq: 1 } }, noteSeq: 1, notes: [{ text: "Passenger fell", points: -30 }] },
+  waiting: { ...clone(base), phase: "atStop", atStop: { alightLeft: 0, boardLeft: 0, doorsHint: true }, next: { ...base.next, delta: -300 }, requested: false, waitingNext: 0,
+    cabin: { led: { stop: base.next.name, line: "305", dest: "Hradec Králové", onRequest: false, requested: false, bellSeq: 0, last: false, here: true, waitSec: 312 },
+    comfort: { standing: 0, seats: 25, cup: 0, spill: false, falls: 0, fallSeq: 0 } } },
 }
 
 const lines = [
@@ -50,6 +60,8 @@ const sel = { station: stations[0], lines: lines.slice(0, 4).map((l, i) => ({ id
 
 export const MENU_STATES = {
   nearby: { ...common, screen: "nearby", stations },
+  nexttrip: { ...common, screen: "nearby", stations, nextTrip: { routeId: 6964117, ref: "305", colour: "#2f9e8f", to: "Hradec Králové", from: "Náchod", stopName: "Náchod, Masarykovo náměstí", label: "07:40", inMin: 6, wait: true, tomorrow: false, place: "from", source: "gtfs" } },
+  nexttripjump: { ...common, screen: "nearby", stations, nextTrip: { routeId: 6964117, ref: "363", colour: "#c0572b", to: "Police nad Metují, aut. st.", from: "Náchod", stopName: "Náchod, Masarykovo náměstí", label: "11:05", inMin: 210, wait: false, tomorrow: false, place: "through", source: "generated" } },
   loading: { ...common, screen: "nearby", loading: "nearby" },
   down: { ...common, screen: "nearby", error: "service_down", service: { up: false, error: "connect timeout", port: 47630 } },
   empty: { ...common, screen: "nearby", stations: [] },
