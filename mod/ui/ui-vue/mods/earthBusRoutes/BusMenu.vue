@@ -68,6 +68,7 @@
                 <button role="tab" :aria-selected="tab === 'near'" :class="{ on: tab === 'near' }" @click="tab = 'near'">{{ t("near.title") }}</button>
                 <button role="tab" :aria-selected="tab === 'map'" :class="{ on: tab === 'map' }" @click="openMap">{{ t("map.tab") }}</button>
                 <button role="tab" :aria-selected="tab === 'mine'" :class="{ on: tab === 'mine' }" @click="tab = 'mine'">{{ t("mine.title") }}<span v-if="saved.length" class="badge">{{ saved.length }}</span></button>
+                <button role="tab" :aria-selected="tab === 'profile'" :class="{ on: tab === 'profile' }" @click="openProfile">{{ t("tab.profile") }}</button>
               </div>
               <div class="head-actions">
                 <button v-if="tab === 'near'" class="btn ghost" :disabled="!!(s && s.loading)" @click="call('uiRefresh')">{{ t("refresh") }}</button>
@@ -131,13 +132,14 @@
                 <button class="btn ghost" @click="townList">{{ t("map.asList") }}</button>
               </div>
               <p v-else class="sub">{{ t("map.hint") }}</p>
+              <label v-if="driven" class="driven-toggle"><input v-model="showDriven" type="checkbox" /> {{ t("map.driven") }} <span class="muted small">{{ t("map.drivenHint") }}</span></label>
               <div v-if="s && s.map && s.map.busy" class="loading small"><span class="spin"></span><div><b>{{ t("map.loading") }}</b><div class="muted">{{ t("map.loadingHint") }}</div></div></div>
               <div v-else-if="s && s.map && s.map.err" class="notice bad"><p>{{ errText(s.map.err) }}</p><button class="btn" @click="openMap">{{ t("retry") }}</button></div>
               <div v-else-if="s && s.map && s.map.towns && !s.map.towns.length" class="empty"><b>{{ t("map.none") }}</b></div>
               <div v-if="s && s.map && s.map.towns && s.map.towns.length" class="map-big">
                 <MiniMap :places="s.map.towns" :you="s.pos" :points="[]" :cands="[]" :show-names="false" :label="t('map.tab')"
                          :map-stops="(s.map.focus ? s.map.focusStops : s.map.stops) || []" :focus="s.map.focus || null"
-                         :selected="s.map.sel ? s.map.sel.id : null"
+                         :selected="s.map.sel ? s.map.sel.id : null" :tracks="showDriven && driven ? driven.lines : []" :visited="showDriven ? driven : null"
                          @place="id => call('uiMapFocus', id)" @stop="id => call('uiMapPick', id)" />
               </div>
               <div v-if="s && s.map && s.map.sel" class="map-sel">
@@ -158,6 +160,9 @@
                 </div>
               </div>
             </template>
+
+            <!-- the career: rank, totals, records, achievements -->
+            <ProfileTab v-if="tab === 'profile'" :s="s" @map="openMap" />
 
             <!-- my routes -->
             <template v-if="tab === 'mine'">
@@ -427,6 +432,11 @@
             <li v-for="(n, i) in s.result.notes" :key="i"><span>{{ noteText(n.text) }}</span><b>{{ n.points }}</b></li>
           </ul>
           <div class="muted small">{{ t("res.totals", { trips: s.result.totals.trips, pax: s.result.totals.passengers }) }}</div>
+          <div v-if="s.result.career" class="career-note">
+            <span v-if="s.result.career.earned" class="earned">{{ t("res.credits", { n: s.result.career.earned }) }}</span>
+            <span v-if="s.result.career.rankUp" class="earned">{{ t("res.rankUp", { rank: t("rank." + s.result.career.rankUp) }) }}</span>
+            <span v-for="id in s.result.career.unlocked" :key="id" class="ach-new" :title="t('ach.' + id + '.d')">★ {{ t("res.unlocked") }}: {{ t("ach." + id) }}</span>
+          </div>
           <div class="row">
             <button v-if="s.result.canReverse" class="btn go" @click="call('uiReverseTrip')">⇄ {{ t("res.back") }}</button>
             <button v-if="s.result.canContinue" class="btn" @click="call('uiBuildContinue')">＋ {{ t("res.next") }}</button>
@@ -455,6 +465,7 @@ import StopsPage from "./StopsPage.vue"
 import NextTripCard from "./NextTripCard.vue"
 import ShiftStart from "./ShiftStart.vue"
 import ShiftPage from "./ShiftPage.vue"
+import ProfileTab from "./ProfileTab.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"
@@ -521,7 +532,11 @@ function remove(m) {
   clearTimeout(sureTimer)
   sureTimer = setTimeout(() => { sure.value = null }, 3000)
 }
-function openMap() { tab.value = "map"; call("uiMapOpen") }
+function openMap() { tab.value = "map"; call("uiMapOpen"); call("uiProfileOpen") }
+function openProfile() { tab.value = "profile"; call("uiProfileOpen") }
+// the career's layer of the map: the lines driven, the towns and stations stopped at (only once the profile is in the model)
+const showDriven = ref(true)
+const driven = computed(() => (s.value && s.value.profile && s.value.profile.layer && s.value.profile.layer.lines.length ? s.value.profile.layer : null))
 function townList() { const f = s.value && s.value.map && s.value.map.focus; if (f) { tab.value = "near"; call("uiMapPlace", f.id) } }
 function mapLines() { tab.value = "near"; call("uiMapGo", "lines") }
 function placeKind(pl) {
@@ -718,6 +733,8 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .find { display: flex; gap: 8px;
   input { flex: 1; min-width: 0; padding: 10px 14px; border: 0; border-radius: 10px; background: #0f1a20; color: var(--ink); font: inherit; font-size: 16px; box-shadow: inset 0 0 0 1px var(--hair);
     &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); } } }
+.driven-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 14px; }
+.career-note { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; .earned { font-weight: 700; color: var(--led); } .ach-new { font-weight: 700; } }
 .map-big { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
 .map-head { display: flex; align-items: center; gap: 12px; .map-town { flex: 1; font-size: 18px; } .btn { padding: 6px 12px; } }
 .map-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2);

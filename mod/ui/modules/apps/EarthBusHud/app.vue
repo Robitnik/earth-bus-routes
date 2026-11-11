@@ -173,6 +173,14 @@
         </div>
       </transition>
     </template>
+
+    <!-- an achievement was unlocked (career, plan 006 stage E): shown for a few seconds over whatever the HUD shows -->
+    <transition name="note">
+      <div v-if="ach" class="ach-toast" role="status" :key="ach.id">
+        <span class="ach-star" aria-hidden="true">★</span>
+        <span class="ach-body"><small>{{ tr("hud.ach") }}</small><b>{{ achName(ach) }}</b></span>
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -264,6 +272,28 @@ const radio = computed(() => {
   return null
 })
 const noteText = t => (TEXT[lang] && TEXT[lang]["note." + t]) || t
+
+// ---- achievements (the same titles as the menu's ach.<id>; a title the lists do not know falls back to the English one Lua sends)
+TEXT.en["hud.ach"] = "Achievement unlocked"
+TEXT.uk["hud.ach"] = "Нове досягнення"
+const ACH = {
+  en: { "first_trip": "First trip", "trips_10": "10 trips", "trips_100": "100 trips", "on_time_all": "Every stop on time", "night_line": "Night line", "km_100_trip": "100 km in one trip", "km_1000": "1000 km driven", "towns_10": "10 towns", "towns_50": "50 towns", "countries_3": "3 countries", "transfers_10": "Connection kept", "smooth_trip": "A smooth ride", "smooth_shift": "A shift without a jolt", "first_s": "First S", "ghost_beat": "Faster than your ghost", "pax_1000": "1000 passengers", "records_5": "Records on 5 lines", "regional_10": "Regional driver", "city_20": "City driver", "first_shift": "First shift", "shifts_10": "10 shifts", "rank_driver": "Driver", "rank_experienced": "Experienced", "rank_mentor": "Mentor", "credits_5000": "5000 credits" },
+  uk: { "first_trip": "Перший рейс", "trips_10": "10 рейсів", "trips_100": "100 рейсів", "on_time_all": "Усі зупинки вчасно", "night_line": "Нічна лінія", "km_100_trip": "100 км за рейс", "km_1000": "1000 км", "towns_10": "10 міст", "towns_50": "50 міст", "countries_3": "3 країни", "transfers_10": "Пересадку дочекався", "smooth_trip": "М'яка їзда", "smooth_shift": "Зміна без ривків", "first_s": "Перша S", "ghost_beat": "Обігнав привида", "pax_1000": "1000 пасажирів", "records_5": "Рекорди на 5 лініях", "regional_10": "Приміський водій", "city_20": "Міський водій", "first_shift": "Перша зміна", "shifts_10": "10 змін", "rank_driver": "Водій", "rank_experienced": "Досвідчений", "rank_mentor": "Наставник", "credits_5000": "5000 кредитів" },
+}
+const achName = a => (ACH[lang] && ACH[lang][a.id]) || a.name || a.id
+const ach = ref(null)
+let achQueue = []
+let achTimer = null
+function nextAch() {
+  clearTimeout(achTimer)
+  ach.value = achQueue.shift() || null
+  if (ach.value) achTimer = setTimeout(nextAch, 6000)
+}
+events.on("EarthBusRoutesAchievement", a => {
+  if (!a || !a.id) return
+  achQueue.push(a)
+  if (!ach.value) nextAch()
+})
 
 // ---- the numbers
 const lineColour = computed(() => (d.value && ((d.value.route && d.value.route.colour) || (d.value.armed && d.value.armed.colour)
@@ -413,6 +443,13 @@ onMounted(() => {
   box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
   user-select: none;
   overflow: hidden;
+}
+
+.ach-toast {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 8px;
+  background: #26394a; box-shadow: inset 0 0 0 1.5px var(--led), 0 4px 14px rgba(0, 0, 0, 0.5); z-index: 5;
+  .ach-star { font-size: 22px; color: var(--led); }
+  .ach-body { display: flex; flex-direction: column; min-width: 0; small { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; } b { font-size: 15px; line-height: 1.2; } }
 }
 
 .idle {

@@ -144,6 +144,17 @@
       "help": "On a line you have driven before from the same stop, a translucent bus shows where your best trip was, and the HUD shows how far ahead or behind it you are."
     },
     {
+      "key": "career",
+      "label": "Career and collection",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Counts your pay, rank and achievements and draws the lines you have driven on the map. It never locks a line: free play stays open. Off keeps only the trip totals and line records."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

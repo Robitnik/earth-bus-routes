@@ -31,6 +31,7 @@ local cabin = require('earthBusRoutes/cabin')
 local shiftrun = require('earthBusRoutes/shiftrun')       -- shifts with a dispatcher (plan 006 B)
 local connections = require('earthBusRoutes/connections')
 local ghostrun = require('earthBusRoutes/ghostrun')     -- the ghost of the best trip (plan 006 D)
+local careersvc = require('earthBusRoutes/careersvc')       -- the profile, ranks, achievements, the driven-lines layer (plan 006, stage E)
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -47,9 +48,12 @@ local S = {
 local function earthApi() return rawget(_G, 'beamngEarth_api') end
 
 local function readStats()
-  local ok, st = pcall(jsonReadFile, '/settings/earthBusRoutes/stats.json')
-  S.stats = (ok and type(st) == 'table') and { trips = st.trips or 0, passengers = st.passengers or 0, points = st.points or 0 } or nil
+  S.stats = careersvc.stats()          -- profile.json (stats.json of older versions is moved into it on the first read)
+  if S.stats and S.stats.trips == 0 then S.stats = nil end
 end
+
+-- the career's counting (the map layer, achievements, pay) can be switched off in the add-on's options; free play is never affected
+local function careerOn() return S.opts.career ~= 'off' end
 
 local function readOptions()
   readStats()
@@ -155,6 +159,8 @@ local function buildModel()
   if S.result then model.result = S.result end
   model.stats = S.stats
   model.shift = shiftrun.model()
+  model.career = { on = careerOn() }
+  if S.profileOpen and careerOn() then model.profile = careersvc.model() end
   model.find = M.findModel()
   model.progress = datasvc.state.progress
   model.map = S.map
@@ -1336,6 +1342,7 @@ local function beginTrip(plan, rotate)
   S.trip.veh = veh
   cabin.configure(S.trip, S.opts)
   pcall(ghostrun.begin, S.trip, S.opts)
+  careersvc.begin()
   S.hudTimer = 0
   world.resetAccel()
   world.watchDoors(veh)
@@ -1506,21 +1513,15 @@ end
 
 -- ---- finishing -----------------------------------------------------------------------------------------------------
 
-local function statsPath() return '/settings/earthBusRoutes/stats.json' end
-
+-- The trip's numbers go into the profile (career.lua): the totals, the record of the line, and (career on) the driven line, the visits,
+-- the pay and the achievements. Returns record, previous points, { trips, passengers, points }, news.
 local function saveStats(t, res)
-  local ok, stats = pcall(jsonReadFile, statsPath())
-  if not ok or type(stats) ~= 'table' then stats = {} end
-  stats.trips = (stats.trips or 0) + 1
-  stats.passengers = (stats.passengers or 0) + (res.passengers or 0)
-  stats.points = (stats.points or 0) + (res.points or 0)
-  stats.best = stats.best or {}
-  local key = tostring(t.route.ref) .. '|' .. tostring(t.route.network or '')
-  local prev = stats.best[key]
-  local record = (not prev) or res.points > (prev.points or 0)
-  if record then stats.best[key] = { points = res.points, grade = res.grade, ref = t.route.ref, from = t.route.from, to = t.route.to } end
-  pcall(jsonWriteFile, statsPath(), stats, true)
-  return record, prev and prev.points or nil, stats
+  local ok, record, previous, stats, news = pcall(careersvc.finish, t, res, careerOn())
+  if not ok then
+    log('W', TAG, 'profile not saved: ' .. tostring(record))
+    return false, nil, S.stats or { trips = 0, passengers = 0, points = 0 }, nil
+  end
+  return record, previous, stats, news
 end
 
 local function endClockAndGps()
@@ -1533,7 +1534,7 @@ end
 
 local function finishTrip(t)
   local res = trip.result(t)
-  local record, previous, stats = saveStats(t, res)
+  local record, previous, stats, careerNews = saveStats(t, res)
   local okGhost, ghostNew = pcall(ghostrun.finish, t, res)      -- a better trip replaces the ghost (also in a shift)
   if shiftrun.onTripFinished(t, res) then return end          -- a shift takes the trip over: the dispatcher, not the result page
   local back = S.reverseOf[t.route.id]
@@ -1546,6 +1547,7 @@ local function finishTrip(t)
     scheduled = t.entry ~= nil, canContinue = #t.route.stops > 0, custom = t.route.custom or false,
   }
   S.result.ghostNew = (okGhost and ghostNew == true) or nil
+  S.result.career = careerNews          -- { earned (credits), unlocked (achievement ids), rankUp }
   S.stats = { trips = stats.trips, passengers = stats.passengers, points = stats.points }
   S.finishedRouteId = t.route.id
   local lastStop = t.route.stops[#t.route.stops]
@@ -1558,6 +1560,28 @@ local function finishTrip(t)
   datasvc.watching = true world.navigate('earthBusRoutes')
   guihooks.trigger('EarthBusRoutesHud', { finished = true, result = S.result })
 end
+
+-- ---- the career (profile tab, driven-lines layer) --------------------------------------------------------------------------
+
+-- The profile tab or the map's driven-lines layer is open: the model carries the profile from now on
+function M.uiProfileOpen()
+  S.profileOpen = true
+  publish()
+end
+
+-- For stage B (shifts): a shift is running (its trips are paid with the shift, not one by one) ...
+function M.careerSetShift(on) careersvc.inShift = on == true end
+
+-- ... and its summary: { hours, trips, passengers, punctuality, grade, revenue, smooth }. Returns { earned, unlocked, rankUp, rank } or nil.
+function M.careerShiftDone(rec)
+  if not careerOn() then return nil end
+  local r = careersvc.shiftDone(rec)
+  if S.profileOpen then publish() end
+  return r
+end
+
+-- The rank and what it opens: { id, index, hours, avgLetter, next, hoursNeed, gradeNeed, progress, unlocks = { lines, shiftHours, depot, night, heavyEvents } }
+function M.careerRank() return careersvc.rank() end
 
 function M.uiCancelTrip()
   if not S.trip then return end
@@ -1631,6 +1655,7 @@ end
 local function handleEvents(t)
   for _, e in ipairs(trip.takeEvents(t)) do
     if e.name == 'arrived' then
+      careersvc.arrived(e.data.stop)
       world.busDisplay(t.veh, t.route, stopsAhead(t))
     elseif e.name == 'departed' then
       world.busDisplay(t.veh, t.route, stopsAhead(t))
@@ -1664,6 +1689,7 @@ local function tripFrame(dt)
   local aL, aR = world.accel(veh, dt)
   trip.update(t, dt, { lat = pose.lat, lon = pose.lon, speed = pose.speed or 0, aLong = aL, aLat = aR, doorsOpen = world.doorsOpen(veh) })
   pcall(ghostrun.update, t)
+  careersvc.sample(pose.lat, pose.lon)
   if handleEvents(t) then return end
   world.clockSet(t.clock)
   S.hudTimer = S.hudTimer - dt

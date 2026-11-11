@@ -12,6 +12,8 @@ if (view === "hud") {
   createApp(Hud).mount(app)
   const state = HUD_STATES[q.get("state") || "approach"]
   setTimeout(() => window.__emit("EarthBusRoutesHud", JSON.parse(JSON.stringify(state))), 30)
+  // ?ach=first_s: the toast of an unlocked achievement
+  if (q.get("ach")) setTimeout(() => window.__emit("EarthBusRoutesAchievement", { id: q.get("ach"), name: q.get("ach") }), 80)
 } else {
   import("@mod/menu").then(async m => {
     const { MENU_STATES } = await import("./mocks.js")
