@@ -11,6 +11,11 @@
     <polyline v-if="linePoints" :points="linePoints" class="road-casing" />
     <polyline v-if="linePoints" :points="linePoints" class="road" />
 
+    <!-- the lines driven so far (career layer) -->
+    <g v-if="drivenLines.length" class="driven" aria-hidden="true">
+      <polyline v-for="(l, i) in drivenLines" :key="'d' + i" :points="l" class="drv" />
+    </g>
+
     <!-- stops on the way (stops screen) -->
     <g v-for="(st, i) in stopDots" :key="'s' + i">
       <circle :cx="st.x" :cy="st.y" :r="st.chosen ? 0 : 3.2" class="way-stop" :class="{ off: !st.on }" />
@@ -30,6 +35,7 @@
        @click="emit('stop', d.id)" @mouseenter="hoverStop = d.id" @mouseleave="hoverStop = null">
       <circle :cx="d.x" :cy="d.y" r="7" class="hit" />
       <circle :cx="d.x" :cy="d.y" :r="d.kind === 'station' ? 4.2 : 2.8" class="dot" :class="d.kind" />
+      <g v-if="d.visited" class="tick small" :transform="`translate(${d.x + 6}, ${d.y - 6})`"><circle r="5.5" /><path d="M-2.6 0.2 L-0.8 2 L2.8 -2" /></g>
     </g>
 
     <!-- you -->
@@ -39,6 +45,7 @@
     <g v-for="pl in placeChips" :key="'t' + pl.id" class="place" :class="pl.kind" @click="emit('place', pl.id)">
       <rect :x="pl.x - pl.w / 2" :y="pl.y - pl.h / 2" :width="pl.w" :height="pl.h" :rx="pl.h / 2" class="chip" />
       <text :x="pl.x" :y="pl.y + pl.fs * 0.35" class="pl-name" :style="{ fontSize: pl.fs + 'px' }">{{ pl.name }}</text>
+      <g v-if="pl.visited" class="tick" :transform="`translate(${pl.x + pl.w / 2 - 3}, ${pl.y - pl.h / 2 + 3})`"><circle r="7" /><path d="M-3.2 0.2 L-1 2.6 L3.4 -2.4" /></g>
     </g>
 
     <g v-for="c in stopChips" :key="'s' + c.id" class="schip" :class="[c.kind, { sel: selected === c.id }]" @click="emit('stop', c.id)">
@@ -74,6 +81,8 @@ const props = defineProps({
   mapStops: { type: Array, default: () => [] },   // stations and stops of the map: { id, name, lat, lon, kind, lines }
   focus: { type: Object, default: null },         // a town's close-up: { lat, lon, radius (m), name }
   selected: { type: [Number, String], default: null },
+  tracks: { type: Array, default: () => [] },     // lines driven: { ref, pts: [[lat, lon], ...] }
+  visited: { type: Object, default: null },       // { towns: [{ name, lat, lon }], stations: [{ name, lat, lon }] }: stopped there before
 })
 const emit = defineEmits(["pick", "hover", "place", "stop"])
 const hoverStop = ref(null)
@@ -133,6 +142,27 @@ const linePoints = computed(() => {
   if (!props.line || props.line.length < 2) return ""
   return props.line.map(([la, lo]) => { const p = project(la, lo); return p.x.toFixed(1) + "," + p.y.toFixed(1) }).join(" ")
 })
+// the driven lines: only those with a point in the frame get drawn
+const drivenLines = computed(() => {
+  const out = []
+  for (const tr of props.tracks) {
+    if (!tr.pts || tr.pts.length < 2) continue
+    out.push(tr.pts.map(([la, lo]) => { const p = project(la, lo); return p.x.toFixed(1) + "," + p.y.toFixed(1) }).join(" "))
+  }
+  return out
+})
+const normName = n => String(n || "").toLowerCase().trim()
+const townNames = computed(() => new Set(((props.visited && props.visited.towns) || []).map(v => normName(v.name))))
+const stationNames = computed(() => new Set(((props.visited && props.visited.stations) || []).map(v => normName(v.name))))
+// a town counts as visited when a stop of that name was served, or one was served within 2.5 km of its centre
+const TOWN_NEAR_M = 2500
+function townVisited(p) {
+  const list = (props.visited && props.visited.towns) || []
+  if (!list.length) return false
+  if (townNames.value.has(normName(p.name))) return true
+  const k = Math.cos(p.lat * Math.PI / 180)
+  return list.some(v => Math.hypot((v.lat - p.lat) * 110574, (v.lon - p.lon) * 111320 * k) < TOWN_NEAR_M)
+}
 const pointDots = computed(() => props.points.map(p => ({ ...project(p.lat, p.lon), name: p.name })))
 // stations outside the frame are only in the list
 const candDots = computed(() => props.cands
@@ -155,14 +185,14 @@ const placeChips = computed(() => {
     if (x < w / 2 || x > W - w / 2 || y < h / 2 || y > H - h / 2) continue
     if (boxes.some(b => Math.abs(b.x - x) < (b.w + w) / 2 + 2 && Math.abs(b.y - y) < (b.h + h) / 2 + 2)) continue
     boxes.push({ x, y, w, h })
-    out.push({ id: p.id, name: p.name, kind: p.kind, x, y, w, h, fs })
+    out.push({ id: p.id, name: p.name, kind: p.kind, x, y, w, h, fs, visited: townVisited(p) })
   }
   return out
 })
 
 // the stops in the frame
 const stopPts = computed(() => props.mapStops
-  .map(s => ({ ...project(s.lat, s.lon), id: s.id, name: s.name, kind: s.kind, n: (s.lines || []).length }))
+  .map(s => ({ ...project(s.lat, s.lon), id: s.id, name: s.name, kind: s.kind, n: (s.lines || []).length, visited: s.kind === "station" && stationNames.value.has(normName(s.name)) }))
   .filter(p => p.x > 4 && p.x < W - 4 && p.y > 4 && p.y < H - 4))
 const hoverDot = computed(() => (hoverStop.value == null ? null : stopPts.value.find(p => p.id === hoverStop.value) || null))
 // in a close-up the town's name is left out of its stops' ("Police n.Met.,škola" -> "škola")
@@ -217,6 +247,9 @@ function short(n) {
 .mini { width: 100%; height: 100%; display: block; background: #121f26; border-radius: 10px; }
 .road-casing { fill: none; stroke: #0b1519; stroke-width: 9; stroke-linejoin: round; stroke-linecap: round; }
 .road { fill: none; stroke: var(--line); stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
+.drv { fill: none; stroke: rgba(255, 255, 255, 0.55); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.tick { pointer-events: none; circle { fill: #2f9e6a; stroke: #0b1519; stroke-width: 1.5; } path { fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  &.small path { stroke-width: 1.5; } }
 .way-stop { fill: var(--ink); stroke: #0b1519; stroke-width: 1.5; &.off { fill: none; stroke: var(--muted); } }
 .cand {
   cursor: pointer;

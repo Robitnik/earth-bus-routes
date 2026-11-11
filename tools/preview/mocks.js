@@ -201,3 +201,42 @@ Object.assign(MENU_STATES, {
       lines: ["360", "361", "363", "375"].map(r => ({ ref: r, colour: "#d8e04a" })) } } },
   buildcities: { ...common2, screen: "build", stations, build: { ...build, showCities: true, cities: towns, cands: [] } },
 })
+
+// ---- the career (plan 006, stage E)
+const ACH_IDS = ["first_trip", "trips_10", "trips_100", "on_time_all", "night_line", "km_100_trip", "km_1000", "towns_10", "towns_50", "countries_3", "transfers_10", "smooth_trip",
+  "smooth_shift", "first_s", "ghost_beat", "pax_1000", "records_5", "regional_10", "city_20", "first_shift", "shifts_10", "rank_driver", "rank_experienced", "rank_mentor", "credits_5000"]
+const unlockedIds = new Set(["first_trip", "trips_10", "on_time_all", "km_100_trip", "first_s", "towns_10", "first_shift", "rank_driver", "smooth_trip"])
+const unlocksOf = { driver: { lines: ["city", "suburban"], shiftHours: 2, depot: false, night: false, heavyEvents: false } }
+const driveLine = pts => ({ ref: "305", pts })
+const layer = {
+  lines: [
+    driveLine([[50.4157, 16.1626], [50.4397, 16.1884], [50.4825, 16.1945], [50.5262, 16.2437], [50.5855, 16.332]]),
+    driveLine([[50.4157, 16.1626], [50.3907, 16.0536], [50.3568, 15.9231], [50.2092, 15.8328]]),
+    driveLine([[50.4157, 16.1626], [50.3442, 16.1514], [50.2917, 16.1598]]),
+  ],
+  towns: [{ name: "Náchod", lat: 50.4157, lon: 16.1626, n: 12 }, { name: "Hronov", lat: 50.4825, lon: 16.1945, n: 3 }, { name: "Police nad Metují", lat: 50.5262, lon: 16.2437, n: 4 },
+    { name: "Broumov", lat: 50.5855, lon: 16.332, n: 2 }, { name: "Hradec Králové", lat: 50.2092, lon: 15.8328, n: 1 }, { name: "Jaroměř", lat: 50.3568, lon: 15.9231, n: 1 }],
+  stations: [{ name: "Náchod, autobusová stanice", lat: 50.4171, lon: 16.1608, n: 9 }, { name: "Broumov, železniční stanice", lat: 50.5815, lon: 16.3389, n: 2 }],
+}
+const profile = {
+  totals: { trips: 34, passengers: 1186, points: 24100, km: 612.4, hours: 19.5, onTimePct: 87, shifts: 4, shiftHours: 7.5, credits: 1830, revenue: 1450 },
+  rank: { id: "driver", index: 2, hours: 7.5, avg: 2.5, avgLetter: "A", next: "experienced", hoursNeed: 10, gradeNeed: "B", hoursPct: 0.75, gradeOk: true, progress: 0.75, unlocks: unlocksOf.driver },
+  records: [
+    { key: "305|IREDO", ref: "305", from: "Náchod", to: "Hradec Králové", points: 931, grade: "S" }, { key: "360|IREDO", ref: "360", from: "Police nad Metují", to: "Náchod", points: 874, grade: "A" },
+    { key: "211|", ref: "211", from: "Trutnov", to: "Hradec Králové", points: 802, grade: "A" }, { key: "N1|", ref: "N1", from: "Hradec Králové", to: "Náchod", points: 688, grade: "B" },
+    { key: "12|", ref: "12", from: "Hronov", to: "Náchod", points: 540, grade: "C" },
+  ],
+  achievements: ACH_IDS.map(id => ({ id, name: id, unlocked: unlockedIds.has(id), at: unlockedIds.has(id) ? 1 : undefined })),
+  unlockedCount: unlockedIds.size, visited: { towns: 11, stations: 5, countries: 2 }, layer,
+}
+Object.assign(MENU_STATES, {
+  profile: { ...common2, screen: "nearby", stations, tab: "profile", career: { on: true }, profile },
+  profilenew: { ...common2, screen: "nearby", stations, tab: "profile", career: { on: true }, profile: { ...profile,
+    totals: { trips: 0, passengers: 0, points: 0, km: 0, hours: 0, onTimePct: null, shifts: 0, shiftHours: 0, credits: 0, revenue: 0 },
+    rank: { id: "trainee", index: 1, hours: 0, avg: null, avgLetter: null, next: "driver", hoursNeed: 3, gradeNeed: "C", hoursPct: 0, gradeOk: false, progress: 0,
+      unlocks: { lines: ["city"], shiftHours: 1, depot: false, night: false, heavyEvents: false } },
+    records: [], achievements: ACH_IDS.map(id => ({ id, name: id, unlocked: false })), unlockedCount: 0, visited: { towns: 0, stations: 0, countries: 0 }, layer: { lines: [], towns: [], stations: [] } } },
+  profileoff: { ...common2, screen: "nearby", stations, tab: "profile", career: { on: false } },
+  mapdriven: { ...common2, screen: "nearby", stations, tab: "map", career: { on: true }, profile, map: { towns, stops: mapStops, sel: null } },
+  resultcareer: { ...MENU_STATES.result, career: { on: true }, result: { ...MENU_STATES.result.result, career: { earned: 148, unlocked: ["first_s", "km_100_trip"], rankUp: "driver" } } },
+})

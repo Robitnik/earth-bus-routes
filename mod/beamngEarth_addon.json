@@ -45,6 +45,17 @@
       "help": "The stop's bay on the road as in the game's bus mode: corner markers red while you come, orange in the bay, green when done; its name and who waits over it."
     },
     {
+      "key": "career",
+      "label": "Career and collection",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Counts your pay, rank and achievements and draws the lines you have driven on the map. It never locks a line: free play stays open. Off keeps only the trip totals and line records."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",
