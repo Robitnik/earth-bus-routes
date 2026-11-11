@@ -26,6 +26,7 @@ local builder = require('earthBusRoutes/builder')
 local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
+local shiftrun = require('earthBusRoutes/shiftrun')       -- shifts with a dispatcher (plan 006 B)
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -148,6 +149,7 @@ local function buildModel()
   end
   if S.result then model.result = S.result end
   model.stats = S.stats
+  model.shift = shiftrun.model()
   model.find = M.findModel()
   model.progress = datasvc.state.progress
   model.map = S.map
@@ -1116,6 +1118,7 @@ function M.uiOpen()
   readSaved()
   if datasvc.state.features == nil then datasvc.ping(function() publish() end) end
   S.screen = S.trip and 'trip' or ((S.result and S.result.show) and 'result') or 'nearby'
+  S.screen = shiftrun.screenFor(S.screen) or S.screen
   if S.screen == 'nearby' then loadNearby(false) else publish() end
   datasvc.watching = true world.navigate('earthBusRoutes')
 end
@@ -1419,6 +1422,7 @@ end
 local function finishTrip(t)
   local res = trip.result(t)
   local record, previous, stats = saveStats(t, res)
+  if shiftrun.onTripFinished(t, res) then return end          -- a shift takes the trip over: the dispatcher, not the result page
   local back = S.reverseOf[t.route.id]
   S.result = {
     show = true, points = res.points, grade = res.grade, stars = res.stars, parts = res.parts, passengers = res.passengers,
@@ -1443,6 +1447,7 @@ end
 
 function M.uiCancelTrip()
   if not S.trip then return end
+  if shiftrun.onCancel() then return end                       -- cancelling a trip of a shift ends the shift
   S.trip = nil
   endClockAndGps()
   S.screen = 'nearby'
@@ -1494,12 +1499,14 @@ end
 local function hudOf(t)
   local h = trip.hud(t)
   h.units = S.opts.units or 'km/h'
+  h.shift = shiftrun.hud(t)
   return h
 end
 
 -- The HUD app asks when it mounts (it may have been added after the trip started)
 function M.sendHud()
   if S.trip then guihooks.trigger('EarthBusRoutesHud', hudOf(S.trip))
+  elseif shiftrun.sendHud() then -- (a shift's layover or empty run)
   elseif S.armed then S.armed.hudTimer = 0
   elseif S.result and S.result.show then guihooks.trigger('EarthBusRoutesHud', { finished = true, result = S.result })
   else guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
@@ -1554,7 +1561,7 @@ local function startingFrame(dt)
   if (st.seenTeleport and api and api.ready()) or st.t > 45 then
     S.starting = nil
     if api and api.ready() then
-      beginTrip(st.plan, true)
+      if st.after then st.after() else beginTrip(st.plan, true) end
     else
       S.err = 'The world did not load in time'
       publish()
@@ -1592,6 +1599,7 @@ function M.onUpdate(dtReal, dtSim)
   if S.starting then startingFrame(dtReal or 0) end
   if S.trip then tripFrame(dtSim or 0) end
   if S.armed and not S.trip and not S.starting then armedFrame(dtReal or 0) end
+  shiftrun.frame(dtReal or 0, dtSim or 0)
   -- keep the cell around the player ready, so the menu opens at once
   S.prefetchTimer = S.prefetchTimer - (dtReal or 0)
   if S.prefetchTimer <= 0 and not S.trip and not S.starting then
@@ -1636,6 +1644,7 @@ end
 function M.onBeamNGEarthTeleported()
   if S.armed then M.uiCancelArmed(true) world.toast('Drive-to-start cancelled: you were teleported', 4) guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
   if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you were teleported', 4) end
+  shiftrun.onTeleport()
 end
 
 function M.onVehicleSwitched()
@@ -1645,7 +1654,11 @@ end
 function M.onExtensionUnloaded()
   endClockAndGps()
   datasvc.reset()
-  S.trip, S.starting = nil, nil
+  S.trip, S.starting, S.shift = nil, nil, nil
 end
+
+-- Shifts with a dispatcher (plan 006 B): the logic is in shift.lua, the game side in shiftrun.lua; main lends it what it needs.
+shiftrun.attach(M, S, { publish = publish, loadRoute = loadRoute, beginTrip = beginTrip, buildPlan = buildPlan, currentTrips = currentTrips,
+  goPlay = goPlay, endClockAndGps = endClockAndGps })
 
 return M

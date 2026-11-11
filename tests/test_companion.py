@@ -1017,5 +1017,246 @@ class Http(unittest.TestCase):
         self.assertIn("served", j)
 
 
+# ---- plan 006 stage B: shifts (/v1/shift) and the depot (/v1/depot) ----------------------------------------------------------
+
+def shift_gtfs(path):
+    """A feed for chaining trips. Line 361 Alpha - Gamma (weekdays: out 07:00, back 07:40 from the platform 55 m from Gamma, out
+    08:20, back 09:05, and an out at 08:07 that leaves too soon after the back trip); line 400 Gamma - Delta at 07:31 (another
+    line from the same terminus, earlier than the way back). Saturdays: 361 out at 10:00, line 400 from Epsilon (400 m from
+    Gamma: not the same terminus) at 10:30 and from Gamma at 10:31, no way back."""
+    def rows(*items):
+        return "".join(items)
+    st = []
+    trips = []
+
+    def trip(tid, route, service, head, times):
+        trips.append(f'"{route}","{service}","{tid}","{head}"\n')
+        for seq, (sid, hhmm) in enumerate(times, 1):
+            st.append(f'"{tid}","{hhmm}:00","{hhmm}:00","{sid}","{seq}"\n')
+    trip("A1", "R1", "WK", "Gamma", [("S1", "07:00"), ("S2", "07:10"), ("S3", "07:25")])
+    trip("B1", "R1", "WK", "Alpha", [("S3b", "07:40"), ("S2", "07:50"), ("S1", "08:05")])
+    trip("A0", "R1", "WK", "Gamma", [("S1", "08:07"), ("S2", "08:17"), ("S3", "08:32")])
+    trip("A2", "R1", "WK", "Gamma", [("S1", "08:20"), ("S2", "08:30"), ("S3", "08:45")])
+    trip("B2", "R1", "WK", "Alpha", [("S3b", "09:05"), ("S2", "09:15"), ("S1", "09:30")])
+    trip("C1", "R2", "WK", "Delta", [("S3", "07:31"), ("S4", "07:41")])
+    trip("F1s", "R2", "SAT", "Delta", [("S5", "10:30"), ("S4", "10:40")])
+    trip("A1s", "R1", "SAT", "Gamma", [("S1", "10:00"), ("S2", "10:10"), ("S3", "10:25")])
+    trip("C1s", "R2", "SAT", "Delta", [("S3", "10:31"), ("S4", "10:41")])
+    files = {
+        "agency.txt": 'agency_id,agency_name\n"A1","Bus Co"\n',
+        "routes.txt": 'route_id,agency_id,route_short_name,route_long_name,route_type\n'
+                      '"R1","A1","641361","361 Alpha-Gamma","701"\n"R2","A1","641400","400 Gamma-Delta","701"\n',
+        "trips.txt": 'route_id,service_id,trip_id,trip_headsign\n' + rows(*trips),
+        "calendar.txt": 'service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\n'
+                        '"WK","1","1","1","1","1","0","0","20200101","20991231"\n'
+                        '"SAT","0","0","0","0","0","1","0","20200101","20991231"\n',
+        "stops.txt": 'stop_id,stop_name,stop_lat,stop_lon\n"S1","Alpha, aut.st.",50.0000,16.0000\n"S2","Beta",50.0100,16.0000\n'
+                     '"S3","Gamma",50.0200,16.0000\n"S3b","Gamma, peron",50.02050,16.0000\n"S4","Delta",50.0300,16.0000\n'
+                     '"S5","Epsilon",50.0236,16.0000\n',
+        "stop_times.txt": 'trip_id,arrival_time,departure_time,stop_id,stop_sequence\n' + rows(*st),
+    }
+    with zipfile.ZipFile(path, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+
+
+class Shifts(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = pathlib.Path(cls.tmp.name)
+        shift_gtfs(cls.dir / "feed.zip")
+        d.build_gtfs_index(cls.dir / "feed.zip", cls.dir / "gtfs_XX.db", TODAY)
+        cls.gtfs = d.Gtfs(cls.dir, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+        cls.gtfs.preload()
+        cls.shifts = d.Shifts(cls.gtfs)
+        db = cls.gtfs.dbs["XX"]
+        cls.out361 = db.execute("SELECT pid FROM patterns WHERE ref='361' AND stops LIKE 'S1,%'").fetchone()[0]
+        cls.back361 = db.execute("SELECT pid FROM patterns WHERE ref='361' AND stops LIKE 'S3b,%'").fetchone()[0]
+        cls.r400 = db.execute("SELECT pid FROM patterns WHERE ref='400' AND stops LIKE 'S3,%'").fetchone()[0]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.gtfs.dbs["XX"].close()
+        cls.tmp.cleanup()
+
+    def hhmm(self, items):
+        return [(x["ref"], x["pid"], f"{x['start'] // 3600:02d}:{x['start'] % 3600 // 60:02d}") for x in items]
+
+    def test_a_weekday_shift_goes_there_and_back_from_the_same_terminus(self):
+        out = self.shifts.chain(self.out361, 7 * 3600, 3, 120)           # Wednesday, two hours
+        self.assertEqual(self.hhmm(out), [("361", self.out361, "07:00"), ("361", self.back361, "07:40"),
+                                          ("361", self.out361, "08:20")])
+        self.assertEqual([x["layover"] for x in out], [0, 15 * 60, 15 * 60])          # (07:31 and 08:07 were not taken)
+        self.assertEqual((out[0]["from"], out[0]["to"], out[0]["end"]), ("Alpha, aut.st.", "Gamma", 7 * 3600 + 25 * 60))
+        self.assertEqual(out[1]["id"], d.GTFS_ROUTE + self.back361)
+        self.assertEqual(out[1]["head"], "Alpha")
+
+    def test_the_same_line_back_is_preferred_to_an_earlier_other_line(self):
+        out = self.shifts.chain(self.out361, 7 * 3600, 3, 60)
+        # line 400 leaves Gamma at 07:31 (6 min after arriving), the way back of 361 at 07:40: the way back is taken
+        self.assertEqual([x["ref"] for x in out[:2]], ["361", "361"])
+        self.assertEqual(out[1]["start"], 7 * 3600 + 40 * 60)
+
+    def test_a_terminus_further_than_200_m_is_not_the_same_terminus(self):
+        # Saturday: line 400 leaves Epsilon (400 m from Gamma) at 10:30 and Gamma itself at 10:31: only the second is a way on
+        out = self.shifts.chain(self.out361, 10 * 3600, 6, 120)
+        self.assertEqual([x["from"] for x in out], ["Alpha, aut.st.", "Gamma"])
+
+    def test_the_shift_ends_by_time_and_a_turn_needs_five_minutes(self):
+        self.assertEqual(len(self.shifts.chain(self.out361, 7 * 3600, 3, 30)), 1)            # nothing leaves by 07:30
+        self.assertEqual(len(self.shifts.chain(self.out361, 7 * 3600, 3, 45)), 2)            # the way back at 07:40
+        long = self.shifts.chain(self.out361, 7 * 3600, 3, 180)
+        self.assertEqual(self.hhmm(long)[-1], ("361", self.back361, "09:05"))
+        self.assertEqual(len(long), 4)
+        self.assertNotIn(8 * 3600 + 7 * 60, [x["start"] for x in long])                      # 08:07: 2 min after arriving
+
+    def test_another_line_from_the_same_terminus_when_the_line_has_no_way_back(self):
+        out = self.shifts.chain(self.out361, 10 * 3600, 6, 60)                              # Saturday
+        self.assertEqual(self.hhmm(out), [("361", self.out361, "10:00"), ("400", self.r400, "10:31")])
+        self.assertEqual(out[1]["layover"], 6 * 60)
+        self.assertEqual(len(self.shifts.chain(self.r400, 10 * 3600 + 31 * 60, 6, 120)), 1)  # nothing leaves from Delta
+
+    def test_nothing_known_is_nothing(self):
+        self.assertEqual(self.shifts.chain(d.GTFS_ROUTE + 9999, 7 * 3600, 3, 60), [])
+        self.assertEqual(d.Shifts(d.Gtfs(None)).chain(1, 7 * 3600, 3, 60), [])
+        # a pattern that runs on no such weekday still gives its own trip (the caller chose it) and no chain
+        self.assertEqual(len(self.shifts.chain(self.out361, 7 * 3600, 7, 120)), 1)
+
+    def test_the_tiny_feed_has_no_second_trip_to_chain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tiny_gtfs(pathlib.Path(tmp) / "feed.zip")
+            d.build_gtfs_index(pathlib.Path(tmp) / "feed.zip", pathlib.Path(tmp) / "gtfs_XX.db", TODAY)
+            g = d.Gtfs(tmp, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+            g.preload()
+            try:
+                out = d.Shifts(g).chain(d.GTFS_ROUTE + 1, 7 * 3600, 3, 120)
+                self.assertEqual([(x["ref"], x["start"]) for x in out], [("361", 7 * 3600)])
+            finally:
+                g.dbs["XX"].close()
+
+
+class ShiftHttp(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.dir = pathlib.Path(cls.tmp.name)
+        shift_gtfs(cls.dir / "feed.zip")
+        d.build_gtfs_index(cls.dir / "feed.zip", cls.dir / "gtfs_XX.db", TODAY)
+        gtfs = d.Gtfs(cls.dir, feeds={"XX": {"url": "x"}}, today=lambda: TODAY)
+        gtfs.preload()
+        cls.calls = []
+
+        def upstream(query):
+            cls.calls.append(query)
+            return json.dumps(DEPOTS)
+        cls.svc = d.Service(d.Cache(cls.dir / "cache"), upstream=upstream, gtfs=gtfs)
+        cls.pid = gtfs.dbs["XX"].execute("SELECT pid FROM patterns WHERE ref='361' AND stops LIKE 'S1,%'").fetchone()[0]
+        cls.httpd, _ = d.serve(0, service=cls.svc)
+        cls.port = cls.httpd.server_address[1]
+        cls.httpd.RequestHandlerClass = d.make_handler(cls.svc, cls.port)
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.svc.gtfs.dbs["XX"].close()
+        cls.tmp.cleanup()
+
+    def get(self, path):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.putrequest("GET", path, skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.port}")
+        c.endheaders()
+        r = c.getresponse()
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+    def test_info_lists_the_features(self):
+        _, j = self.get("/v1/info")
+        self.assertIn("shift", j["features"])
+        self.assertIn("depot", j["features"])
+
+    def test_shift_answers_with_the_chain(self):
+        s, j = self.get(f"/v1/shift?pid={d.GTFS_ROUTE + self.pid}&start=25200&day=3&mins=120")
+        self.assertEqual(s, 200)
+        self.assertTrue(j["ok"])
+        self.assertEqual([(x["ref"], x["start"]) for x in j["data"]["trips"]], [("361", 25200), ("361", 27600), ("361", 30000)])
+        self.assertEqual(j["data"]["trips"][1]["layover"], 900)
+        # the raw pattern number works as well
+        s, j2 = self.get(f"/v1/shift?pid={self.pid}&start=25200&day=3&mins=120")
+        self.assertEqual(j2["data"]["trips"], j["data"]["trips"])
+
+    def test_shift_of_an_unknown_line_is_an_empty_list_and_bad_parameters_are_400(self):
+        s, j = self.get(f"/v1/shift?pid={d.GTFS_ROUTE + 9999}&start=25200&day=3&mins=60")
+        self.assertEqual((s, j["data"]["trips"]), (200, []))
+        self.assertEqual(self.get("/v1/shift?pid=1&start=25200&day=9&mins=60")[0], 400)
+        self.assertEqual(self.get("/v1/shift?pid=1&start=-5&day=3&mins=60")[0], 400)
+        self.assertEqual(self.get("/v1/shift?pid=abc&start=1&day=3")[0], 400)
+        self.assertEqual(self.get("/v1/shift?start=1&day=3")[0], 400)
+
+    def test_shift_without_timetables_is_an_empty_list(self):
+        svc = d.Service(d.Cache(self.dir / "cache2"), upstream=lambda q: "{}")
+        httpd, _ = d.serve(0, service=svc)
+        port = httpd.server_address[1]
+        httpd.RequestHandlerClass = d.make_handler(svc, port)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+            c.putrequest("GET", "/v1/shift?pid=1&start=100&day=2&mins=60", skip_host=True)
+            c.putheader("Host", f"127.0.0.1:{port}")
+            c.endheaders()
+            j = json.loads(c.getresponse().read().decode("utf-8"))
+            self.assertEqual((j["data"]["trips"], j["data"]["ready"]), ([], False))
+        finally:
+            httpd.shutdown()
+
+    def test_depot_is_asked_once_and_kept(self):
+        before = len(self.calls)
+        s, j = self.get("/v1/depot?lat=50.0&lon=16.0")
+        self.assertEqual(s, 200)
+        dep = j["data"]["depot"]
+        self.assertEqual((dep["kind"], dep["name"]), ("depot", "ČSAD vozovna Náchod"))
+        s, j = self.get("/v1/depot?lat=50.001&lon=16.001")           # the same ~5 km cell
+        self.assertTrue(j["cached"])
+        self.assertEqual(len(self.calls) - before, 1)
+        self.assertEqual(self.get("/v1/depot?lat=95&lon=16")[0], 400)
+        self.assertEqual(self.get("/v1/depot?lat=50")[0], 400)
+
+
+DEPOTS = {"elements": [
+    {"type": "node", "id": 1, "lat": 50.0100, "lon": 16.0000, "tags": {"amenity": "bus_station", "name": "Autobusové nádraží"}},
+    {"type": "way", "id": 2, "center": {"lat": 50.0300, "lon": 16.0300}, "tags": {"landuse": "depot", "name": "ČSAD vozovna Náchod"}},
+    {"type": "way", "id": 3, "center": {"lat": 50.0050, "lon": 16.0000}, "tags": {"landuse": "depot", "railway": "yes", "name": "Depo ŽST"}},
+    {"type": "way", "id": 4, "center": {"lat": 50.0020, "lon": 16.0000}, "tags": {"building": "garage", "name": "Garáž"}},
+    {"type": "node", "id": 5, "lat": 50.0, "lon": 16.0001, "tags": {"name": "Parkoviště depo", "amenity": "parking"}}]}
+
+
+class DepotPick(unittest.TestCase):
+    def pick(self, elements, lat=50.0, lon=16.0):
+        return json.loads(d.pick_depot(json.dumps({"elements": elements}), lat, lon))["depot"]
+
+    def test_a_depot_is_preferred_to_a_station_even_when_further(self):
+        dep = self.pick(DEPOTS["elements"])
+        self.assertEqual((dep["kind"], dep["name"], dep["lat"]), ("depot", "ČSAD vozovna Náchod", 50.03))
+        self.assertGreater(dep["dist"], 3000)
+
+    def test_without_a_depot_the_nearest_bus_station(self):
+        dep = self.pick([e for e in DEPOTS["elements"] if e["id"] in (1, 3, 4, 5)] + [
+            {"type": "node", "id": 6, "lat": 50.05, "lon": 16.0, "tags": {"amenity": "bus_station", "name": "Far"}}])
+        self.assertEqual((dep["kind"], dep["name"]), ("station", "Autobusové nádraží"))
+
+    def test_a_bus_depot_wins_over_a_nearer_unnamed_one_and_nothing_is_none(self):
+        near = {"type": "node", "id": 7, "lat": 50.001, "lon": 16.0, "tags": {"building": "transportation", "name": "Depo"}}
+        bus = {"type": "node", "id": 8, "lat": 50.01, "lon": 16.0, "tags": {"landuse": "depot", "name": "Autobusové depo"}}
+        self.assertEqual(self.pick([near, bus])["name"], "Autobusové depo")
+        self.assertIsNone(self.pick([]))
+
+    def test_the_query_names_every_kind_and_the_answer_is_small(self):
+        q = d.depot_query(50.0, 16.0)
+        for part in ("amenity=bus_station", "landuse=depot", "building=transportation", "vozovna", "around:10000,50.0000,16.0000"):
+            self.assertIn(part, q)
+        self.assertTrue(q.startswith("[out:json]"))
+
+
 if __name__ == "__main__":
     unittest.main()

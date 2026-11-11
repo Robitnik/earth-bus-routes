@@ -20,6 +20,9 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
                                         (station / stop) and the line numbers calling there; from this computer only
   GET /v1/progress                      what the service is waiting for right now (for a progress bar)
   GET /v1/lines?ref=..&lat=..&lon=..    the bus lines with this number within 40 km (&local=1 likewise)
+  GET /v1/shift?pid=..&start=..&day=..&mins=..   a shift: the trip of timetable pattern `pid` leaving at `start` (s from
+                                        midnight), then the trips that follow it for `mins` minutes (chained at the termini)
+  GET /v1/depot?lat=..&lon=..           the bus depot within 10 km of a point, else the nearest bus station: {"depot": {..} | null}
   GET /v1/status                        what it did lately (for the Add-ons page's log)
 
 Every answer is {"ok": true, "cached": bool, "data": <Overpass JSON>} or {"ok": false, "error": "..."}.
@@ -1926,6 +1929,176 @@ class Service:
         return self.get(along_key(pts), along_query(road), post=lambda text: filter_along(text, road), upstream=self.upstream_once)
 
 
+# ---- shifts and depots (plan 006, stage B) -------------------------------------------------------------------------------
+# A shift is a chain of trips with layovers at the termini. The national timetables have no block ids, so the chain is built here:
+# after a trip's last stop, the earliest departure of any line that leaves from that terminus (within SHIFT_NEAR_M) between
+# SHIFT_MIN_TURN_S and SHIFT_MAX_WAIT_S later; a departure of the same line (its way back) is preferred. No network is used.
+SHIFT_NEAR_M = 200
+SHIFT_MIN_TURN_S = 300
+SHIFT_MAX_WAIT_S = 2400
+SHIFT_MAX_TRIPS = 14
+SHIFT_MAX_MINS = 720
+DEPOT_RADIUS_M = 10000
+DEPOT_CELL_DEG = 0.05
+FEATURES.extend(["shift", "depot"])
+
+
+class Shifts:
+    """Chains of trips out of the timetable index of a Gtfs (read only; it takes the Gtfs's lock)."""
+
+    def __init__(self, gtfs):
+        self.gtfs = gtfs
+
+    @staticmethod
+    def _day_bit(db, pid, meta, day):
+        """The day of the index (a bit of the departures' mask) that stands for weekday `day` (1 Monday .. 7 Sunday): of the two
+        such days in the next two weeks the one the pattern runs most on (a public holiday runs a Sunday timetable), as the
+        departure lists of a route do. None when the index has no such day."""
+        import datetime
+        day0 = datetime.datetime.strptime(meta.get("today", "19700101"), "%Y%m%d").date()
+        bits = [i for i in range(min(int(meta.get("days", "0")), 14)) if (day0 + datetime.timedelta(days=i)).isoweekday() == day]
+        if not bits:
+            return None
+        masks = [m for (m,) in db.execute("SELECT mask FROM deps WHERE pid=?", (pid,))]
+        return max(bits, key=lambda b: sum(1 for m in masks if m >> b & 1))
+
+    @staticmethod
+    def _info(db, pid, cache):
+        """{ref, head, stops: [sid], offs: [s], from, to} of a pattern, or None."""
+        if pid in cache:
+            return cache[pid]
+        p = db.execute("SELECT ref, head, stops, offs FROM patterns WHERE pid=?", (pid,)).fetchone()
+        info = None
+        if p is not None:
+            sl, offs = p[2].split(","), [int(x) for x in p[3].split(",")]
+
+            def name(sid):
+                r = db.execute("SELECT name FROM stops WHERE sid=?", (sid,)).fetchone()
+                return r[0] if r else ""
+            info = {"ref": p[0], "head": p[1] or "", "stops": sl, "offs": offs, "from": name(sl[0]), "to": name(sl[-1])}
+        cache[pid] = info
+        return info
+
+    @staticmethod
+    def _item(pid, start, info, prev_end):
+        end = start + info["offs"][-1]
+        return {"pid": pid, "id": GTFS_ROUTE + pid, "start": start, "end": end, "ref": info["ref"], "head": info["head"],
+                "from": info["from"], "to": info["to"], "layover": 0 if prev_end is None else start - prev_end}
+
+    def chain(self, pid, start, day, mins):
+        """[{pid, id (relation id for /v1/route), start, end, ref, head, from, to, layover}]: the trip `pid` leaving at `start`
+        (seconds from midnight, may pass 86400) on weekday `day`, then the trips that follow it for `mins` minutes of the shift.
+        [] when the timetables do not know the pattern."""
+        pid = pid - GTFS_ROUTE if pid >= GTFS_ROUTE else pid
+        mins = max(1, min(int(mins), SHIFT_MAX_MINS))
+        with self.gtfs._lock:
+            for db in self.gtfs.dbs.values():
+                cache = {}
+                first = self._info(db, pid, cache)
+                if first is None:
+                    continue
+                return self._chain_db(db, pid, first, int(start), day, mins, cache)
+        return []
+
+    def _chain_db(self, db, pid, first, start, day, mins, cache):
+        meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
+        bit = self._day_bit(db, pid, meta, day)
+        out = [self._item(pid, start, first, None)]
+        if bit is None:
+            return out
+        limit = start + mins * 60
+        used = {(pid, start)}
+        cur = first
+        while len(out) < SHIFT_MAX_TRIPS:
+            end = out[-1]["end"]
+            lo, hi = end + SHIFT_MIN_TURN_S, min(end + SHIFT_MAX_WAIT_S, limit)
+            if hi < lo:
+                break
+            row = db.execute("SELECT lat, lon FROM stops WHERE sid=?", (cur["stops"][-1],)).fetchone()
+            if row is None:
+                break
+            sids = [r[0] for r in self.gtfs._stops_near(db, row[0], row[1], SHIFT_NEAR_M)]
+            pids = []
+            for i in range(0, len(sids), 400):
+                chunk = sids[i:i + 400]
+                pids += [r[0] for r in db.execute(
+                    f"SELECT DISTINCT pid FROM sp WHERE pos=0 AND sid IN ({','.join('?' * len(chunk))})", chunk)]
+            best = None
+            for i in range(0, len(pids), 400):
+                chunk = pids[i:i + 400]
+                for p2, st, mask in db.execute(
+                        f"SELECT pid, start, mask FROM deps WHERE pid IN ({','.join('?' * len(chunk))}) AND start BETWEEN ? AND ?",
+                        chunk + [lo, hi]):
+                    if not mask >> bit & 1 or (p2, st) in used:
+                        continue
+                    info = self._info(db, p2, cache)
+                    if info is None or len(info["offs"]) < 2:
+                        continue
+                    key = (info["ref"] != cur["ref"], st, p2)         # the same line first, then the earliest
+                    if best is None or key < best[0]:
+                        best = (key, p2, st, info)
+            if best is None:
+                break
+            _, p2, st, info = best
+            used.add((p2, st))
+            out.append(self._item(p2, st, info, end))
+            cur = info
+        return out
+
+
+def depot_query(lat, lon, radius=DEPOT_RADIUS_M):
+    a = f"around:{int(radius)},{lat:.4f},{lon:.4f}"
+    return (f"[out:json][timeout:50];(nwr[amenity=bus_station]({a});nwr[landuse=depot]({a});nwr[building=transportation]({a});"
+            f'nwr["name"~"depo|vozovna|gar[aá][zž]|depot",i]({a}););out tags center 300;')
+
+
+def depot_key(lat, lon):
+    snap5 = lambda v: round(round(v / DEPOT_CELL_DEG) * DEPOT_CELL_DEG, 4)
+    return f"depot_{snap5(lat):.2f}_{snap5(lon):.2f}"
+
+
+def pick_depot(text, lat, lon):
+    """The bus depot nearest to (lat, lon) in an Overpass answer, else the nearest bus station: {"depot": {name, lat, lon, kind
+    ("depot" | "station"), dist} or null} as text. A depot is a landuse=depot / building=transportation, or a name with depo,
+    vozovna, garaz; a railway one, a car park or a garage building is not."""
+    data = json.loads(text)
+    depots, stations = [], []
+    for e in data.get("elements", []):
+        tags = e.get("tags") or {}
+        la, lo = e.get("lat"), e.get("lon")
+        if la is None and e.get("center"):
+            la, lo = e["center"].get("lat"), e["center"].get("lon")
+        if la is None or lo is None:
+            continue
+        name = tags.get("name", "")
+        d = _dist_m(lat, lon, la, lo)
+        if tags.get("amenity") == "bus_station":
+            stations.append((d, name, la, lo))
+            continue
+        if tags.get("railway") or tags.get("amenity") == "parking" or tags.get("building") in ("garage", "garages"):
+            continue
+        folded = fold(name)
+        if tags.get("landuse") == "depot" or tags.get("building") == "transportation" or re.search(r"depo|vozovna|garaz|depot", folded):
+            bus = bool(re.search(r"bus|csad|dopravn|mhd", folded + " " + fold(tags.get("operator", ""))))
+            depots.append((d - (3000 if bus else 0), d, name, la, lo))
+    if depots:
+        _, d, name, la, lo = min(depots)
+        pick = {"name": name or "Depot", "lat": round(la, 6), "lon": round(lo, 6), "kind": "depot", "dist": int(d)}
+    elif stations:
+        d, name, la, lo = min(stations)
+        pick = {"name": name or "Bus station", "lat": round(la, 6), "lon": round(lo, 6), "kind": "station", "dist": int(d)}
+    else:
+        pick = None
+    return json.dumps({"depot": pick}, separators=(",", ":"), ensure_ascii=False)
+
+
+def find_depot(service, lat, lon):
+    """(text, cached) of pick_depot's answer for the depot round a point (kept per ~5 km cell like any answer)."""
+    c = DEPOT_CELL_DEG
+    slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
+    return service.get(depot_key(lat, lon), depot_query(slat, slon), post=lambda t: pick_depot(t, slat, slon))
+
+
 # ---- HTTP -----------------------------------------------------------------------------------------------------------
 
 def host_ok(host_header, port):
@@ -1966,6 +2139,20 @@ def make_handler(service, port):
                     if q.get("lat") and q.get("lon"):
                         service.want_timetables(float(q["lat"][0]), float(q["lon"][0]))
                     return self.send_json(200, json.dumps({"ok": True, "data": service.gtfs.status()}))
+                if u.path == "/v1/shift":
+                    pid, start = int(q["pid"][0]), int(q["start"][0])
+                    day, mins = int(q.get("day", ["1"])[0]), int(q.get("mins", ["120"])[0])
+                    if not (1 <= day <= 7 and 0 <= start < 10 ** 6 and 1 <= mins):
+                        return self.fail(400, "pid / start / day / mins out of range")
+                    trips = Shifts(service.gtfs).chain(pid, start, day, mins) if service.gtfs.ready() else []
+                    return self.send_json(200, json.dumps({"ok": True, "cached": True, "data": {
+                        "trips": trips, "source": "gtfs", "ready": service.gtfs.ready()}}, ensure_ascii=False))
+                if u.path == "/v1/depot":
+                    lat, lon = float(q["lat"][0]), float(q["lon"][0])
+                    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+                        return self.fail(400, "lat / lon out of range")
+                    text, cached = find_depot(service, lat, lon)
+                    return self.send_json(200, b'{"ok":true,"cached":' + (b"true" if cached else b"false") + b',"data":' + text.encode("utf-8") + b"}")
                 if u.path == "/v1/progress":
                     return self.send_json(200, json.dumps({"ok": True, "data": ACTIVITY.snapshot()}))
                 if u.path == "/v1/status":
