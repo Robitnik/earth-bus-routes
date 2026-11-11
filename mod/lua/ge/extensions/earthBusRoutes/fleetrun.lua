@@ -24,8 +24,14 @@ local st = { fl = nil, t = 0, sigT = 0, sig = nil, reloadAt = -1e9, offUntil = 0
 -- 0 .. 6 buses; 0 when the option is off or there is no virtual net to take trips from
 function M.wanted()
   if not S then return 0 end
-  if (S.opts.aiBuses or 'off') ~= 'on' or (S.opts.busNet or 'on') == 'off' then return 0 end
-  return fleet.limitOf(S.opts.busFleet == nil and 2 or S.opts.busFleet)
+  -- aiBuses: 'off' or how many ('1'..'6'); 'on' (0.10.0) means busFleet or 2. Earth allows 16 options, so the count is the
+  -- choice itself since 0.10.2.
+  local a = S.opts.aiBuses or 'off'
+  if a == 'off' or (S.opts.busNet or 'on') == 'off' then return 0 end
+  if a == 'on' then return fleet.limitOf(S.opts.busFleet == nil and 2 or S.opts.busFleet) end
+  local n = tonumber(a)
+  if not n then return 0 end
+  return fleet.limitOf(n)
 end
 
 local function makeEnv()

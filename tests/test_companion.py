@@ -1577,5 +1577,30 @@ class SpeedLimits(unittest.TestCase):
             self.assertEqual(off.with_limits("not json"), "not json")
 
 
+class AddonManifest(unittest.TestCase):
+    """mod/beamngEarth_addon.json against BeamNG.Earth's checks (server/addons.py parse_options). Earth refuses the whole
+    list when one rule is broken, and the game then shows none of the options (0.10.0 had 20 options and a 321-letter help)."""
+
+    def test_the_options_pass_earths_checks(self):
+        import re
+        root = pathlib.Path(__file__).resolve().parent.parent
+        opts = json.loads((root / "mod" / "beamngEarth_addon.json").read_text(encoding="utf-8"))["options"]
+        self.assertLessEqual(len(opts), 16, "OPTIONS_MAX")
+        keys = set()
+        for o in opts:
+            self.assertRegex(o["key"], r"^[a-z][A-Za-z0-9_]{0,30}$")
+            self.assertNotIn(o["key"], keys)
+            keys.add(o["key"])
+            self.assertIn(o["type"], ("int", "bool", "text", "choice"))
+            self.assertLessEqual(len(o.get("label") or o["key"]), 60, o["key"])
+            self.assertLessEqual(len(o.get("help") or ""), 300, o["key"])
+            if o["type"] == "choice":
+                self.assertTrue(0 < len(o["choices"]) <= 20 and all(0 < len(c) <= 60 for c in o["choices"]), o["key"])
+                self.assertIn(o.get("default", o["choices"][0]), o["choices"], o["key"])
+            if o["type"] == "int":
+                lo, hi = o.get("min", -(1 << 31)), o.get("max", 1 << 31)
+                self.assertTrue(isinstance(lo, int) and isinstance(hi, int) and lo <= hi and lo <= o.get("default", lo) <= hi, o["key"])
+
+
 if __name__ == "__main__":
     unittest.main()

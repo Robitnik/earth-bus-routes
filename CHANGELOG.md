@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.2
+
+- **The settings are back.** BeamNG.Earth takes at most 16 options for an add-on (and 300 letters of help each); 0.10.0 had 20, so Earth dropped all of them and none showed in the game. Now 16: "Next trip from here", the LED board and the depot start are always on (the shift's start still has its depot checkbox), and "AI buses on the lines" is one choice: off, or how many (1, 2, 3, 4 or 6). A test checks the list against Earth's own rules.
+- No data service update needed (stays 0.10.1).
+
 ## 0.10.1
 
 - **No more five-minute waits for a route.** The moving buses of 0.10.0 loaded up to 30 lines in the background, and the data service asks the public servers one at a time, so the route you picked waited behind them (300 s and more). Background loads now take only what the service keeps on this computer (a timetable line whose road was never asked for moves straight between its stops on the map); they never ask a public server.

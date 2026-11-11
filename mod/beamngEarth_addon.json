@@ -45,28 +45,6 @@
       "help": "The stop's bay on the road as in the game's bus mode: corner markers red while you come, orange in the bay, green when done; its name and who waits over it."
     },
     {
-      "key": "quickStart",
-      "label": "Next trip from here card",
-      "type": "choice",
-      "choices": [
-        "on",
-        "off"
-      ],
-      "default": "on",
-      "help": "A card at the top of the Stops tab: the next departure from the stop you stand at, one press to start it."
-    },
-    {
-      "key": "ledBoard",
-      "label": "LED board in the bus",
-      "type": "choice",
-      "choices": [
-        "on",
-        "off"
-      ],
-      "default": "on",
-      "help": "The HUD's LED board with the next stop and 'on request', and the bell when a passenger asks for a stop."
-    },
-    {
       "key": "liveComfort",
       "label": "Live comfort",
       "type": "choice",
@@ -87,17 +65,6 @@
       ],
       "default": "on",
       "help": "Adds a \"Start a shift\" button to the route card: a chain of trips with layovers at the termini and a summary at the end."
-    },
-    {
-      "key": "depotStart",
-      "label": "Shifts start at the depot",
-      "type": "choice",
-      "choices": [
-        "on",
-        "off"
-      ],
-      "default": "on",
-      "help": "A shift may begin with an empty service run from the nearest bus depot (or bus station) to the first stop."
     },
     {
       "key": "events",
@@ -181,20 +148,15 @@
       "label": "AI buses on the lines",
       "type": "choice",
       "choices": [
-        "on",
-        "off"
+        "off",
+        "1",
+        "2",
+        "3",
+        "4",
+        "6"
       ],
       "default": "off",
-      "help": "EXPERIMENTAL, off until it is tried in the game. A few real buses of the lines round you drive their routes by the timetable, stop at the stops and open their doors; a transfer you are asked to wait for becomes a bus you can see arrive. They are made and put away out of your sight. Needs 'Buses of the lines on the map'."
-    },
-    {
-      "key": "busFleet",
-      "label": "Number of AI buses",
-      "type": "int",
-      "default": 2,
-      "min": 0,
-      "max": 6,
-      "help": "How many real AI buses are kept ready at most (0 = none). More buses need more of the computer."
+      "help": "EXPERIMENTAL, not yet tried in the game. How many real AI buses of the lines round you drive their routes by the timetable, stop and open their doors (a transfer becomes a bus you see arrive). Made out of your sight."
     },
     {
       "key": "units",

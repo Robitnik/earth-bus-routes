@@ -977,9 +977,17 @@ function T.the_option_values_and_the_off_switches()
   local have = {}
   local order = {}
   for _, o in ipairs(json.options) do have[o.key] = o order[#order + 1] = o.key end
-  assert(have.busFleet and have.busFleet.default == 2 and have.busFleet.min == 0 and have.busFleet.max == 6 and have.aiBuses.default == 'off')
+  -- 0.10.2: Earth takes at most 16 options, so the count is the choice of aiBuses itself
+  assert(not have.busFleet and have.aiBuses.default == 'off' and have.aiBuses.choices[1] == 'off')
+  S.opts.busNet, S.opts.busFleet = nil, nil
+  S.opts.aiBuses = '3'
+  assert(fleetrun.wanted() == 3, 'three buses')
+  S.opts.aiBuses = '6'
+  assert(fleetrun.wanted() == 6)
+  S.opts.aiBuses = 'nonsense'
+  assert(fleetrun.wanted() == 0)
   local iu, ib
-  for i, k in ipairs(order) do if k == 'units' then iu = i end if k == 'busFleet' then ib = i end end
+  for i, k in ipairs(order) do if k == 'units' then iu = i end if k == 'aiBuses' then ib = i end end
   assert(ib < iu, 'before units')
 end
 
