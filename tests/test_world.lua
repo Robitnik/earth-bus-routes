@@ -171,4 +171,28 @@ function T.the_size_of_the_vehicle_is_asked_in_a_safe_way()
   assert(world.vehicleSize({ getInitialLength = function() return 0.1 end, getInitialWidth = function() return 2.5 end }) == nil, 'nonsense')
 end
 
+function T.the_indicators_are_read_defensively()
+  H.reset()
+  local world = H.load('mod/lua/ge/extensions/earthBusRoutes/world.lua')
+  local veh = { getID = function() return 7 end }
+  assert(world.signal(veh, 'L') == nil, 'no bridge: unknown')
+  local values, watched = {}, {}
+  _G.core_vehicleBridge = {
+    registerValueChangeNotification = function(v, k) watched[#watched + 1] = k end,
+    getCachedVehicleData = function(id, k) assert(id == 7) if k == 'boom' then error('x') end return values[k] end,
+  }
+  world.watchSignals(veh)
+  assert(#watched == 4)
+  assert(world.signal(veh, 'L') == nil and world.signal(veh, 'R') == nil, 'never reported: unknown, not off')
+  values.signal_L = 0
+  assert(world.signal(veh, 'L') == false and world.signal(veh, 'R') == nil)
+  values.signal_left_input = 1                                 -- the lever, while the lamp is in its dark half
+  assert(world.signal(veh, 'L') == true)
+  values.signal_R = 1
+  assert(world.signal(veh, 'R') == true)
+  _G.core_vehicleBridge.getCachedVehicleData = function() error('gone') end
+  assert(world.signal(veh, 'L') == nil, 'a failing bridge is silent')
+  _G.core_vehicleBridge = nil
+end
+
 return T

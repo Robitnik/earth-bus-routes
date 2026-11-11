@@ -1261,7 +1261,7 @@ local function buildPlan()
     opts = { density = S.opts.density or 'normal', difficulty = S.opts.difficulty or 'normal', timeScale = S.opts.timeScale or 1,
       weather = world.weather(),
       -- the dispatcher's events, tickets sold by the driver and transfers: on unless the player turned them off
-      events = S.opts.events ~= 'off', tickets = S.opts.tickets ~= 'off', transfers = S.opts.transfers ~= 'off' },
+      events = S.opts.events ~= 'off', tickets = S.opts.tickets ~= 'off', transfers = S.opts.transfers ~= 'off', rules = S.opts.rules ~= 'off' },
     vehicle = { bus = veh.bus }, vehicleName = veh.name,
   }
 end
@@ -1346,6 +1346,7 @@ local function beginTrip(plan, rotate)
   S.hudTimer = 0
   world.resetAccel()
   world.watchDoors(veh)
+  world.watchSignals(veh)
   world.clockBegin()
   world.clockSet(plan.clock)
   local stop = plan.route.stops[plan.startIndex]
@@ -1687,7 +1688,8 @@ local function tripFrame(dt)
     return
   end
   local aL, aR = world.accel(veh, dt)
-  trip.update(t, dt, { lat = pose.lat, lon = pose.lon, speed = pose.speed or 0, aLong = aL, aLat = aR, doorsOpen = world.doorsOpen(veh) })
+  trip.update(t, dt, { lat = pose.lat, lon = pose.lon, speed = pose.speed or 0, aLong = aL, aLat = aR, doorsOpen = world.doorsOpen(veh),
+    signalL = world.signal(veh, 'L'), signalR = world.signal(veh, 'R') })
   pcall(ghostrun.update, t)
   careersvc.sample(pose.lat, pose.lon)
   if handleEvents(t) then return end

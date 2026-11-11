@@ -306,4 +306,102 @@ function T.without_twins_nothing_changes()
   assert(b.stops[1].id == 103)
 end
 
+-- ---- speed limits (speedlimit.lua, osm.parseRoute) ----------------------------------------------------------------------
+
+function T.maxspeed_values_are_understood()
+  local sl = require('earthBusRoutes/speedlimit')
+  assert(sl.parse('50') == 50 and sl.parse(' 70 ') == 70 and sl.parse('50 km/h') == 50)
+  assert(sl.parse('30 mph') == 48 and sl.parse('60 mph') == 97)
+  assert(sl.parse('CZ:urban') == 50 and sl.parse('CZ:rural') == 90 and sl.parse('CZ:motorway') == 130)
+  assert(sl.parse('DE:urban') == 50 and sl.parse('DE:rural') == 100 and sl.parse('DE:motorway') == false)
+  assert(sl.parse('GB:nsl_single') == nil)                   -- a name we do not know: the country's rule decides
+  assert(sl.parse('walk') == 7 and sl.parse('CZ:living_street') == 20 and sl.parse('DE:zone30') == 30)
+  assert(sl.parse('none') == false and sl.parse('signals') == false)
+  assert(sl.parse('50;70') == 50 and sl.parse('') == nil and sl.parse('fast') == nil and sl.parse('3') == nil)
+  assert(sl.wayKmh({ maxspeed = '70' }, 'CZ', true) == 70)
+  assert(sl.wayKmh({ ['maxspeed:forward'] = '60', ['maxspeed:backward'] = '40' }, 'CZ', true) == 60)
+  assert(sl.wayKmh({ ['maxspeed:forward'] = '60', ['maxspeed:backward'] = '40' }, 'CZ', false) == 40)
+  assert(sl.wayKmh({ maxspeed = 'CZ:urban' }, 'CZ', true) == 50)
+  assert(sl.wayKmh({ ['maxspeed:type'] = 'CZ:rural' }, nil, true) == 90)
+  assert(sl.wayKmh({ highway = 'motorway' }, 'CZ', true) == 130 and sl.wayKmh({ highway = 'motorway' }, 'DE', true) == false)
+  assert(sl.wayKmh({ highway = 'residential' }, 'CZ', true) == nil and sl.wayKmh(nil, 'CZ', true) == nil)
+  assert(sl.leftHand('GB') and sl.leftHand('IE') and not sl.leftHand('CZ') and not sl.leftHand(nil))
+end
+
+-- the route 308 of the fixtures with `way` elements (as the data service's Overpass answer has) tagged in thirds
+local function tagged(limits)
+  local data = H.fixture('route_6962840')
+  local rel = data.elements[1]
+  local refs = {}
+  for _, m in ipairs(rel.members) do if m.type == 'way' then refs[#refs + 1] = m end end
+  local third = math.floor(#refs / 3)
+  for i, m in ipairs(refs) do
+    local tags = nil
+    if i <= third then tags = { highway = 'secondary', maxspeed = '70' }
+    elseif i <= 2 * third then tags = { highway = 'residential', maxspeed = 'CZ:urban' } end
+    data.elements[#data.elements + 1] = { type = 'way', id = m.ref, tags = tags or { highway = 'tertiary' } }
+  end
+  rel.limits = limits
+  return data, refs, third
+end
+
+local function limitAtMiddleOf(r, member)
+  local g = member.geometry
+  local k = math.max(1, math.floor(#g / 2))
+  local a = geo.along(r.path, r.cum, (g[k].lat + g[k + 1].lat) / 2, (g[k].lon + g[k + 1].lon) / 2)
+  return require('earthBusRoutes/speedlimit').at(r, a)
+end
+
+function T.a_route_gets_the_limits_of_its_ways()
+  local sl = require('earthBusRoutes/speedlimit')
+  local data, refs, third = tagged({ cc = 'CZ', towns = {} })
+  local r = assert(osm.parseRoute(data))
+  assert(r.limitInfo and r.limitInfo.cc == 'CZ')
+  assert(limitAtMiddleOf(r, refs[2]) == 70, tostring(limitAtMiddleOf(r, refs[2])))
+  assert(limitAtMiddleOf(r, refs[third + 2]) == 50)             -- "CZ:urban"
+  assert(limitAtMiddleOf(r, refs[#refs - 1]) == 90)             -- untagged, no town near: outside a town
+  local rev = osm.reversed(r)                                    -- the same road the other way: the same limits at the same places
+  assert(sl.at(rev, 5) ~= nil)
+  local g = refs[2].geometry
+  local mid = { (g[1].lat + g[2].lat) / 2, (g[1].lon + g[2].lon) / 2 }
+  assert(sl.at(rev, (geo.along(rev.path, rev.cum, mid[1], mid[2]))) == 70)
+end
+
+function T.untagged_roads_are_built_up_near_a_town()
+  local sl = require('earthBusRoutes/speedlimit')
+  local data, refs = tagged(nil)
+  local last = refs[#refs - 1].geometry
+  local c = last[math.floor(#last / 2)]
+  data.elements[1].limits = { cc = 'CZ', towns = { { c.lat, c.lon, 1500 } } }
+  local r = assert(osm.parseRoute(data))
+  assert(limitAtMiddleOf(r, refs[#refs - 1]) == 50, 'in the town')
+  assert(limitAtMiddleOf(r, refs[95]) == 90, 'outside it')
+  -- a long way outside: the road a town's radius away
+  assert(sl.urban('CZ') == 50 and sl.rural('CZ') == 90 and sl.urban('XX') == 50)
+  assert(sl.rural('DE') == 100)
+end
+
+function T.without_limits_or_tags_nothing_is_known()
+  local sl = require('earthBusRoutes/speedlimit')
+  local r = assert(osm.parseRoute(H.fixture('route_6962840')))          -- no way tags in this answer, no rel.limits
+  assert(r.limitInfo == nil and sl.at(r, 100) == nil)
+  local data, refs = tagged(nil)                                         -- tags only: where they are silent, nothing
+  local r2 = assert(osm.parseRoute(data))
+  assert(limitAtMiddleOf(r2, refs[2]) == 70)
+  assert(limitAtMiddleOf(r2, refs[#refs - 1]) == nil)
+end
+
+function T.a_gtfs_line_has_towns_only()
+  local sl = require('earthBusRoutes/speedlimit')
+  local data = H.fixture('route_gtfs_363')
+  local rel = data.elements[1]
+  local g = rel.members[1].geometry
+  rel.limits = { cc = 'CZ', towns = { { g[1].lat, g[1].lon, 1500 } } }
+  local r = assert(osm.parseRoute(data))
+  assert(sl.at(r, 10) == 50, 'in the first town')
+  local far                                                      -- a place of the road 3 km and more from that town
+  for i = 1, #r.path do if geo.dist(g[1].lat, g[1].lon, r.path[i].lat, r.path[i].lon) > 3000 then far = r.cum[i] break end end
+  assert(far and sl.at(r, far) == 90, 'outside it')
+end
+
 return T

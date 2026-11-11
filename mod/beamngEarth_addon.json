@@ -155,6 +155,17 @@
       "help": "Counts your pay, rank and achievements and draws the lines you have driven on the map. It never locks a line: free play stays open. Off keeps only the trip totals and line records."
     },
     {
+      "key": "rules",
+      "label": "Driving rules",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Points for the indicator when you pull out of a stop and for keeping to the speed limit (+10 km/h allowed), and the limit sign on the HUD."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

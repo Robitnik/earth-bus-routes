@@ -1,6 +1,7 @@
 -- Parsing of Overpass answers into stops, stations, lines and routes. Pure logic (no game calls): the tests run it under
 -- lupa on recorded answers (tests/fixtures). Overpass queries live in overpass.lua.
 local geo = require('earthBusRoutes/geomath')
+local speedlimit = require('earthBusRoutes/speedlimit')
 local M = {}
 
 M.MERGE_M = 150        -- same-named platforms closer than this are one stop (one platform per direction)
@@ -452,6 +453,7 @@ function M.parseRoute(data)
 
   -- 1. the way chain ----------------------------------------------------------------------------------------------
   local path, gaps = {}, 0
+  local spans = {}                                      -- ways whose tags give a speed limit (speedlimit.info)
   local function add(p)
     local last = path[#path]
     if not (last and last.lat == p.lat and last.lon == p.lon) then path[#path + 1] = { lat = p.lat, lon = p.lon } end
@@ -460,6 +462,7 @@ function M.parseRoute(data)
     local role = m.role or ''
     if m.type == 'way' and m.geometry and #m.geometry >= 2 and (role == '' or role == 'forward' or role == 'backward' or role == 'hail_and_ride') then
       local g = m.geometry
+      local wayForward = true                         -- driven the way of its nodes (for the limit of one direction)
       if #path == 0 then
         for _, p in ipairs(g) do add(p) end
       else
@@ -467,9 +470,14 @@ function M.parseRoute(data)
         local dStart = geo.dist(e.lat, e.lon, g[1].lat, g[1].lon)
         local dEnd = geo.dist(e.lat, e.lon, g[#g].lat, g[#g].lon)
         local forward = dStart <= dEnd
+        wayForward = forward
         if math.min(dStart, dEnd) > M.GAP_M then gaps = gaps + 1 end
         if forward then for i = 1, #g do add(g[i]) end else for i = #g, 1, -1 do add(g[i]) end end
       end
+      -- the way's speed limit, from the tags the answer holds of it (the data service's rel.limits tells the country)
+      local wt = byId['way' .. tostring(m.ref)]
+      local kmh = wt and speedlimit.wayKmh(wt.tags, type(rel.limits) == 'table' and rel.limits.cc or nil, wayForward)
+      if kmh ~= nil then spans[#spans + 1] = { geometry = g, kmh = kmh } end
     end
   end
 
@@ -604,6 +612,7 @@ function M.parseRoute(data)
   head.nodes = nil
   head.stops, head.path, head.cum, head.length = stops, path, cum, length
   head.gaps, head.loop = gaps, loop
+  head.limitInfo = speedlimit.info(spans, rel.limits)
   head.rotated = rotated or nil
   -- the real timetable: every stop has its time from the start, in order (a stop left out would make the times lie)
   if gt and type(gt.starts) == 'table' then

@@ -8,6 +8,8 @@ local cabin = require('earthBusRoutes/cabin')
 local schedule = require('earthBusRoutes/schedule')
 local dispatch = require('earthBusRoutes/dispatch')
 local connections = require('earthBusRoutes/connections')
+local rules = require('earthBusRoutes/rules')
+local speedlimit = require('earthBusRoutes/speedlimit')
 local M = {}
 
 M.ZONE_M = 35            -- the bus is "at" a stop this near its platform ...
@@ -54,6 +56,7 @@ function M.new(plan)
   local kind = schedule.kindOf(route, plan.ctx)
   t.tickets = t.opts.tickets ~= false and kind ~= 'city' and kind ~= 'main'
   dispatch.start(t, plan.ctx, function(i) return M.scheduledArrival(t, i) end)
+  t.rules = rules.new({ on = t.opts.rules ~= false, left = speedlimit.leftHand(route.limitInfo and route.limitInfo.cc) })
   return t
 end
 
@@ -232,7 +235,11 @@ function M.update(t, dt, s)
   local doorsOpen = s.doorsOpen
   t.standing = (speed < M.STOP_SPEED) and (t.standing + dt) or 0
   if doorsOpen == nil then doorsOpen = (t.phase == 'atStop' or t.phase == 'start') and t.standing >= M.NO_DOORS_DWELL_S end
-  scoring.sample(t.score, dt, speed, s.aLong, s.aLat, doorsOpen, s.overLimit)
+  local over = s.overLimit
+  if over == nil then over = rules.speeding(t.rules, t.route, t.along, t.off, speed) end
+  t.doorsMoving = doorsOpen == true and speed > 2
+  rules.signals(t.rules, t.elapsed, s.signalL, s.signalR)
+  scoring.sample(t.score, dt, speed, s.aLong, s.aLat, doorsOpen, over)
 
   t.dist = geo.dist(s.lat, s.lon, stop.lat, stop.lon)
   t.alongTimer = t.alongTimer - dt
@@ -273,6 +280,7 @@ function M.update(t, dt, s)
         if t.endTimer >= M.END_DWELL_S and dispatch.canFinish(t) then finish(t) end
       end
     elseif speed > M.GO_SPEED then
+      if rules.noSignal(t.rules, t.elapsed) then scoring.noSignal(t.score) end
       depart(t)
     end
   end
@@ -316,7 +324,16 @@ function M.hud(t)
     dispatch = dispatch.current(t),                                              -- the dispatcher's message: { key, params, kind, seq }
     hold = t.hold and { ref = t.hold.ref, left = math.max(0, t.hold.at - t.clock), approx = t.hold.approx } or nil,
     selling = t.ticketExtra > 0 and t.timer < 0 and t.phase == 'atStop' or nil,   -- the driver is selling tickets
+    rules = M.rulesHud(t),
   }
+end
+
+-- What the HUD shows of the rules: the limit sign, the doors hint, the indicator hint; nil when the rules are off
+function M.rulesHud(t)
+  local r = t.rules
+  if not r or not r.on then return nil end
+  return { limit = r.limit, over = r.over, doorsMoving = t.doorsMoving or false,
+    signal = r.seen and { side = rules.side(r), on = rules.signalOn(r) } or nil }
 end
 
 -- The inside of the bus rides along with the trip: the LED board and the live comfort (cabin.lua), and a trip that waits at its

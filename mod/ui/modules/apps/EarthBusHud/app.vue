@@ -110,6 +110,7 @@
                     <span v-if="d.atStop && d.atStop.alightLeft > 0">{{ tr("hud.gettingOff", { n: d.atStop.alightLeft }) }}</span>
                     <span v-if="d.atStop && d.atStop.boardLeft > 0">{{ tr("hud.boarding", { n: d.atStop.boardLeft }) }}</span>
                     <span v-if="d.atStop && d.atStop.alightLeft <= 0 && d.atStop.boardLeft <= 0 && !d.hold">{{ tr("hud.closeDoors") }}</span>
+                    <span v-if="signalHint" class="hint">{{ signalHint }}</span>
                   </span>
                 </template>
                 <template v-else>
@@ -157,6 +158,7 @@
             <g class="cup-sway" :style="{ transform: 'rotate(' + comfort.cup + 'deg)', transformOrigin: '12.5px 14px' }"><path class="cup-coffee" d="M6.2 11h12.6v6a5.2 5.2 0 0 1-5.2 5.2h-2.2A5.2 5.2 0 0 1 6.2 17z" /></g>
           </svg>
         </div>
+        <div v-if="limitText" class="limit" :class="{ over: d.rules.over }" :title="tr('hud.limitTip')">{{ limitText }}</div>
         <div class="score" :title="tr('hud.scoreTip')">
           <svg viewBox="0 0 44 44" class="ring" aria-hidden="true">
             <circle cx="22" cy="22" r="18" class="ring-bg" />
@@ -166,6 +168,8 @@
           <span class="points">{{ d.score.points }}</span>
         </div>
       </footer>
+
+      <div v-if="d.rules && d.rules.doorsMoving" class="warn">{{ tr("hud.doorsMoving") }}</div>
 
       <transition name="note">
         <div v-if="lastNote" class="note" :key="d.noteSeq">
@@ -224,6 +228,7 @@ const TEXT = {
     "hud.holding": "Waiting for line {ref}: {time}", "hud.selling": "Selling tickets…",
     "note.Connection made": "Connection made", "note.Missed connection": "Missed connection", "note.Wheelchair passenger helped": "Wheelchair passenger helped",
     "note.Wheelchair passenger left behind": "Wheelchair passenger left behind", "note.Bag handed in": "Bag handed in", "note.Group served": "Group served",
+    "hud.limitTip": "Speed limit of this road", "hud.doorsMoving": "Doors are open: stop and close them", "hud.signalLeft": "Left indicator", "hud.signalRight": "Right indicator", "note.No signal": "No indicator", "note.Speeding": "Speeding",
   },
   uk: {
     "hud.idle.plate": "Автобус", "hud.idle.text": "Рейсу немає. Ctrl+Shift+B: обрати маршрут.",
@@ -252,6 +257,7 @@ const TEXT = {
     "hud.holding": "Чекаємо лінію {ref}: {time}", "hud.selling": "Продаж квитків…",
     "note.Connection made": "Пересадку дочекалися", "note.Missed connection": "Пропущена пересадка", "note.Wheelchair passenger helped": "Пасажиру на візку допомогли",
     "note.Wheelchair passenger left behind": "Пасажира на візку залишили", "note.Bag handed in": "Сумку віддано", "note.Group served": "Групу обслужено",
+    "hud.limitTip": "Обмеження швидкості на цій дорозі", "hud.doorsMoving": "Двері відчинені: зупиніться й зачиніть", "hud.signalLeft": "Лівий поворотник", "hud.signalRight": "Правий поворотник", "note.No signal": "Без поворотника", "note.Speeding": "Перевищення швидкості",
   },
 }
 function tr(key, p) {
@@ -387,6 +393,18 @@ const approach = computed(() => {
   if (!n) return 0
   const m = n.remaining > 0 ? n.remaining : n.dist
   return Math.max(0, Math.min(1, 1 - m / 600))
+})
+
+// the sign of the road's speed limit (in the player's units) and the indicator hint at a stop
+const limitText = computed(() => {
+  const l = d.value && d.value.rules && d.value.rules.limit
+  if (!l) return ""
+  return d.value.units === "mph" ? String(Math.round(l / 1.609344 / 5) * 5) : String(l)
+})
+const signalHint = computed(() => {
+  const s = d.value && d.value.rules && d.value.rules.signal
+  if (!s || s.on) return ""
+  return tr(s.side === "R" ? "hud.signalRight" : "hud.signalLeft")
 })
 
 const seatSegs = computed(() => (d.value && d.value.capacity ? Math.round((d.value.seats / d.value.capacity) * 20) : 10))
@@ -724,6 +742,41 @@ onMounted(() => {
     &.on.stand { background: var(--late); }
   }
 }
+.limit {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 4px solid #d8382f;
+  background: #ffffff;
+  color: #111;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.5px;
+  transition: box-shadow 0.2s;
+  &.over { animation: over-limit 0.7s ease-in-out infinite; }
+}
+@keyframes over-limit {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(216, 56, 47, 0); }
+  50% { box-shadow: 0 0 0 7px rgba(216, 56, 47, 0.45); }
+}
+.warn {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 104px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #4a2b1c;
+  color: #ffc233;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
 .score {
   position: relative;
   flex: none;
@@ -778,5 +831,6 @@ onMounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .stop.current .dot { animation: none; }
   .ledboard .lb-flag { animation: none !important; }
+  .limit.over { animation: none; box-shadow: 0 0 0 4px rgba(216, 56, 47, 0.6); }
 }
 </style>

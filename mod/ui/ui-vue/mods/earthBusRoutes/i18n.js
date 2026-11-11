@@ -201,6 +201,7 @@ const DICT = {
     "note.Connection made": "Connection made", "note.Missed connection": "Missed connection", "note.Wheelchair passenger helped": "Wheelchair passenger helped",
     "note.Wheelchair passenger left behind": "Wheelchair passenger left behind", "note.Bag handed in": "Bag handed in", "note.Group served": "Group served",
     "res.tickets": "Tickets sold", "res.connections": "Connections made",
+    "note.No signal": "No indicator", "note.Speeding": "Speeding",
   },
   uk: {
     ...SHIFT_UK,
@@ -399,6 +400,7 @@ const DICT = {
     "note.Connection made": "Пересадку дочекалися", "note.Missed connection": "Пропущена пересадка", "note.Wheelchair passenger helped": "Пасажиру на візку допомогли",
     "note.Wheelchair passenger left behind": "Пасажира на візку залишили", "note.Bag handed in": "Сумку віддано", "note.Group served": "Групу обслужено",
     "res.tickets": "Продано квитків", "res.connections": "Пересадок дочекалися",
+    "note.No signal": "Без поворотника", "note.Speeding": "Перевищення швидкості",
   },
 }
 
