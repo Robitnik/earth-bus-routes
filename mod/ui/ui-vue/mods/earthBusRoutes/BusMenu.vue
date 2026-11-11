@@ -28,10 +28,13 @@
           </template>
         </nav>
         <div class="tools">
-          <div class="lang" role="group" :aria-label="t('lang')">
-            <button :class="{ on: lang === 'en' }" @click="setLang('en')">EN</button>
-            <button :class="{ on: lang === 'uk' }" @click="setLang('uk')">УК</button>
-          </div>
+          <label class="lang" :title="t('lang')">
+            <span class="lang-icon" aria-hidden="true">🌐</span>
+            <select :value="isAuto() ? 'auto' : lang" :aria-label="t('lang')" @change="pickLang($event.target.value)">
+              <option value="auto">{{ t("lang.auto") }}</option>
+              <option v-for="l in LANGS" :key="l.code" :value="l.code">{{ l.name }}</option>
+            </select>
+          </label>
           <button class="btn ghost" @click="close">{{ t("close") }}</button>
         </div>
       </header>
@@ -475,10 +478,11 @@ import ProfileTab from "./ProfileTab.vue"
 import DepartureBoard from "./DepartureBoard.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
-import { lang, setLang, t, noteText } from "./i18n.js"
+import { lang, setLang, resetLang, isAuto, syncLang, LANGS, t, noteText } from "./i18n.js"
+const pickLang = v => (v === "auto" ? resetLang() : setLang(v))
 
 const events = useEvents()
-events.on("EarthBusRoutesState", onState)
+events.on("EarthBusRoutesState", m => { syncLang(); onState(m) })
 // the moving buses and the live board come on their own, small and often (the whole model only when something changed)
 events.on("EarthBusRoutesBuses", d => {
   if (!state.value || !d) return
@@ -688,8 +692,10 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .sep { flex: none; width: 14px; height: 2px; background: var(--hair); }
 .mini-plate { display: inline-block; margin-right: 8px; padding: 0 7px; border-radius: 4px; background: var(--line); color: var(--ink-on-line); font-weight: 800; }
 .tools { flex: none; display: flex; align-items: center; gap: 12px; }
-.lang { display: flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden;
-  button { border: 0; padding: 6px 10px; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; &.on { background: var(--panel-3); color: var(--ink); } } }
+.lang { display: flex; align-items: center; gap: 6px; border: 1px solid var(--hair); border-radius: 8px; padding: 0 4px 0 8px; color: var(--muted);
+  .lang-icon { font-size: 14px; }
+  select { border: 0; padding: 6px 4px; background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; max-width: 170px;
+    option { background: #1b2a32; color: #e8f0f2; } } }
 
 // ---- body
 .body { flex: 1; min-height: 0; padding: 18px 20px 6px; overflow: hidden; display: flex; }

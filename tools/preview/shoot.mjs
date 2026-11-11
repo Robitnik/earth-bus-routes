@@ -39,7 +39,10 @@ for (const name of names) {
   // name:click=<css selector> clicks that element before the shot (e.g. a bus dot on the map)
   const click = new URLSearchParams(extra).get("click")
   if (click) { await page.click(click); await page.waitForTimeout(300) }
-  const file = path.join(out, `${view}-${nm}.png`)
+  // ?uilang=de-DE (in the extras): the page in that game language; the shot goes to docs/shots/lang/<view>-<state>-<lang>.png
+  const ul = new URLSearchParams(extra).get("uilang")
+  if (ul) fs.mkdirSync(path.join(out, "lang"), { recursive: true })
+  const file = ul ? path.join(out, "lang", `${view}-${nm}-${ul}.png`) : path.join(out, `${view}-${nm}.png`)
   await page.screenshot({ path: file })
   console.log("saved", file)
   await page.close()

@@ -192,76 +192,41 @@
 import { computed, onMounted, ref, watch } from "vue"
 import { useBridge } from "@/bridge"
 import { useEvents } from "@/services/events"
+import { isLang, autoLang } from "./langs.js"
 
 const { api } = useBridge()
 const events = useEvents()
 const d = ref(null)
 const compact = ref(false)
 
-// ---- the two languages of the add-on (the menu follows the same rule: Ukrainian / Russian game language -> uk)
-const lang = (typeof navigator !== "undefined" && /^(uk|ru|be)/i.test(navigator.language || "")) ? "uk" : "en"
-const TEXT = {
-  en: {
-    "hud.idle.plate": "Bus", "hud.idle.text": "No trip. Press Ctrl+Shift+B to pick a route.",
-    "hud.armed": "Drive to the start", "hud.armedHint": "The trip begins when you get there and stop.",
-    "hud.done": "Trip finished: {points} points. Open the menu for details.", "hud.toggle": "Click to fold",
-    "hud.openDoors": "Open the doors", "hud.closeDoors": "Close the doors and go", "hud.gettingOff": "{n} getting off", "hud.boarding": "{n} boarding",
-    "hud.due": "due {time}", "hud.waiting": "{n} waiting", "hud.stopRequested": "Stop requested",
-    "hud.onboard": "on board", "hud.onboardTip": "Passengers on board / capacity", "hud.scoreTip": "Score of this trip", "hud.progress": "Progress along the line",
-    "hud.layover": "Layover, next trip", "hud.layoverIn": "in {min} min", "hud.layoverNow": "Boarding", "hud.lateBy": "late by {min} min",
-    "hud.layoverAway": "Get back in the bus: the shift waits, the time goes on.", "hud.layoverLoading": "The dispatcher is preparing the trip…",
-    "hud.layoverWait": "Trip {n} of the shift. Departs {time}; the shift ends {end}.", "hud.service": "Service run to the first stop", "hud.serviceSign": "Služební jízda",
-    "hud.serviceDue": "Due at {time}", "hud.shiftTrip": "Shift: trip {n}", "hud.shiftDepot": "from the depot", "hud.lateStart": "began {min} min late",
-    "hud.shiftEnds": "ends in {time}", "hud.shiftDone": "Shift finished: {n} trips, {points} points on average. Open the menu for the summary.",
-    "hud.onTime": "On time", "m": "m", "km": "km", "ft": "ft", "mi": "mi",
-    "hud.ghost": "Ghost", "hud.ghostWait": "starts when you leave", "hud.ghostTip": "Your best trip on this line ({points} points): + slower than it was here, − faster",
-    "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
-    "note.Passenger fell": "Passenger fell",
-    "hud.led.next": "Next stop", "hud.led.now": "Stop", "hud.led.last": "Terminus", "hud.led.onRequest": "On request", "hud.led.leavesIn": "Departs in {t}",
-    "hud.standing": "{n} standing", "hud.cupTip": "The coffee sways with the ride: brake gently, people are standing",
-    "msg.school": "School group at {stop}: about {n} people", "msg.crowd": "Crowd after the event at {stop}: expect a full bus",
-    "msg.wheelchair": "Wheelchair user waiting at {stop}: keep the doors open for {s} s", "msg.wheelchairDone": "Wheelchair passenger on board",
-    "msg.closed": "{stop} is out of service: drive past", "msg.request": "Stop requested at {stop}",
-    "msg.bag": "A passenger left a bag: hand it in at the dispatch office (stop at the station)", "msg.bagDone": "Bag handed in. Thank you", "msg.bagLeft": "The bag stays on the bus",
-    "msg.connection": "At {stop} wait for line {ref}: due {time}, {mins} min after you", "msg.connectionApprox": "At {stop} wait for line {ref}: about {time} (estimated)",
-    "msg.connectionWait": "Waiting for line {ref} until {time}", "msg.connectionBoard": "{n} passengers from line {ref} are boarding", "msg.connectionMissed": "You left before line {ref} arrived",
-    "hud.holding": "Waiting for line {ref}: {time}", "hud.selling": "Selling tickets…",
-    "note.Connection made": "Connection made", "note.Missed connection": "Missed connection", "note.Wheelchair passenger helped": "Wheelchair passenger helped",
-    "note.Wheelchair passenger left behind": "Wheelchair passenger left behind", "note.Bag handed in": "Bag handed in", "note.Group served": "Group served",
-    "hud.limitTip": "Speed limit of this road", "hud.doorsMoving": "Doors are open: stop and close them", "hud.signalLeft": "Left indicator", "hud.signalRight": "Right indicator", "note.No signal": "No indicator", "note.Speeding": "Speeding",
-  },
-  uk: {
-    "hud.idle.plate": "Автобус", "hud.idle.text": "Рейсу немає. Ctrl+Shift+B: обрати маршрут.",
-    "hud.armed": "Їдьте до початку", "hud.armedHint": "Рейс почнеться, коли ви доїдете й зупинитесь.",
-    "hud.done": "Рейс завершено: {points} балів. Подробиці в меню.", "hud.toggle": "Клік: згорнути",
-    "hud.openDoors": "Відчиніть двері", "hud.closeDoors": "Зачиніть двері й рушайте", "hud.gettingOff": "виходить {n}", "hud.boarding": "заходить {n}",
-    "hud.due": "за розкладом {time}", "hud.waiting": "чекає {n}", "hud.stopRequested": "Зупинку замовлено",
-    "hud.onboard": "у салоні", "hud.onboardTip": "Пасажирів у салоні / місткість", "hud.scoreTip": "Бали за рейс", "hud.progress": "Пройдено по маршруту",
-    "hud.layover": "Стоянка, наступний рейс", "hud.layoverIn": "через {min} хв", "hud.layoverNow": "Посадка", "hud.lateBy": "із запізненням {min} хв",
-    "hud.layoverAway": "Поверніться в автобус: зміна чекає, час іде.", "hud.layoverLoading": "Диспетчер готує рейс…",
-    "hud.layoverWait": "Рейс {n} зміни. Відправлення {time}; зміна закінчується {end}.", "hud.service": "Службовий рейс до першої зупинки", "hud.serviceSign": "Služební jízda",
-    "hud.serviceDue": "Треба бути о {time}", "hud.shiftTrip": "Зміна: рейс {n}", "hud.shiftDepot": "з депо", "hud.lateStart": "почався із запізненням {min} хв",
-    "hud.shiftEnds": "закінчується через {time}", "hud.shiftDone": "Зміну завершено: {n} рейсів, у середньому {points} балів. Підсумок у меню.",
-    "hud.onTime": "Вчасно", "m": "м", "km": "км", "ft": "фт", "mi": "миль",
-    "hud.ghost": "Привид", "hud.ghostWait": "рушає, коли ви рушите", "hud.ghostTip": "Ваш найкращий рейс на цьому маршруті ({points} балів): + повільніше, ніж тут їхали тоді, − швидше",
-    "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
-    "note.Passenger fell": "Пасажир упав",
-    "hud.led.next": "Наступна зупинка", "hud.led.now": "Зупинка", "hud.led.last": "Кінцева", "hud.led.onRequest": "На вимогу", "hud.led.leavesIn": "Відправлення через {t}",
-    "hud.standing": "стоять {n}", "hud.cupTip": "Кава хитається від їзди: гальмуйте плавно, люди стоять",
-    "msg.school": "Шкільна група на «{stop}»: близько {n} людей", "msg.crowd": "Натовп після події на «{stop}»: чекайте повний автобус",
-    "msg.wheelchair": "На «{stop}» чекає пасажир на візку: тримайте двері відчиненими {s} с", "msg.wheelchairDone": "Пасажир на візку в салоні",
-    "msg.closed": "«{stop}» не обслуговується: проїжджайте повз", "msg.request": "Зупинку «{stop}» замовили",
-    "msg.bag": "Пасажир забув сумку: віддайте в диспетчерську (зупиніться біля автостанції)", "msg.bagDone": "Сумку віддано. Дякуємо", "msg.bagLeft": "Сумка лишається в автобусі",
-    "msg.connection": "На «{stop}» почекайте лінію {ref}: прибуде о {time}, через {mins} хв після вас", "msg.connectionApprox": "На «{stop}» почекайте лінію {ref}: десь о {time} (орієнтовно)",
-    "msg.connectionWait": "Чекаємо лінію {ref} до {time}", "msg.connectionBoard": "З лінії {ref} заходить {n} пасажирів", "msg.connectionMissed": "Ви поїхали раніше, ніж приїхала лінія {ref}",
-    "hud.holding": "Чекаємо лінію {ref}: {time}", "hud.selling": "Продаж квитків…",
-    "note.Connection made": "Пересадку дочекалися", "note.Missed connection": "Пропущена пересадка", "note.Wheelchair passenger helped": "Пасажиру на візку допомогли",
-    "note.Wheelchair passenger left behind": "Пасажира на візку залишили", "note.Bag handed in": "Сумку віддано", "note.Group served": "Групу обслужено",
-    "hud.limitTip": "Обмеження швидкості на цій дорозі", "hud.doorsMoving": "Двері відчинені: зупиніться й зачиніть", "hud.signalLeft": "Лівий поворотник", "hud.signalRight": "Правий поворотник", "note.No signal": "Без поворотника", "note.Speeding": "Перевищення швидкості",
-  },
+// ---- languages (langs.js; the texts are in lang/<code>.js): the menu's choice (the same localStorage key), else the game's interface
+// language, else English; a key a language lacks shows in English
+import en from "./lang/en.js"
+import uk from "./lang/uk.js"
+import de from "./lang/de.js"
+import es from "./lang/es.js"
+import fr from "./lang/fr.js"
+import ja from "./lang/ja.js"
+import ko from "./lang/ko.js"
+import pl from "./lang/pl.js"
+import pt_BR from "./lang/pt_BR.js"
+import pt_PT from "./lang/pt_PT.js"
+import ru from "./lang/ru.js"
+import zh_Hans from "./lang/zh_Hans.js"
+import zh_Hant from "./lang/zh_Hant.js"
+const PACKS = { en, uk, de, es, fr, ja, ko, pl, pt_BR, pt_PT, ru, zh_Hans, zh_Hant }
+const lang = ref("en")
+function syncLang() {
+  let chosen = null
+  try { chosen = localStorage.getItem("earthBusRoutes.lang") } catch (e) { /* private window */ }
+  const l = isLang(chosen) ? chosen : autoLang(useBridge())
+  if (l !== lang.value) lang.value = l
 }
+syncLang()
+const TEXT = {}
+for (const c of Object.keys(PACKS)) TEXT[c] = (PACKS[c] && PACKS[c].text) || {}
 function tr(key, p) {
-  let s = (TEXT[lang] && TEXT[lang][key]) || TEXT.en[key] || key
+  let s = (TEXT[lang.value] && TEXT[lang.value][key]) || TEXT.en[key] || key
   if (p) for (const k in p) s = s.replace("{" + k + "}", p[k])
   return s
 }
@@ -277,16 +242,10 @@ const radio = computed(() => {
   if (v.selling) return { key: "sell", kind: "info", text: tr("hud.selling") }
   return null
 })
-const noteText = t => (TEXT[lang] && TEXT[lang]["note." + t]) || t
+const noteText = t => (TEXT[lang.value] && TEXT[lang.value]["note." + t]) || TEXT.en["note." + t] || t
 
 // ---- achievements (the same titles as the menu's ach.<id>; a title the lists do not know falls back to the English one Lua sends)
-TEXT.en["hud.ach"] = "Achievement unlocked"
-TEXT.uk["hud.ach"] = "Нове досягнення"
-const ACH = {
-  en: { "first_trip": "First trip", "trips_10": "10 trips", "trips_100": "100 trips", "on_time_all": "Every stop on time", "night_line": "Night line", "km_100_trip": "100 km in one trip", "km_1000": "1000 km driven", "towns_10": "10 towns", "towns_50": "50 towns", "countries_3": "3 countries", "transfers_10": "Connection kept", "smooth_trip": "A smooth ride", "smooth_shift": "A shift without a jolt", "first_s": "First S", "ghost_beat": "Faster than your ghost", "pax_1000": "1000 passengers", "records_5": "Records on 5 lines", "regional_10": "Regional driver", "city_20": "City driver", "first_shift": "First shift", "shifts_10": "10 shifts", "rank_driver": "Driver", "rank_experienced": "Experienced", "rank_mentor": "Mentor", "credits_5000": "5000 credits" },
-  uk: { "first_trip": "Перший рейс", "trips_10": "10 рейсів", "trips_100": "100 рейсів", "on_time_all": "Усі зупинки вчасно", "night_line": "Нічна лінія", "km_100_trip": "100 км за рейс", "km_1000": "1000 км", "towns_10": "10 міст", "towns_50": "50 міст", "countries_3": "3 країни", "transfers_10": "Пересадку дочекався", "smooth_trip": "М'яка їзда", "smooth_shift": "Зміна без ривків", "first_s": "Перша S", "ghost_beat": "Обігнав привида", "pax_1000": "1000 пасажирів", "records_5": "Рекорди на 5 лініях", "regional_10": "Приміський водій", "city_20": "Міський водій", "first_shift": "Перша зміна", "shifts_10": "10 змін", "rank_driver": "Водій", "rank_experienced": "Досвідчений", "rank_mentor": "Наставник", "credits_5000": "5000 кредитів" },
-}
-const achName = a => (ACH[lang] && ACH[lang][a.id]) || a.name || a.id
+const achName = a => (PACKS[lang.value] && PACKS[lang.value].ach && PACKS[lang.value].ach[a.id]) || (PACKS.en.ach[a.id]) || a.name || a.id
 const ach = ref(null)
 let achQueue = []
 let achTimer = null
@@ -425,7 +384,7 @@ watch(() => d.value && d.value.noteSeq, (seq, was) => {
   noteTimer = setTimeout(() => { lastNote.value = null }, 4000)
 })
 
-events.on("EarthBusRoutesHud", data => { d.value = data })
+events.on("EarthBusRoutesHud", data => { syncLang(); d.value = data })
 
 onMounted(() => {
   api.engineLua("if earthBusRoutes_main and earthBusRoutes_main.sendHud then earthBusRoutes_main.sendHud() end")
