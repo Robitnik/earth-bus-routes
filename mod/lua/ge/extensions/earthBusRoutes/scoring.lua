@@ -67,6 +67,10 @@ end
 
 function M.collision(s) s.collisions = s.collisions + 1 note(s, 'Collision', -40) end
 
+-- A standing passenger fell when the bus braked hard (cabin.lua): the comfort of the ride loses FALL_POINTS
+M.FALL_POINTS = 30
+function M.fall(s) s.falls = (s.falls or 0) + 1 note(s, 'Passenger fell', -M.FALL_POINTS) end
+
 local function clamp01(x) return math.max(0, math.min(1, x)) end
 
 -- Final numbers: parts 0..1, points, grade, stars
@@ -87,6 +91,7 @@ function M.result(s)
   local planned = math.max(s.planned, s.served + s.missed, 1)
   local service = clamp01(s.served / planned) * (1 - clamp01(s.leftWaiting / math.max(1, s.passengers + s.leftWaiting)) * 0.3)
   local comfort = 1 - clamp01(s.harshSec / math.max(60, 0.08 * s.drivenSec))
+  comfort = clamp01(comfort - (s.falls or 0) * M.FALL_POINTS / M.WEIGHTS.comfort)
   local safety = clamp01(1 - 0.2 * s.doorEvents - 0.15 * s.collisions - 0.01 * s.speedingSec)
   local parts = { punctuality = punctuality, service = service, comfort = comfort, safety = safety }
   local points = 0

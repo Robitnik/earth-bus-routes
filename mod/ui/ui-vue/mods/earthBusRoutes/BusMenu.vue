@@ -75,6 +75,7 @@
               </div>
             </div>
             <p v-if="tab === 'near'" class="sub">{{ t("near.sub") }}</p>
+            <NextTripCard v-if="tab === 'near' && s && s.nextTrip && !s.find" :trip="s.nextTrip" />
 
             <!-- search: a station by name, a line by number -->
             <form v-if="tab === 'near'" class="find" @submit.prevent="runFind">
@@ -444,6 +445,7 @@ import ProgressBar from "./ProgressBar.vue"
 import MiniMap from "./MiniMap.vue"
 import BuildPage from "./BuildPage.vue"
 import StopsPage from "./StopsPage.vue"
+import NextTripCard from "./NextTripCard.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"

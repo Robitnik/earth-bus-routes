@@ -34,6 +34,18 @@
         <span class="led clock">{{ clockText }}</span>
       </header>
 
+      <!-- the LED board of the saloon: the next stop, "on request", the line and its terminus (a bell sounds when a stop is asked for) -->
+      <section v-if="led" class="ledboard" :class="{ asked: led.requested }" :aria-label="tr('hud.led.next')">
+        <div class="lb-top">
+          <span class="lb-tag">{{ led.last ? tr("hud.led.last") : led.here ? tr("hud.led.now") : tr("hud.led.next") }}</span>
+          <span v-if="led.requested" class="lb-flag asked" :key="'a' + led.bellSeq">{{ tr("hud.stopRequested") }}</span>
+          <span v-else-if="led.waitSec" class="lb-flag wait">{{ tr("hud.led.leavesIn", { t: mmss(led.waitSec) }) }}</span>
+          <span v-else-if="led.onRequest" class="lb-flag demand">{{ tr("hud.led.onRequest") }}</span>
+        </div>
+        <div class="lb-stop">{{ led.stop }}</div>
+        <div class="lb-line">{{ led.line }} → {{ led.dest }}</div>
+      </section>
+
       <!-- the line diagram: the next stop opened up at the top, the stops after it on the line's colour -->
       <section class="line" :key="d.index">
         <div v-for="(s, i) in shown" :key="s.index" class="stop" :class="{ current: i === 0, far: i > 3, 'is-here': i === 0 && atStop }">
@@ -74,7 +86,8 @@
         <div class="load" :title="tr('hud.onboardTip')">
           <div class="load-top">
             <span class="load-num"><b>{{ d.onboard }}</b><small>/{{ d.capacity }}</small></span>
-            <span class="load-label">{{ tr("hud.onboard") }}</span>
+            <span v-if="!(comfort && comfort.standing > 0)" class="load-label">{{ tr("hud.onboard") }}</span>
+            <span v-else class="standing">{{ tr("hud.standing", { n: comfort.standing }) }}</span>
             <span v-if="d.lastBoard || d.lastAlight" class="flows">
               <span class="in">+{{ d.lastBoard }}</span><span class="out">−{{ d.lastAlight }}</span>
             </span>
@@ -82,6 +95,13 @@
           <div class="seats" role="progressbar" :aria-valuenow="d.onboard" :aria-valuemax="d.capacity">
             <i v-for="n in 20" :key="n" :class="{ on: n <= filled, stand: n > seatSegs }"></i>
           </div>
+        </div>
+        <div v-if="comfort" class="cupbox" :class="{ spill: comfort.spill }" :title="tr('hud.cupTip')">
+          <svg viewBox="0 0 28 28" class="cup" aria-hidden="true">
+            <path class="cup-body" d="M5 8h15v9a6 6 0 0 1-6 6h-3a6 6 0 0 1-6-6z" />
+            <path class="cup-handle" d="M20 10h2a3 3 0 0 1 0 6h-2" />
+            <g class="cup-sway" :style="{ transform: 'rotate(' + comfort.cup + 'deg)', transformOrigin: '12.5px 14px' }"><path class="cup-coffee" d="M6.2 11h12.6v6a5.2 5.2 0 0 1-5.2 5.2h-2.2A5.2 5.2 0 0 1 6.2 17z" /></g>
+          </svg>
         </div>
         <div class="score" :title="tr('hud.scoreTip')">
           <svg viewBox="0 0 44 44" class="ring" aria-hidden="true">
@@ -124,6 +144,9 @@ const TEXT = {
     "hud.onboard": "on board", "hud.onboardTip": "Passengers on board / capacity", "hud.scoreTip": "Score of this trip", "hud.progress": "Progress along the line",
     "hud.onTime": "On time", "m": "m", "km": "km", "ft": "ft", "mi": "mi",
     "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
+    "note.Passenger fell": "Passenger fell",
+    "hud.led.next": "Next stop", "hud.led.now": "Stop", "hud.led.last": "Terminus", "hud.led.onRequest": "On request", "hud.led.leavesIn": "Departs in {t}",
+    "hud.standing": "{n} standing", "hud.cupTip": "The coffee sways with the ride: brake gently, people are standing",
   },
   uk: {
     "hud.idle.plate": "Автобус", "hud.idle.text": "Рейсу немає. Ctrl+Shift+B: обрати маршрут.",
@@ -134,6 +157,9 @@ const TEXT = {
     "hud.onboard": "у салоні", "hud.onboardTip": "Пасажирів у салоні / місткість", "hud.scoreTip": "Бали за рейс", "hud.progress": "Пройдено по маршруту",
     "hud.onTime": "Вчасно", "m": "м", "km": "км", "ft": "фт", "mi": "миль",
     "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
+    "note.Passenger fell": "Пасажир упав",
+    "hud.led.next": "Наступна зупинка", "hud.led.now": "Зупинка", "hud.led.last": "Кінцева", "hud.led.onRequest": "На вимогу", "hud.led.leavesIn": "Відправлення через {t}",
+    "hud.standing": "стоять {n}", "hud.cupTip": "Кава хитається від їзди: гальмуйте плавно, люди стоять",
   },
 }
 function tr(key, p) {
@@ -170,10 +196,15 @@ function timeLabel(sec) {
   return pad(Math.floor(s / 3600)) + ":" + pad(Math.floor((s % 3600) / 60))
 }
 const clockText = computed(() => (d.value ? timeLabel(d.value.clock) : "--:--"))
+const mmss = sec => Math.floor(sec / 60) + ":" + pad(Math.floor(sec % 60))
+// the saloon: the LED board and the live comfort (each is left out of the data when its menu setting is off)
+const led = computed(() => (d.value && d.value.cabin && d.value.cabin.led) || null)
+const comfort = computed(() => (d.value && d.value.cabin && d.value.cabin.comfort) || null)
 
 const delay = computed(() => {
   const n = d.value && d.value.next
   if (!n || n.delta === undefined || n.delta === null) return null
+  if (led.value && led.value.waitSec) return null                    // waiting for the departure: the LED board counts it down
   const s = Math.round(n.delta)
   if (Math.abs(s) <= 60) return { cls: "ok", text: tr("hud.onTime") }
   const a = Math.abs(s)
@@ -426,6 +457,48 @@ onMounted(() => {
   100% { box-shadow: 0 0 0 12px transparent; }
 }
 
+// ---- the LED board of the saloon
+.ledboard {
+  position: relative;
+  flex: none;
+  padding: 5px 10px 6px;
+  border-radius: 6px;
+  background: #07090a;
+  color: var(--led);
+  text-shadow: 0 0 7px rgba(255, 170, 0, 0.55);
+  overflow: hidden;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(rgba(0, 0, 0, 0.42) 1px, transparent 1px) 0 0 / 100% 3px,
+      linear-gradient(90deg, rgba(0, 0, 0, 0.42) 1px, transparent 1px) 0 0 / 3px 100%;
+    pointer-events: none;
+  }
+  .lb-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 17px; }
+  .lb-tag { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.75; }
+  .lb-flag {
+    padding: 0 7px;
+    border-radius: 3px;
+    background: var(--led);
+    color: #07090a;
+    text-shadow: none;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    &.demand { animation: blink 1.6s steps(1) infinite; }
+    &.wait { background: transparent; color: var(--led); outline: 1px solid var(--led); text-transform: none; letter-spacing: 0.2px; }
+    &.asked { background: #ff5a3c; color: #fff; animation: ring 0.5s steps(1) 6; }
+  }
+  .lb-stop { margin-top: 1px; font-size: 20px; font-weight: 700; line-height: 1.2; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  .lb-line { font-size: 13px; opacity: 0.7; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  &.asked .lb-stop { color: #ff8a6b; text-shadow: 0 0 7px rgba(255, 90, 60, 0.6); }
+}
+@keyframes blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.25; } }
+@keyframes ring { 0% { opacity: 1; } 50% { opacity: 0.2; } }
+
 // ---- load and score
 .board {
   display: flex;
@@ -439,6 +512,21 @@ onMounted(() => {
 .load-num { font-size: 22px; b { font-weight: 800; } small { font-size: 14px; color: var(--muted); } }
 .load-label { color: var(--muted); font-size: 13px; }
 .flows { margin-left: auto; display: flex; gap: 8px; font-weight: 700; font-size: 14px; .in { color: var(--ok); } .out { color: var(--early); } }
+.standing { white-space: nowrap; padding: 0 7px; border-radius: 99px; background: rgba(255, 135, 90, 0.18); color: var(--late); font-size: 13px; font-weight: 700; }
+.cupbox {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  .cup { width: 28px; height: 28px; }
+  .cup-body { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linejoin: round; }
+  .cup-handle { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; }
+  .cup-coffee { fill: #8b5a3a; }
+  .cup-sway { transition: transform 0.08s linear; }
+  &.spill .cup-body, &.spill .cup-handle { stroke: var(--late); }
+  &.spill .cup-coffee { fill: var(--late); }
+}
 .seats {
   display: grid;
   grid-template-columns: repeat(20, 1fr);
@@ -488,5 +576,6 @@ onMounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .stop.current .dot { animation: none; }
+  .ledboard .lb-flag { animation: none !important; }
 }
 </style>

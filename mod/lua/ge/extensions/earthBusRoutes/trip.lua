@@ -4,6 +4,7 @@
 local geo = require('earthBusRoutes/geomath')
 local demand = require('earthBusRoutes/demand')
 local scoring = require('earthBusRoutes/scoring')
+local cabin = require('earthBusRoutes/cabin')
 local M = {}
 
 M.ZONE_M = 35            -- the bus is "at" a stop this near its platform ...
@@ -137,6 +138,7 @@ local function startStopping(t, sample)
   t.lastBoard, t.lastAlight = 0, 0
   local sched = M.scheduledArrival(t, t.idx)
   local delta = sched and (t.clock - sched) or nil
+  if t.waitStart and t.departedStops == 0 and t.idx == t.startIndex then delta = 0 end      -- began early on purpose: waits here for the departure
   t.arrivalDelta = delta
   scoring.arrived(t.score, delta)
   t.requested = false
@@ -284,6 +286,24 @@ function M.hud(t)
     atStop = t.phase == 'atStop' and { alightLeft = t.alightLeft, boardLeft = t.boardLeft, doorsHint = not t.doorOpenedHere } or nil,
     finished = t.finished,
   }
+end
+
+-- The inside of the bus rides along with the trip: the LED board and the live comfort (cabin.lua), and a trip that waits at its
+-- first stop for the scheduled departure (plan.waitStart, set by quick.lua).
+local baseNew, baseUpdate, baseHud = M.new, M.update, M.hud
+function M.new(plan)
+  local t = baseNew(plan)
+  t.waitStart = plan.waitStart or nil
+  return t
+end
+function M.update(t, dt, s)
+  baseUpdate(t, dt, s)
+  cabin.update(t, dt, s)
+end
+function M.hud(t)
+  local h = baseHud(t)
+  h.cabin = cabin.hud(t)
+  return h
 end
 
 function M.liveScore(t)

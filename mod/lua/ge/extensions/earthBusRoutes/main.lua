@@ -26,6 +26,8 @@ local builder = require('earthBusRoutes/builder')
 local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
+local quick = require('earthBusRoutes/quick')
+local cabin = require('earthBusRoutes/cabin')
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -134,6 +136,7 @@ local function buildModel()
   model.lines = S.sel.lines
   model.tabCounts, model.tab = S.sel.tabCounts, S.sel.tab
   model.armed = M.armedModel()
+  model.nextTrip = M.nextTripModel()
   local route = currentRoute()
   if route then
     local c = currentTrips(route)
@@ -193,6 +196,7 @@ local function loadNearby(silent)
     if not ok then log('E', TAG, 'parse failed: ' .. tostring(err)) S.err = 'Could not read the map data' end
     S.loading = nil
     if not silent then S.screen = 'nearby' end
+    pcall(M.nextTripRefresh)
     publish()
   end, (not silent) and 'urgent' or nil)
 end
@@ -1270,6 +1274,7 @@ local function beginTrip(plan, rotate)
   S.result = nil
   S.trip = trip.new(plan)
   S.trip.veh = veh
+  cabin.configure(S.trip, S.opts)
   S.hudTimer = 0
   world.resetAccel()
   world.watchDoors(veh)
@@ -1296,6 +1301,7 @@ function M.uiStart()
   if S.armed then M.uiCancelArmed(true) end
   local plan, why = buildPlan()
   if not plan then S.err = why publish() return end
+  if S.quickPlan then pcall(quick.adjustPlan, plan, S.quickPlan, world.nowSec()) S.quickPlan = nil end
   S.err = nil
   local stop = plan.route.stops[plan.startIndex]
   local pose = world.pose()
@@ -1307,6 +1313,52 @@ function M.uiStart()
   publish()
   goPlay()
   world.toast('Taking you to ' .. tostring(stop.name) .. '…', 5)
+end
+
+-- ---- "next trip from here" (plan 006, idea 11) -----------------------------------------------------------------------------
+
+-- The routes of the lines at the nearest stop are loaded (a few, cached) and the earliest departure over them is the card on top of
+-- the Stops tab. S.nextTrip = { station, ctx, cands } ; a new nearby answer starts it again.
+function M.nextTripRefresh()
+  S.nextTrip = nil
+  local cell = S.cell
+  local st = cell and not cell.found and cell.model and cell.model[1]
+  if S.opts.quickStart == 'off' or S.trip or not st or st.dist > quick.NEAR_M then return end
+  local lines = menu.linesModel(st.ref, cell.routes)
+  local nt = { station = st.id, ctx = { busy = #lines >= 4 }, cands = {} }      -- the same context the menu's own timetable uses
+  S.nextTrip = nt
+  for _, v in ipairs(quick.variants(lines)) do
+    loadRoute(v.id, function(route)
+      if S.nextTrip ~= nt or not route then return end
+      local ok, cand = pcall(quick.candidate, route, st, nt.ctx)
+      if ok and cand then nt.cands[#nt.cands + 1] = cand publish() end
+    end)
+  end
+end
+
+function M.nextTripModel()
+  local nt = S.nextTrip
+  if not nt or S.opts.quickStart == 'off' or S.trip then return nil end
+  local now = world.nowSec()
+  local ok, q = pcall(quick.pick, nt.cands, now, world.weekday())
+  return ok and quick.model(q, now) or nil
+end
+
+-- One press: the trip of the card starts (waited for at the stop when it leaves within 20 minutes, else the clock moves to it)
+function M.uiStartNext()
+  local nt = S.nextTrip
+  local st = nt and S.cell and S.cell.model and S.cell.model[nt.station]
+  if not st or S.trip or S.starting then return end
+  local now = world.nowSec()
+  local q = quick.pick(nt.cands, now, world.weekday())
+  if not q then return end
+  local lines = menu.linesModel(st.ref, S.cell.routes)
+  S.sel = { station = nt.station, mode = 'here', routeId = q.routeId, timeSec = q.sec, dep = 1, place = q.place, lines = lines }
+  S.sel.tabCounts = menu.tabCounts(lines)
+  S.sel.tab = menu.firstTab(S.sel.tabCounts)
+  S.quickPlan = q
+  M.uiStart()
+  S.quickPlan = nil
 end
 
 -- ---- driving to the start: the trip waits for the bus ----------------------------------------------------------------------
@@ -1516,6 +1568,8 @@ local function handleEvents(t)
     elseif e.name == 'missed' then
       world.toast('Missed stop: ' .. tostring(e.data.stop.name), 4)
       gpsAhead(t)
+    elseif e.name == 'bell' then
+      world.stopBell()
     elseif e.name == 'finished' then
       finishTrip(t)
       return true

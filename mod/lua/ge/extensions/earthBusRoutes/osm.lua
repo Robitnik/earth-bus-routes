@@ -486,7 +486,8 @@ function M.parseRoute(data)
       if not lat and m.geometry and m.geometry[1] then lat, lon = m.geometry[1].lat, m.geometry[1].lon end
       local kind = nodeKind(etags, m.role)
       if lat and kind then
-        local s = { id = m.ref, name = etags.name, lat = lat, lon = lon, role = m.role or '' }
+        local s = { id = m.ref, name = etags.name, lat = lat, lon = lon, role = m.role or '',
+          onRequest = etags.request_stop == 'yes' or nil }          -- a request stop: the bus stops only when somebody asks (the LED board says so)
         if kind == 'platform' then
           nth = nth + 1
           s.gtfsOff = gt and gt.offs and tonumber(gt.offs[nth]) or nil
@@ -549,6 +550,7 @@ function M.parseRoute(data)
   for _, s in ipairs(stops) do
     local prev = merged[#merged]
     if prev and M.normName(prev.name) == M.normName(s.name) and geo.dist(prev.lat, prev.lon, s.lat, s.lon) < M.MERGE_M then
+      s.onRequest, prev.onRequest = s.onRequest or prev.onRequest, s.onRequest or prev.onRequest
       if (s.off or 0) < (prev.off or 0) then merged[#merged] = s end
     else
       merged[#merged + 1] = s
@@ -648,7 +650,7 @@ function M.reversed(route)
   for i = n, 1, -1 do
     local s = route.stops[i]
     stops[#stops + 1] = { id = s.id, name = s.name, lat = s.lat, lon = s.lon, role = s.role, off = s.off, station = s.station,
-      along = math.min(a1 - a0, math.max(0, a1 - (s.along or 0))), alts = s.alts }
+      along = math.min(a1 - a0, math.max(0, a1 - (s.along or 0))), alts = s.alts, onRequest = s.onRequest }
     stops[#stops].index = #stops
   end
   local inside = { }

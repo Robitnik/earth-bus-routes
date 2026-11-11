@@ -340,6 +340,20 @@ function M.faceHeading(veh, wantHeading)
   end) == true
 end
 
+-- The stop-request bell: the sound the game's own bus mode plays when somebody asks for the stop (bus.flow.json of busMode).
+-- Not heard in a game session yet; a missing event or engine call turns the bell off for the session, never the trip.
+M.BELL_EVENT = 'event:>UI>Missions>Bus_Stop_Bell'
+local bellOff = false
+function M.stopBell()
+  if bellOff then return false end
+  local ok, err = pcall(function() return Engine.Audio.playOnce('AudioGui', M.BELL_EVENT) end)
+  if not ok then
+    bellOff = true
+    log('W', TAG, 'world: the stop bell is off: ' .. tostring(err))
+  end
+  return ok
+end
+
 -- ---- the clock ---------------------------------------------------------------------------------------------------
 
 local clock = { savedMode = nil, savedTime = nil, active = false, lastSet = -1 }
@@ -405,7 +419,7 @@ function M.ensureHud()
   for _, a in ipairs(cur.apps or {}) do
     if a.appName == M.HUD_APP then return false end
   end
-  local ok = try(L.addApp, cur.filename, M.HUD_APP, { right = '20px', top = '110px', width = '380px', height = '410px' })
+  local ok = try(L.addApp, cur.filename, M.HUD_APP, { right = '20px', top = '110px', width = '380px', height = '480px' })
   if ok then
     try(function() guihooks.trigger('UiAppLayoutsChanged') end)
     try(L.setCurrentLayout, cur.filename)
