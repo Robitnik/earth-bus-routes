@@ -15,6 +15,12 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
   dots; a town brings the map closer with all its stops; a stop gives you the GPS route there, a teleport or its lines. The
   route builder can add a town's main station with one click.
 - **Stop markers** in the world as in the game's bus mode: the corner markers of the next stop's bay (red while you come, orange in the bay, green when done), an arrow of the way to stand, the name and who waits; a progress bar for everything slow.
+- **Shifts and a career**: a shift is a chain of trips with layovers (the real timetable in Czechia), with transfers to wait for,
+  dispatcher events, tickets on regional lines, a ghost of your best trip, rank and credits, a profile, the map of the lines you
+  have driven and achievements. Free play stays open.
+- **Driving rules**: the turn signal at a stop, the road's speed limit, doors open on the move.
+- **Buses on the map**: every trip near you as a moving dot, a live departure board; real AI buses of the lines are in
+  (experimental, off by default: turn on "AI buses on the lines" in the add-on settings).
 - **Search**: type a station name or a line number (363, N1); results appear as you type from the data service's own index, and the public servers fill in the rest.
 - **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
 - **Lines and directions**: every line with its operator, network, length, ride time, stops and how often it runs through the day.

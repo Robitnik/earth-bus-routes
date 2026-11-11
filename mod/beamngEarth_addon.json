@@ -184,8 +184,8 @@
         "on",
         "off"
       ],
-      "default": "on",
-      "help": "A few real buses of the lines round you drive their routes by the timetable, stop at the stops and open their doors; a transfer you are asked to wait for becomes a bus you can see arrive. They are made and put away out of your sight. Needs 'Buses of the lines on the map'."
+      "default": "off",
+      "help": "EXPERIMENTAL, off until it is tried in the game. A few real buses of the lines round you drive their routes by the timetable, stop at the stops and open their doors; a transfer you are asked to wait for becomes a bus you can see arrive. They are made and put away out of your sight. Needs 'Buses of the lines on the map'."
     },
     {
       "key": "busFleet",

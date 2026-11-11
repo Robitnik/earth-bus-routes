@@ -24,7 +24,7 @@ local st = { fl = nil, t = 0, sigT = 0, sig = nil, reloadAt = -1e9, offUntil = 0
 -- 0 .. 6 buses; 0 when the option is off or there is no virtual net to take trips from
 function M.wanted()
   if not S then return 0 end
-  if (S.opts.aiBuses or 'on') == 'off' or (S.opts.busNet or 'on') == 'off' then return 0 end
+  if (S.opts.aiBuses or 'off') ~= 'on' or (S.opts.busNet or 'on') == 'off' then return 0 end
   return fleet.limitOf(S.opts.busFleet == nil and 2 or S.opts.busFleet)
 end
 

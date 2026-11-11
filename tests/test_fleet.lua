@@ -957,6 +957,8 @@ function T.the_option_values_and_the_off_switches()
   local fleetrun = require('earthBusRoutes/fleetrun')
   local S = { opts = {} }
   fleetrun.attach({}, S, {})
+  assert(fleetrun.wanted() == 0, 'experimental: off until the player turns it on')
+  S.opts.aiBuses = 'on'
   assert(fleetrun.wanted() == 2, 'default two buses')
   S.opts.busFleet = 4
   assert(fleetrun.wanted() == 4)
@@ -975,7 +977,7 @@ function T.the_option_values_and_the_off_switches()
   local have = {}
   local order = {}
   for _, o in ipairs(json.options) do have[o.key] = o order[#order + 1] = o.key end
-  assert(have.busFleet and have.busFleet.default == 2 and have.busFleet.min == 0 and have.busFleet.max == 6 and have.aiBuses.default == 'on')
+  assert(have.busFleet and have.busFleet.default == 2 and have.busFleet.min == 0 and have.busFleet.max == 6 and have.aiBuses.default == 'off')
   local iu, ib
   for i, k in ipairs(order) do if k == 'units' then iu = i end if k == 'busFleet' then ib = i end end
   assert(ib < iu, 'before units')
@@ -1030,7 +1032,7 @@ function T.fleetrun_runs_the_fleet_with_the_game_functions_and_publishes_a_line_
     return true
   end
   busnetrun._state.net, busnetrun._state.clock = W.net, W.clock
-  local S = { opts = {}, screen = 'nearby' }
+  local S = { opts = { aiBuses = 'on' }, screen = 'nearby' }
   fleetrun.attach({}, S, {})
   busnetrun.attach({}, S, { publish = function() end })
   for i = 1, 150 do
