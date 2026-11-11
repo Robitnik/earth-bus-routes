@@ -125,4 +125,50 @@ function T.a_failing_drawer_turns_the_markers_off_without_an_error()
   assert(#H.logs >= 1 and H.logs[#H.logs]:find('markers off'))
 end
 
+local function ghostSpec() return { back = { lat = 50.0, lon = 16.0 }, front = { lat = 50.0, lon = 16.00017 }, width = 2.55 } end
+
+function T.the_ghost_is_a_filled_rectangle_with_an_edge_and_an_arrow()
+  local world, calls = stubs()
+  assert(world.ghostAvailable())
+  world.drawGhost(ghostSpec(), 300)
+  assert(calls.drawTriSolid == 6, 'two triangles of the body and one of the arrow, both faces: ' .. tostring(calls.drawTriSolid))
+  assert(calls.drawLine == 4 and calls.drawTextAdvanced == nil)
+end
+
+function T.the_ghost_follows_the_ground_of_the_game()
+  local world, calls = stubs()
+  local seen = {}
+  _G.be = { getSurfaceHeightBelow = function(_, p) seen[#seen + 1] = p.z return 310 end }
+  world.drawGhost(ghostSpec(), 300)
+  _G.be = nil
+  assert(#seen >= 5 and seen[1] == 340, 'looked for from above the bus: ' .. tostring(seen[1]))
+  assert(calls.drawTriSolid == 6)
+end
+
+function T.the_ghost_needs_earths_coordinates_and_a_failure_turns_only_it_off()
+  local world, calls = stubs({ transform = false })
+  assert(not world.ghostAvailable())
+  world.drawGhost(ghostSpec(), 300)
+  assert(next(calls) == nil)
+  local w2, c2 = stubs({ failOn = 'drawLine' })
+  w2.drawGhost(ghostSpec(), 300)                          -- no error
+  assert(not w2.ghostAvailable() and w2.markersAvailable(), 'the stop markers go on')
+  local n = c2.drawTriSolid
+  w2.drawGhost(ghostSpec(), 300)
+  assert(c2.drawTriSolid == n and H.logs[#H.logs]:find('ghost off'))
+  -- a rectangle of no length (the same point twice) is not drawn
+  local w3, c3 = stubs()
+  w3.drawGhost({ back = { lat = 50, lon = 16 }, front = { lat = 50, lon = 16 }, width = 2.5 }, 300)
+  assert(next(c3) == nil)
+end
+
+function T.the_size_of_the_vehicle_is_asked_in_a_safe_way()
+  local world = stubs()
+  assert(world.vehicleSize(nil) == nil)
+  assert(world.vehicleSize({}) == nil, 'no such method')
+  local l, w = world.vehicleSize({ getInitialLength = function() return 12.1 end, getInitialWidth = function() return 2.55 end })
+  assert(l == 12.1 and w == 2.55)
+  assert(world.vehicleSize({ getInitialLength = function() return 0.1 end, getInitialWidth = function() return 2.5 end }) == nil, 'nonsense')
+end
+
 return T

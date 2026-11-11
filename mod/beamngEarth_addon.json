@@ -133,6 +133,17 @@
       "help": "On suburban and intercity lines a quarter of the passengers buy a ticket from you: a moment longer at the doors, at most 12 seconds per stop."
     },
     {
+      "key": "ghost",
+      "label": "Ghost of your best trip",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "On a line you have driven before from the same stop, a translucent bus shows where your best trip was, and the HUD shows how far ahead or behind it you are."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

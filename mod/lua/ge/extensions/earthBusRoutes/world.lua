@@ -245,6 +245,72 @@ function M.clearMarkers()
   end
 end
 
+-- ---- the ghost of the best trip --------------------------------------------------------------------------------------------
+-- A translucent bus-sized rectangle lying on the road, drawn with the debug drawer as the bay fill of the markers is, with the
+-- same ground lookup (toGround). spec = { back = {lat, lon}, front = {lat, lon}, width }: the middle of its back and of its
+-- front edge (taken from the route, so it follows a bend); refZ as for drawMarkers. A failure turns the ghost off, never the trip.
+local ghostOff = false
+local GHOST_FILL, GHOST_EDGE = { 70, 150, 255, 80 }, { 0.45, 0.7, 1, 0.95 }
+local GHOST_LIFT = 0.15                -- metres over the ground (over the road paint, under the bus)
+
+function M.ghostAvailable()
+  local a = api()
+  return not ghostOff and a ~= nil and a.has ~= nil and a.has('transform') == true and rawget(_G, 'debugDrawer') ~= nil
+end
+
+-- the ground under a game x, y, looked for from above refZ; `fallback` when the game cannot tell
+local function groundXY(x, y, refZ, fallback)
+  local be = rawget(_G, 'be')
+  if be and be.getSurfaceHeightBelow then
+    local h = be:getSurfaceHeightBelow(vec3(x, y, (refZ or fallback or 0) + 40))
+    if type(h) == 'number' and h > -1e5 then return h end
+  end
+  return fallback or 0
+end
+
+function M.drawGhost(spec, refZ)
+  if not (spec and M.ghostAvailable()) then return end
+  local ok, err = pcall(function()
+    local dd = debugDrawer
+    local fx, fy, fz = toGround(spec.front.lat, spec.front.lon, refZ)
+    local bx, by, bz = toGround(spec.back.lat, spec.back.lon, refZ)
+    if not (fx and bx) then return end
+    local dx, dy = fx - bx, fy - by
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.5 then return end
+    dx, dy = dx / len, dy / len
+    local rx, ry = dy * (spec.width or 2.55) / 2, -dx * (spec.width or 2.55) / 2       -- half a width to the right
+    local function corner(x, y, z) return vec3(x, y, groundXY(x, y, refZ, z) + GHOST_LIFT) end
+    local p = { corner(bx - rx, by - ry, bz), corner(fx - rx, fy - ry, fz), corner(fx + rx, fy + ry, fz), corner(bx + rx, by + ry, bz) }
+    local fill = ColorI(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], GHOST_FILL[4])
+    tri(dd, p[1], p[2], p[3], fill)
+    tri(dd, p[1], p[3], p[4], fill)
+    local edge = ColorF(GHOST_EDGE[1], GHOST_EDGE[2], GHOST_EDGE[3], GHOST_EDGE[4])
+    for k = 1, 4 do dd:drawLine(p[k], p[k % 4 + 1], edge) end
+    -- an arrow in the front half: which way it goes
+    local mx, my, mz = (fx + bx) / 2, (fy + by) / 2, (fz + bz) / 2
+    local function at(a, w)                    -- a metres along (from the middle), w metres to the right
+      local x, y = mx + dx * a + (dy * w), my + dy * a - (dx * w)
+      return vec3(x, y, groundXY(x, y, refZ, mz) + GHOST_LIFT + 0.02)
+    end
+    local half = len / 2
+    tri(dd, at(half - 0.6, 0), at(half - 3.2, 0.7), at(half - 3.2, -0.7), ColorI(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], 150))
+  end)
+  if not ok then
+    ghostOff = true
+    log('W', TAG, 'world: ghost off: ' .. tostring(err))
+  end
+end
+
+-- length, width of the vehicle in metres, or nil when the game does not say
+function M.vehicleSize(veh)
+  if not veh then return nil end
+  local okL, l = pcall(function() return veh:getInitialLength() end)
+  local okW, w = pcall(function() return veh:getInitialWidth() end)
+  if okL and type(l) == 'number' and l >= 4 and l <= 30 and okW and type(w) == 'number' and w >= 1.6 and w <= 3.5 then return l, w end
+  return nil
+end
+
 function M.toast(text, seconds)
   local a = api()
   if a and a.notify then try(a.notify, text, seconds or 5) return end

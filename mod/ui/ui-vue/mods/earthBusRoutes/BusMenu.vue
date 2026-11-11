@@ -404,6 +404,7 @@
               <div class="stars" :aria-label="s.result.stars + ' / 5'"><i v-for="n in 5" :key="n" :class="{ on: n <= s.result.stars }">★</i></div>
               <div v-if="s.result.record" class="record">{{ t("res.record") }}</div>
               <div v-else-if="s.result.previous" class="muted small">{{ t("res.best", { n: s.result.previous }) }}</div>
+              <div v-if="s.result.ghostNew" class="muted small">{{ t("res.ghostNew") }}</div>
             </div>
             <div class="parts">
               <div v-for="k in PARTS" :key="k" class="part">
