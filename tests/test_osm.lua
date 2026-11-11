@@ -200,6 +200,21 @@ function T.a_circular_line_starts_where_the_map_says()
   assert(r.stops[2].name == 'Police nad Metují, škola')
 end
 
+-- 360 Police → Teplice: a PTv2 relation whose platforms are listed shuffled (the road is in order, from the bus station):
+-- the stops go by the road then, and the trip starts at the bus station.
+function T.shuffled_stops_go_by_the_road()
+  local r = assert(osm.parseRoute(H.fixture('route_6978584')))
+  assert(r.shuffled, 'the list is seen to be out of order')
+  assert(r.stops[1].name == 'Police nad Metují, aut.st.', 'first: ' .. r.stops[1].name)
+  assert(r.stops[2].name == 'Police nad Metují, škola')
+  for i = 2, #r.stops do
+    assert(r.stops[i].along >= r.stops[i - 1].along, ('stop %d %s goes backwards'):format(i, r.stops[i].name))
+  end
+  -- a list in order is left alone
+  local loop = assert(osm.parseRoute(H.fixture('route_7185111')))
+  assert(not loop.shuffled)
+end
+
 function T.same_stop_name_reads_abbreviations()
   assert(osm.sameStopName('Police nad Metují, aut.st.', 'Police nad Metují, autobusové stanoviště'))
   assert(osm.sameStopName('Náchod, aut. nádraží', 'Náchod, autobusové nádraží'))

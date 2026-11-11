@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 (not released yet)
+
+- **"From here" / "To here" / "Through" read the line's own words when its list of stops is out of order.** At Police nad Metují the OSM relation of 360 to Teplice lists its stops shuffled (the bus station 8th of 16) and 363 starts its list at the school next door: both were under "Through". A station in the middle of the list that the line's tags *and* name call its start or end is now that end (when the two disagree, the order stays). "aut.st." and "autobusové stanoviště" are one name.
+- **A relation whose stops the road cannot follow** (two or more steps backwards) is laid out by the road, like an old relation: 360 from Police now starts at the bus station, then the school.
+
 ## 0.6.0 (after the first playtest)
 
 - **Stops are zones along the road, not points.** A stop counts when the bus is level with it on the road (35 m along it), even when the platform is across a wide street; a stop the bus drives past is passed, so the stop number always moves on (a missed first stop no longer holds the trip back). The place along the road is tracked so a road driven out and back (or a loop crossing itself) is not confused.

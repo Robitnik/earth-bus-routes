@@ -208,9 +208,40 @@ end
 -- Where a station is on a route: 'from' (the route starts here), 'to' (it ends here), 'loop' (both: a circular line), 'through'.
 -- Second result: true when it is only a guess (the data has no order of stops, so the ends are compared by name).
 local function sameName(a, b)
+  if M.sameStopName(a, b) then return true end    -- "aut.st." = "autobusové stanoviště"
   a, b = M.normName(a), M.normName(b)
   if a == '' or b == '' then return false end
   return a == b or a:find(b, 1, true) ~= nil or b:find(a, 1, true) ~= nil
+end
+
+-- The ends of "360: A - B" / "363 A - X - B" (the ref and the stops between dropped); nil without a spaced dash.
+function M.nameEnds(route)
+  local n = route.name
+  if type(n) ~= 'string' then return nil end
+  if route.ref then n = n:gsub('^' .. tostring(route.ref):gsub('%p', '%%%0') .. '%s*:?%s*', '') end
+  n = n:gsub('\226\128\147', '-'):gsub('\226\134\146', '-'):gsub('=>', '-')     -- "–" and "→"
+  local parts = {}
+  for p in (n .. ' - '):gmatch('(.-)%s+%-+%s+') do parts[#parts + 1] = p end
+  if #parts < 2 then return nil end
+  return parts[1], parts[#parts]
+end
+
+local function endOf(station, from, to)
+  if not from or not to then return nil end
+  local first, last = sameName(station.name, from), sameName(station.name, to)
+  if first and last then return 'loop' end
+  if first then return 'from' end
+  if last then return 'to' end
+  return nil
+end
+
+-- What the route's words (its from/to tags and its name) say: the end they agree on; nil when they say nothing or disagree
+-- (tags are sometimes swapped: the name says "Teplice - Police", from/to say the other way).
+local function endByWords(station, route)
+  local byTags = endOf(station, route.from, route.to)
+  local byName = endOf(station, M.nameEnds(route))
+  if byTags and byName and byTags ~= byName then return nil end
+  return byTags or byName
 end
 
 function M.placeAt(station, route)
@@ -228,14 +259,14 @@ function M.placeAt(station, route)
       if first and last then return 'loop', false end
       if first then return 'from', false end
       if last then return 'to', false end
+      -- in the middle of the list, yet the tags and the name call it an end: the list is shuffled (360 at Police lists its
+      -- stops out of order) or misses the station at its start (363 starts at the school 150 m away); the words win
+      local said = endByWords(station, route)
+      if said then return said, true end
       return 'through', false
     end
   end
-  local first, last = sameName(station.name, route.from), sameName(station.name, route.to)
-  if first and last then return 'loop', true end
-  if first then return 'from', true end
-  if last then return 'to', true end
-  return 'through', true
+  return endByWords(station, route) or 'through', true
 end
 
 -- Routes with the same ref (and network) are one line: { ref, colour, network, operator, variants = { route... } }.
@@ -474,6 +505,7 @@ function M.parseRoute(data)
   -- 3. positions along the line -----------------------------------------------------------------------------------
   local cum, length = geo.cumulative(path)
   local sorted = tags['public_transport:version'] ~= '2'
+  local shuffled = false
   if #path >= 2 and sorted then
     for _, s in ipairs(stops) do
       local a, off = geo.along(path, cum, s.lat, s.lon)
@@ -482,6 +514,18 @@ function M.parseRoute(data)
     table.sort(stops, function(x, y) return x.along < y.along end)
   elseif #path >= 2 then
     path, cum, length = M.orderedAlong(path, cum, length, stops)
+    -- a list that the road cannot follow (stops shuffled in the relation, 360 at Police) is no order: by the road then, as
+    -- for an old relation; one stray stop is not enough (a road passed twice needs the list's order)
+    local back = 0
+    for i = 2, #stops do if stops[i].along < stops[i - 1].along - M.BACK_M then back = back + 1 end end
+    if back >= math.max(2, #stops * 0.2) then
+      for _, s in ipairs(stops) do
+        local a, off = geo.along(path, cum, s.lat, s.lon)
+        s.along, s.off = a or 0, off or 0
+      end
+      table.sort(stops, function(x, y) return x.along < y.along end)
+      shuffled = true
+    end
   else
     -- no road geometry at all: a straight line through the stops
     local acc = 0
@@ -553,6 +597,7 @@ function M.parseRoute(data)
   head.stops, head.path, head.cum, head.length = stops, path, cum, length
   head.gaps, head.loop = gaps, loop
   head.rotated = rotated or nil
+  head.shuffled = shuffled or nil
   head.incomplete = gaps > 0 or #stops < 2 or (tags.complete == 'no')
   head.kind = M.kind(head)
   head.from = head.from or first.name

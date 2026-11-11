@@ -155,4 +155,49 @@ function T.real_data_nachod_splits_lines()
   end
 end
 
+function T.ends_of_a_route_name()
+  local a, b = osm.nameEnds({ ref = '360', name = '360: Police nad Metují, autobusové stanoviště - Teplice n. Met., skály' })
+  assert(a == 'Police nad Metují, autobusové stanoviště' and b == 'Teplice n. Met., skály', tostring(a) .. ' / ' .. tostring(b))
+  a, b = osm.nameEnds({ ref = '363', name = '363 Police n. Metují - Suchý Důl - Police n. Metují' })
+  assert(a == 'Police n. Metují' and b == 'Police n. Metují')
+  a, b = osm.nameEnds({ ref = '7', name = 'Bus 7: A – B' })
+  assert(a == 'Bus 7: A' and b == 'B')
+  assert(osm.nameEnds({ ref = '361', name = '361 Police n.Met.-Machov' }) == nil, 'a dash without spaces is part of a name')
+  assert(osm.nameEnds({ ref = '1' }) == nil)
+end
+
+-- Police nad Metují, the bus station (recorded answer of 2026-11-11): OSM lists 360 Police → Teplice with its stops shuffled
+-- (the station 8th of 16), 363 from the school (the station 13th of 14), and the other 360 with swapped from/to tags.
+function T.lines_at_police_follow_their_names_when_the_list_is_out_of_order()
+  local a = osm.parseAround(H.fixture('police_around_slim3'))
+  local st
+  for _, s in ipairs(osm.groupStops(a.stops)) do
+    if s.name == 'Police nad Metují, aut.st.' then st = s end
+  end
+  assert(st, 'the bus station is in the answer')
+  local at = {}
+  for _, r in ipairs(osm.routesAt(st, a.routes)) do at[r.id] = { osm.placeAt(st, r) } end
+  assert(at[6978584][1] == 'from', '360 Police → Teplice starts here: ' .. tostring(at[6978584][1]))
+  assert(at[6978584][2] == true, 'a guess from the words')
+  assert(at[7185111][1] == 'loop', '363 starts and ends here: ' .. tostring(at[7185111][1]))
+  assert(at[11795188][1] == 'to', '360 Teplice → Police ends here (the order wins over swapped tags)')
+  local c = menu.tabCounts(menu.linesModel(st, a.routes))
+  assert(c.from == 2 and c.to == 2, ('from %d, to %d'):format(c.from, c.to))
+  -- a stop in the middle stays in the middle when the words say nothing about it
+  local school
+  for _, s in ipairs(osm.groupStops(a.stops)) do
+    if s.name == 'Police nad Metují, škola' then school = s end
+  end
+  assert(osm.placeAt(school, a.routes[1]) == 'through')
+end
+
+-- Tags and name disagree (swapped tags): no guess from the words.
+function T.words_that_disagree_say_nothing()
+  local st = station('Police nad Metují, aut.st.', { 10 })
+  local r = route({ ordered = true, n = 16, places = { [10] = { i = 8, j = 8 } }, ref = '360',
+    name = '360: Teplice n. Met., skály - Police nad Metují, autobusové stanoviště',
+    from = 'Police nad Metují, autobusové stanoviště', to = 'Teplice n. Met., skály' })
+  assert(osm.placeAt(st, r) == 'through')
+end
+
 return T
