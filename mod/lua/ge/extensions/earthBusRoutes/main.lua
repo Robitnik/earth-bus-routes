@@ -26,6 +26,7 @@ local builder = require('earthBusRoutes/builder')
 local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
 local geo = require('earthBusRoutes/geomath')
+local ghostrun = require('earthBusRoutes/ghostrun')     -- the ghost of the best trip (plan 006 D)
 
 local S = {
   earth = false, reason = 'not checked', warned = false,
@@ -1270,6 +1271,7 @@ local function beginTrip(plan, rotate)
   S.result = nil
   S.trip = trip.new(plan)
   S.trip.veh = veh
+  pcall(ghostrun.begin, S.trip, S.opts)
   S.hudTimer = 0
   world.resetAccel()
   world.watchDoors(veh)
@@ -1410,6 +1412,7 @@ local function saveStats(t, res)
 end
 
 local function endClockAndGps()
+  pcall(ghostrun.cancel)
   world.clearMarkers()
   S.doneStop = nil
   world.clockEnd()
@@ -1419,6 +1422,7 @@ end
 local function finishTrip(t)
   local res = trip.result(t)
   local record, previous, stats = saveStats(t, res)
+  local okGhost, ghostNew = pcall(ghostrun.finish, t, res)      -- a better trip replaces the ghost
   local back = S.reverseOf[t.route.id]
   S.result = {
     show = true, points = res.points, grade = res.grade, stars = res.stars, parts = res.parts, passengers = res.passengers,
@@ -1428,6 +1432,7 @@ local function finishTrip(t)
     totals = { trips = stats.trips, passengers = stats.passengers, points = stats.points },
     scheduled = t.entry ~= nil, canContinue = #t.route.stops > 0, custom = t.route.custom or false,
   }
+  S.result.ghostNew = (okGhost and ghostNew == true) or nil
   S.stats = { trips = stats.trips, passengers = stats.passengers, points = stats.points }
   S.finishedRouteId = t.route.id
   local lastStop = t.route.stops[#t.route.stops]
@@ -1494,6 +1499,8 @@ end
 local function hudOf(t)
   local h = trip.hud(t)
   h.units = S.opts.units or 'km/h'
+  local okG, gh = pcall(ghostrun.hud, S.opts)
+  if okG then h.ghost = gh end
   return h
 end
 
@@ -1536,6 +1543,7 @@ local function tripFrame(dt)
   end
   local aL, aR = world.accel(veh, dt)
   trip.update(t, dt, { lat = pose.lat, lon = pose.lon, speed = pose.speed or 0, aLong = aL, aLat = aR, doorsOpen = world.doorsOpen(veh) })
+  pcall(ghostrun.update, t)
   if handleEvents(t) then return end
   world.clockSet(t.clock)
   S.hudTimer = S.hudTimer - dt
@@ -1565,6 +1573,7 @@ end
 -- The markers of the next stops (every frame: the debug drawer shows what is drawn in the frame)
 function M.onPreRender()
   if not S.earth then return end
+  if S.trip and not S.trip.finished then pcall(ghostrun.draw, S.trip, S.opts) end
   if S.opts.markers == 'off' then world.drawMarkers({}) return end
   local items
   if S.trip and not S.trip.finished then

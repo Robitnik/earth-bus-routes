@@ -70,6 +70,14 @@
         <div class="route-progress" :title="tr('hud.progress')"><i :style="{ width: d.progress * 100 + '%' }"></i></div>
       </section>
 
+      <!-- the ghost of the best trip on this line: seconds behind (+) or ahead (-) at this place -->
+      <div v-if="d.ghost" class="ghost" :class="ghostCls" :title="tr('hud.ghostTip', { points: d.ghost.points })">
+        <span class="ghost-dot"></span>
+        <span class="ghost-label">{{ tr("hud.ghost") }}</span>
+        <b v-if="d.ghost.text" class="ghost-delta">{{ d.ghost.text }}</b>
+        <span v-else class="ghost-wait">{{ tr("hud.ghostWait") }}</span>
+      </div>
+
       <footer class="board">
         <div class="load" :title="tr('hud.onboardTip')">
           <div class="load-top">
@@ -122,7 +130,7 @@ const TEXT = {
     "hud.openDoors": "Open the doors", "hud.closeDoors": "Close the doors and go", "hud.gettingOff": "{n} getting off", "hud.boarding": "{n} boarding",
     "hud.due": "due {time}", "hud.waiting": "{n} waiting", "hud.stopRequested": "Stop requested",
     "hud.onboard": "on board", "hud.onboardTip": "Passengers on board / capacity", "hud.scoreTip": "Score of this trip", "hud.progress": "Progress along the line",
-    "hud.onTime": "On time", "m": "m", "km": "km", "ft": "ft", "mi": "mi",
+    "hud.onTime": "On time", "hud.ghost": "Ghost", "hud.ghostWait": "starts when you leave", "hud.ghostTip": "Your best trip on this line ({points} points): + slower than it was here, − faster", "m": "m", "km": "km", "ft": "ft", "mi": "mi",
     "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
   },
   uk: {
@@ -132,7 +140,7 @@ const TEXT = {
     "hud.openDoors": "Відчиніть двері", "hud.closeDoors": "Зачиніть двері й рушайте", "hud.gettingOff": "виходить {n}", "hud.boarding": "заходить {n}",
     "hud.due": "за розкладом {time}", "hud.waiting": "чекає {n}", "hud.stopRequested": "Зупинку замовлено",
     "hud.onboard": "у салоні", "hud.onboardTip": "Пасажирів у салоні / місткість", "hud.scoreTip": "Бали за рейс", "hud.progress": "Пройдено по маршруту",
-    "hud.onTime": "Вчасно", "m": "м", "km": "км", "ft": "фт", "mi": "миль",
+    "hud.onTime": "Вчасно", "hud.ghost": "Привид", "hud.ghostWait": "рушає, коли ви рушите", "hud.ghostTip": "Ваш найкращий рейс на цьому маршруті ({points} балів): + повільніше, ніж тут їхали тоді, − швидше", "m": "м", "km": "км", "ft": "фт", "mi": "миль",
     "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
   },
 }
@@ -179,6 +187,12 @@ const delay = computed(() => {
   const a = Math.abs(s)
   const txt = (s > 0 ? "+" : "−") + Math.floor(a / 60) + ":" + pad(a % 60)
   return { cls: s > 0 ? "late" : "early", text: txt }
+})
+
+const ghostCls = computed(() => {
+  const g = d.value && d.value.ghost
+  if (!g || g.delta === undefined || g.delta === null) return ""
+  return g.delta > 0.5 ? "behind" : "ahead"
 })
 
 const distText = computed(() => {
@@ -411,6 +425,21 @@ onMounted(() => {
   .flow { display: flex; gap: 12px; color: var(--ink); }
   .request { color: var(--led); font-weight: 600; }
   .waiting { color: var(--ink); }
+}
+.ghost {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+  border-radius: 99px;
+  font-size: 14px;
+  color: var(--muted);
+  background: rgba(109, 184, 255, 0.1);
+  .ghost-dot { width: 10px; height: 10px; border-radius: 3px; background: rgba(109, 184, 255, 0.55); border: 1px solid #6db8ff; }
+  .ghost-delta { margin-left: auto; font-size: 16px; }
+  .ghost-wait { margin-left: auto; font-size: 13px; }
+  &.behind .ghost-delta { color: var(--late); }
+  &.ahead .ghost-delta { color: var(--ok); }
 }
 .approach, .route-progress {
   height: 4px;
