@@ -11,8 +11,8 @@ M.VERSION = '0.5.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
-M.START_NEAR_M = 80          -- already this near the start stop: no teleport
-M.ARRIVE_M = 45             -- a drive-to-the-start trip begins when the bus is this near the start stop
+M.START_NEAR_M = 250         -- already this near the start stop: no teleport (the first stop is a stop like the rest)
+M.ARRIVE_M = 60             -- a drive-to-the-start trip begins when the bus is this near the start stop
 M.ARRIVE_SPEED = 4         -- ... and slower than this (m/s)
 M.BOARD_GAP_S = 120        -- the departure is the first one after the arrival plus this much
 M.REVERSE_GAP_S = 300        -- the reverse trip leaves this long after the arrival
@@ -986,7 +986,7 @@ local function stopsAhead(t, n)
   return out
 end
 
-local function beginTrip(plan)
+local function beginTrip(plan, rotate)
   local veh = world.vehicle()
   S.result = nil
   S.trip = trip.new(plan)
@@ -998,7 +998,7 @@ local function beginTrip(plan)
   world.clockSet(plan.clock)
   local stop = plan.route.stops[plan.startIndex]
   local _, _, bearing = geo.pointAt(plan.route.path, plan.route.cum, stop.along)
-  if bearing then world.faceHeading(veh, bearing) end
+  if bearing and rotate then world.faceHeading(veh, bearing) end       -- only after our own teleport: never move a bus the player drove there
   if world.ensureHud() and not S.hudAsked then
     S.hudAsked = true
     world.toast('Bus HUD added to your UI layout. Move or remove it in Esc > UI Apps.', 7)
@@ -1055,7 +1055,7 @@ function M.uiDriveToStart()
   local sel = {}
   for k, v in pairs(S.sel) do sel[k] = v end
   sel.dep = 1
-  S.armed = { routeId = S.sel.routeId, ref = route.ref, colour = route.colour, to = route.to, stop = { name = stop.name, lat = stop.lat, lon = stop.lon },
+  S.armed = { routeId = S.sel.routeId, ref = route.ref, colour = route.colour, to = route.to, stop = { name = stop.name, lat = stop.lat, lon = stop.lon, along = stop.along },
     mode = S.sel.mode, sel = sel, hudTimer = 0 }
   S.err = nil
   world.gpsRoute({ { lat = stop.lat, lon = stop.lon, name = stop.name } })
@@ -1085,7 +1085,14 @@ local function armedFrame(dt)
     a.hudTimer = 0.5
     guihooks.trigger('EarthBusRoutesHud', { armed = { ref = a.ref, colour = a.colour, to = a.to, stop = a.stop.name, dist = d, units = S.opts.units or 'km/h' } })
   end
-  if d <= M.ARRIVE_M and (pose.speed or 0) <= M.ARRIVE_SPEED then
+  local arrived = d <= M.ARRIVE_M
+  local route = S.routes[a.routeId]
+  if not arrived and route and route.path and a.stop.along then
+    -- on the road, level with the stop (a platform across a wide street is not within 60 m as the crow flies)
+    local al, off = geo.along(route.path, route.cum, pose.lat, pose.lon, a.stop.along - 200, a.stop.along + 200)
+    arrived = al ~= nil and off <= trip.ZONE_OFF_M and math.abs(al - a.stop.along) <= trip.ZONE_ALONG_M
+  end
+  if arrived and (pose.speed or 0) <= M.ARRIVE_SPEED then
     -- the first departure after we got here, with a little time to board
     local armed = a
     S.armed = nil
@@ -1265,7 +1272,7 @@ local function startingFrame(dt)
   if (st.seenTeleport and api and api.ready()) or st.t > 45 then
     S.starting = nil
     if api and api.ready() then
-      beginTrip(st.plan)
+      beginTrip(st.plan, true)
     else
       S.err = 'The world did not load in time'
       publish()

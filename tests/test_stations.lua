@@ -24,6 +24,8 @@ local function setup()
     toast = function(text) env.toasts[#env.toasts + 1] = text end,
     gpsRoute = function(points) env.gps[#env.gps + 1] = points return true end,
     gpsClear = function() env.gpsCleared = env.gpsCleared + 1 end,
+    faceHeading = function() env.faced = (env.faced or 0) + 1 return true end,
+    teleport = function() env.teleports = (env.teleports or 0) + 1 return true end,
     vehicleInfo = function() return { bus = true, name = 'bus' } end,
   }, { __index = function() return function() end end })
   package.loaded['earthBusRoutes/datasvc'] = ds
@@ -168,6 +170,46 @@ function T.a_line_without_an_opposite_in_the_map_can_still_be_driven_back()
   -- and back again, to the real one
   m.uiToggleReverse()
   assert(model().route.from == first.from and not model().start.reversed)
+  cleanup()
+end
+
+function T.a_player_who_got_there_is_not_teleported_or_turned()
+  local m, model, env = setup()
+  pickStation(m, model)
+  m.uiSelectRoute(model().lines[1].variants[1].id)
+  local first = osm.parseRoute(H.fixture('route_6964117')).stops[1]
+  m.uiSetStartMode('first')
+  -- 150 m from the first stop (the platform is not where the bus stands): no teleport, no turning of the bus
+  env.pose.lat, env.pose.lon = first.lat + 0.0013, first.lon
+  m.uiStart()
+  assert(model().tripActive, 'the trip began where the player is')
+  assert(env.teleports == nil and env.faced == nil, 'nothing was moved')
+  cleanup()
+end
+
+function T.a_far_start_teleports_and_the_bus_is_turned_only_then()
+  local m, model, env = setup()
+  pickStation(m, model)
+  m.uiSelectRoute(model().lines[1].variants[1].id)
+  local first = osm.parseRoute(H.fixture('route_6964117')).stops[1]
+  m.uiSetStartMode('first')
+  env.pose.lat, env.pose.lon = first.lat + 0.1, first.lon
+  m.uiStart()
+  assert(env.teleports == 1 and not model().tripActive, 'taken to the stop first')
+  cleanup()
+end
+
+function T.driving_to_the_start_never_turns_the_bus()
+  local m, model, env = setup()
+  pickStation(m, model)
+  m.uiSelectRoute(model().lines[1].variants[1].id)
+  local first = osm.parseRoute(H.fixture('route_6964117')).stops[1]
+  env.pose.lat = first.lat + 0.1
+  m.uiSetStartMode('first')
+  m.uiDriveToStart()
+  env.pose.lat, env.pose.lon, env.pose.speed = first.lat, first.lon, 0
+  m.onUpdate(1, 1)
+  assert(model().tripActive and env.faced == nil and env.teleports == nil)
   cleanup()
 end
 

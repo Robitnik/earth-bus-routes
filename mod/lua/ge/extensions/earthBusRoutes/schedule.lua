@@ -18,6 +18,19 @@ M.INTERVALS = {
 -- Average moving speed (km/h, traffic lights and queues included) and dwell at a stop (s)
 M.SPEED = { main = 20, city = 21, regional = 36, night = 27 }
 M.DWELL, M.DWELL_STATION = 20, 40
+M.STOP_LOSS_S = 15           -- slowing down for a stop and getting going again, on top of the standing
+
+-- Average speed (km/h) between two stops d metres apart: short legs are town streets, long ones are open road.
+function M.legSpeed(kind, d)
+  if kind == 'regional' then
+    if d < 500 then return 20 elseif d < 1200 then return 30 elseif d < 2500 then return 42 elseif d < 5000 then return 52 end
+    return 60
+  end
+  local v
+  if d < 300 then v = 16 elseif d < 700 then v = 19 else v = 24 end
+  if kind == 'main' then v = v * 0.95 elseif kind == 'night' then v = v * 1.25 end
+  return v
+end
 M.WEEKEND_STRETCH = 1.5
 
 local function hash(s)
@@ -84,7 +97,6 @@ end
 -- Returns arr[i], dep[i] (seconds after the trip's start; arr[1] = 0, dep[1] = the dwell at the terminus).
 function M.runTimes(route, kind, startSec, ctx)
   local stops = route.stops
-  local speed = (M.SPEED[kind] or 21) / 3.6
   local h = (startSec / 3600) % 24
   local factor = 1
   if (h >= 7 and h < 9) or (h >= 15 and h < 18) then factor = 1.15 elseif h >= 22 or h < 5 then factor = 0.9 end
@@ -92,7 +104,7 @@ function M.runTimes(route, kind, startSec, ctx)
   local t = M.DWELL
   for i = 2, #stops do
     local d = math.max(0, stops[i].along - stops[i - 1].along)
-    t = t + d / speed * factor
+    t = t + d / (M.legSpeed(kind, d) / 3.6) * factor + M.STOP_LOSS_S
     arr[i] = t
     local dwell = (i == #stops) and 0 or ((ctx and ctx.station and ctx.station[i]) and M.DWELL_STATION or M.DWELL)
     t = t + dwell

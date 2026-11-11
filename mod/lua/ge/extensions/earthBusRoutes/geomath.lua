@@ -46,11 +46,11 @@ function M.cumulative(path)
 end
 
 -- Project a point onto a polyline: returns metres along it, distance off it (m). `cum` from M.cumulative(path);
--- `from` (metres) limits the search to the part of the line at or after it (a route that doubles back on itself).
-function M.along(path, cum, lat, lon, from)
+-- `from` / `to` (metres) limit the search to that part of the line (a route that doubles back on itself).
+function M.along(path, cum, lat, lon, from, to)
   local bestAlong, bestOff = nil, math.huge
   for i = 2, #path do
-    if not from or cum[i] >= from then
+    if (not from or cum[i] >= from) and (not to or cum[i - 1] <= to) then
       local off, t, len = M.pointSegment(lat, lon, path[i - 1].lat, path[i - 1].lon, path[i].lat, path[i].lon)
       local a = cum[i - 1] + t * len
       if (not from or a >= from) and off < bestOff then bestAlong, bestOff = a, off end

@@ -6,7 +6,13 @@ local demand = require('earthBusRoutes/demand')
 local scoring = require('earthBusRoutes/scoring')
 local M = {}
 
-M.ZONE_M = 35            -- the bus is "at" a stop this near its platform
+M.ZONE_M = 35            -- the bus is "at" a stop this near its platform ...
+M.ZONE_ALONG_M = 35      -- ... or this far along the road from it, while on the road (a platform across a wide street)
+M.ZONE_OFF_M = 45        -- on the road: this near the route's line
+M.LOST_M = 60            -- farther from the line than this: the place on the road is looked for again
+M.ALONG_BACK_M = 40      -- the place along the road moves on from here: a little back ...
+M.ALONG_AHEAD_M = 400    -- ... and this far ahead (the same road out and back: the way back is not taken for the way out)
+M.START_NEAR_M = 120     -- a trip that begins this near its first stop begins standing there
 M.APPROACH_M = 200       -- the crowd of a stop is made when the bus gets this near
 M.PASSED_M = 60          -- farther than this after the zone without having stopped: the stop was passed
 M.STOP_SPEED = 1.0       -- m/s: slower than this the bus stands
@@ -28,13 +34,45 @@ function M.new(plan)
     phase = 'approach', onboard = {}, requested = false,
     waiting = nil, boarded = 0, alighted = 0, lastBoard = 0, lastAlight = 0, leftBehind = 0,
     timer = 0, standing = 0, doorWasOpen = false, doorOpenedHere = false, minDist = math.huge, inZone = false,
-    arrivedAt = nil, finished = false, along = 0, alongTimer = 0, dist = nil, lastDeparture = nil,
+    arrivedAt = nil, finished = false, along = (route.stops[plan.startIndex or 1] or {}).along or 0, off = 0, alongTimer = 0, dist = nil, lastDeparture = nil,
     events = {}, departedStops = 0, notes = {},
   }
   t.score = scoring.new({ difficulty = t.opts.difficulty, bus = not plan.vehicle or plan.vehicle.bus ~= false,
     planned = #route.stops - t.startIndex + 1 })
   t.phase = 'start'                                     -- begins standing at the chosen first stop
   return t
+end
+
+-- Where the bus is along the route's road (t.along) and how far off the line (t.off, nil: nowhere near). A road driven out and
+-- back (or a loop crossing itself) passes the same place twice: of the places the bus could be, the one that keeps the trip
+-- moving on from where it was wins (a short step ahead, a little back), unless another is clearly nearer the line.
+M.ALONG_PULL = 0.02      -- metres of distance from the line one metre of jump along the road is worth
+function M.trackAlong(t, lat, lon)
+  local best, bestScore
+  for _, c in ipairs(geo.alongCandidates(t.route.path, t.route.cum, lat, lon, M.LOST_M, 10)) do
+    if c.off <= M.LOST_M then
+      local d = c.along - t.along
+      local score = c.off + M.ALONG_PULL * math.abs(d) + ((d >= -M.ALONG_BACK_M and d <= M.ALONG_AHEAD_M) and 0 or 1000)
+      if not bestScore or score < bestScore then best, bestScore = c, score end
+    end
+  end
+  if best then t.along, t.off = best.along, best.off else t.off = nil end
+end
+
+-- metres along the road between the bus and the stop, while the bus is on the road; else nil
+local function alongDelta(t, stop)
+  if t.off ~= nil and t.off <= M.ZONE_OFF_M and stop.along then return math.abs(t.along - stop.along) end
+end
+
+local function inStopZone(t, stop)
+  if t.dist <= M.ZONE_M then return true end
+  local d = alongDelta(t, stop)
+  return d ~= nil and d <= M.ZONE_ALONG_M
+end
+
+local function passedStop(t, stop)
+  if t.inZone and t.dist > M.PASSED_M and t.dist > t.minDist + 20 then return true end       -- drove away from it
+  return t.off ~= nil and stop.along ~= nil and t.along > stop.along + M.PASSED_M            -- the road went on past it
 end
 
 local function emit(t, name, data) t.events[#t.events + 1] = { name = name, data = data } end
@@ -172,21 +210,22 @@ function M.update(t, dt, s)
   t.alongTimer = t.alongTimer - dt
   if t.alongTimer <= 0 then
     t.alongTimer = 0.5
-    local a = geo.along(t.route.path, t.route.cum, s.lat, s.lon, math.max(0, t.along - 150))
-    if a then t.along = a end
+    M.trackAlong(t, s.lat, s.lon)
   end
 
   if t.phase == 'start' then
-    -- standing at the chosen first stop (the player was set down there): boarding opens as for any arrival
-    startStopping(t, s)
+    -- standing at the chosen first stop (the player was set down there): boarding opens as for any arrival; a trip that
+    -- begins away from it waits for the bus to get there, like for any other stop
+    if inStopZone(t, stop) or t.dist <= M.START_NEAR_M then startStopping(t, s) else t.phase = 'approach' end
   elseif t.phase == 'approach' then
-    if t.dist <= M.APPROACH_M and t.waiting == nil then makeWaiting(t) end
-    if t.dist <= M.ZONE_M then
+    local near = alongDelta(t, stop)
+    if (t.dist <= M.APPROACH_M or (near ~= nil and near <= M.APPROACH_M)) and t.waiting == nil then makeWaiting(t) end
+    if inStopZone(t, stop) then
       t.inZone = true
       t.minDist = math.min(t.minDist, t.dist)
       if speed < M.STOP_SPEED then startStopping(t, s) end
-    elseif t.inZone and t.dist > M.PASSED_M and t.dist > t.minDist + 20 then
-      -- drove through the stop's zone without standing
+    elseif passedStop(t, stop) then
+      -- drove through the stop's zone, or past it, without standing
       if needed(t) then
         scoring.missed(t.score, t.waiting)
         emit(t, 'missed', { index = t.idx, stop = stop, waiting = t.waiting or 0 })
