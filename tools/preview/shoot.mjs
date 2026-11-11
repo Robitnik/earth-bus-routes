@@ -36,6 +36,9 @@ for (const name of names) {
   const url = view === "hud" ? `${base}/?view=hud&state=${nm}${extra ? "&" + extra : ""}` : `${base}/?view=menu&screen=${nm}${extra ? "&" + extra : ""}`
   await page.goto(url)
   await page.waitForTimeout(700)
+  // name:click=<css selector> clicks that element before the shot (e.g. a bus dot on the map)
+  const click = new URLSearchParams(extra).get("click")
+  if (click) { await page.click(click); await page.waitForTimeout(300) }
   const file = path.join(out, `${view}-${nm}.png`)
   await page.screenshot({ path: file })
   console.log("saved", file)

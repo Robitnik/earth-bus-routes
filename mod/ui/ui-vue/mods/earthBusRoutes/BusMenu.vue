@@ -133,6 +133,7 @@
               </div>
               <p v-else class="sub">{{ t("map.hint") }}</p>
               <label v-if="driven" class="driven-toggle"><input v-model="showDriven" type="checkbox" /> {{ t("map.driven") }} <span class="muted small">{{ t("map.drivenHint") }}</span></label>
+              <p v-if="busCount" class="bus-note muted small"><i class="bus-dot"></i>{{ t("bus.count", { n: busCount }) }}</p>
               <div v-if="s && s.map && s.map.busy" class="loading small"><span class="spin"></span><div><b>{{ t("map.loading") }}</b><div class="muted">{{ t("map.loadingHint") }}</div></div></div>
               <div v-else-if="s && s.map && s.map.err" class="notice bad"><p>{{ errText(s.map.err) }}</p><button class="btn" @click="openMap">{{ t("retry") }}</button></div>
               <div v-else-if="s && s.map && s.map.towns && !s.map.towns.length" class="empty"><b>{{ t("map.none") }}</b></div>
@@ -140,7 +141,8 @@
                 <MiniMap :places="s.map.towns" :you="s.pos" :points="[]" :cands="[]" :show-names="false" :label="t('map.tab')"
                          :map-stops="(s.map.focus ? s.map.focusStops : s.map.stops) || []" :focus="s.map.focus || null"
                          :selected="s.map.sel ? s.map.sel.id : null" :tracks="showDriven && driven ? driven.lines : []" :visited="showDriven ? driven : null"
-                         @place="id => call('uiMapFocus', id)" @stop="id => call('uiMapPick', id)" />
+                         :buses="(s && s.buses) || []" :selected-bus="pickedBus"
+                         @place="id => call('uiMapFocus', id)" @stop="id => call('uiMapPick', id)" @bus="pickBus" />
               </div>
               <div v-if="s && s.map && s.map.sel" class="map-sel">
                 <div class="map-sel-body">
@@ -224,6 +226,7 @@
             </div>
           </div>
           <aside class="aside">
+            <DepartureBoard v-if="s && s.board && tab === 'map'" :board="s.board" />
             <div class="card">
               <h3>{{ t("near.position") }}</h3>
               <div v-if="s && s.pos" class="coords">{{ s.pos.lat.toFixed(5) }}, {{ s.pos.lon.toFixed(5) }}</div>
@@ -250,6 +253,7 @@
           </div>
           <div v-if="s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("lines.loading") }}</b><div class="muted">{{ t("lines.loadingHint") }}</div></div></div>
           <div v-if="s.error" class="notice bad"><p>{{ t("err.generic", { e: s.error }) }}</p></div>
+          <DepartureBoard v-if="s.board" :board="s.board" class="station-board" />
           <div class="tabs station-tabs" role="tablist">
             <button v-for="k in TABS" :key="k" role="tab" :aria-selected="curTab === k" :class="{ on: curTab === k }" @click="call('uiSetTab', k)">
               {{ t("tabs." + k) }}<span class="badge" :class="{ zero: !tabCount(k) }">{{ tabCount(k) }}</span>
@@ -466,6 +470,7 @@ import NextTripCard from "./NextTripCard.vue"
 import ShiftStart from "./ShiftStart.vue"
 import ShiftPage from "./ShiftPage.vue"
 import ProfileTab from "./ProfileTab.vue"
+import DepartureBoard from "./DepartureBoard.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"
@@ -536,6 +541,10 @@ function openMap() { tab.value = "map"; call("uiMapOpen"); call("uiProfileOpen")
 function openProfile() { tab.value = "profile"; call("uiProfileOpen") }
 // the career's layer of the map: the lines driven, the towns and stations stopped at (only once the profile is in the model)
 const showDriven = ref(true)
+// the buses of the lines (plan 007): the chosen one gets a chip on the map
+const pickedBus = ref(null)
+const busCount = computed(() => (s.value && s.value.buses ? s.value.buses.length : 0))
+function pickBus(key) { pickedBus.value = key == null || pickedBus.value === key ? null : key }
 const driven = computed(() => (s.value && s.value.profile && s.value.profile.layer && s.value.profile.layer.lines.length ? s.value.profile.layer : null))
 function townList() { const f = s.value && s.value.map && s.value.map.focus; if (f) { tab.value = "near"; call("uiMapPlace", f.id) } }
 function mapLines() { tab.value = "near"; call("uiMapGo", "lines") }
@@ -735,6 +744,9 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
     &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); } } }
 .driven-toggle { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; cursor: pointer; font-size: 14px; }
 .career-note { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; .earned { font-weight: 700; color: var(--led); } .ach-new { font-weight: 700; } }
+.bus-note { display: flex; align-items: center; gap: 8px; margin: 0; }
+.bus-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--led); box-shadow: 0 0 0 2px #0b1519; flex: none; }
+.station-board { margin: 4px 0 10px; }
 .map-big { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
 .map-head { display: flex; align-items: center; gap: 12px; .map-town { flex: 1; font-size: 18px; } .btn { padding: 6px 12px; } }
 .map-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2);
