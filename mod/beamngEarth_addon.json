@@ -78,6 +78,28 @@
       "help": "Standing passengers and the cup on the HUD; a hard brake with people standing makes one fall (-30 comfort)."
     },
     {
+      "key": "shifts",
+      "label": "Shifts with a dispatcher",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Adds a \"Start a shift\" button to the route card: a chain of trips with layovers at the termini and a summary at the end."
+    },
+    {
+      "key": "depotStart",
+      "label": "Shifts start at the depot",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "A shift may begin with an empty service run from the nearest bus depot (or bus station) to the first stop."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

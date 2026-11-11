@@ -1,4 +1,5 @@
 import base from "../../mod/ui/modules/apps/EarthBusHud/mockdata/snapshot.json"
+import { shiftMenuStates, shiftHudStates } from "./mocks_shift.js"
 const clone = o => JSON.parse(JSON.stringify(o))
 
 export const HUD_STATES = {
@@ -213,3 +214,7 @@ Object.assign(MENU_STATES, {
       lines: ["360", "361", "363", "375"].map(r => ({ ref: r, colour: "#d8e04a" })) } } },
   buildcities: { ...common2, screen: "build", stations, build: { ...build, showCities: true, cities: towns, cands: [] } },
 })
+
+// plan 006 B: the shift pages
+Object.assign(HUD_STATES, shiftHudStates(base))
+Object.assign(MENU_STATES, shiftMenuStates(common2, stations, sel, route, start))

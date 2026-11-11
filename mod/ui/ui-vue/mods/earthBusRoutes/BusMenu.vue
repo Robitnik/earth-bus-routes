@@ -300,6 +300,7 @@
                 </div>
               </div>
             </div>
+            <ShiftStart :s="s" />
             <p v-if="s.route.incomplete" class="warn">{{ t("route.incomplete") }}</p>
             <p v-if="s.route.straight" class="warn">{{ t("build.straight") }}</p>
             <div v-if="s.route.custom" class="own-actions">
@@ -379,6 +380,9 @@
           </div>
         </section>
 
+        <!-- the dispatcher between the trips, the summary of a shift -->
+        <ShiftPage v-else-if="(screen === 'shiftLayover' || screen === 'shiftResult') && s.shift" :s="s" />
+
         <!-- 4. the end of the trip -->
         <section v-else-if="screen === 'result' && s.result" class="result card">
           <div class="res-head">
@@ -446,6 +450,8 @@ import MiniMap from "./MiniMap.vue"
 import BuildPage from "./BuildPage.vue"
 import StopsPage from "./StopsPage.vue"
 import NextTripCard from "./NextTripCard.vue"
+import ShiftStart from "./ShiftStart.vue"
+import ShiftPage from "./ShiftPage.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, t, noteText } from "./i18n.js"

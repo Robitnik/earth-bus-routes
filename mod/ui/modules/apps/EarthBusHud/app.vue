@@ -20,10 +20,42 @@
       </div>
     </div>
 
+    <!-- a shift between two trips: the dispatcher's next trip, the wait and the delay -->
+    <div v-else-if="d.layover" class="armed layover">
+      <header class="blind">
+        <span class="plate">{{ d.layover.ref }}</span>
+        <span class="led dest">{{ d.layover.to }}</span>
+        <span class="led clock">{{ timeLabel(d.layover.departs) }}</span>
+      </header>
+      <div class="armed-body">
+        <div class="armed-label">{{ tr("hud.layover") }}</div>
+        <div class="armed-stop">{{ d.layover.from }} → {{ d.layover.to }}</div>
+        <div class="armed-dist" :class="layoverCls">{{ layoverText }}</div>
+        <div class="armed-hint">{{ layoverHint }}</div>
+      </div>
+    </div>
+
+    <!-- the empty run from the depot to the first stop -->
+    <div v-else-if="d.service" class="armed service">
+      <header class="blind">
+        <span class="plate">{{ d.service.ref }}</span>
+        <span class="led dest">{{ tr("hud.serviceSign") }}</span>
+      </header>
+      <div class="armed-body">
+        <div class="armed-label">{{ tr("hud.service") }}</div>
+        <div class="armed-stop">{{ d.service.stop }}</div>
+        <div class="armed-dist">{{ serviceDist }}</div>
+        <div class="armed-hint">
+          {{ tr("hud.serviceDue", { time: timeLabel(d.service.due) }) }}
+          <template v-if="d.service.late > 60"> · <span class="late">{{ tr("hud.lateBy", { min: Math.ceil(d.service.late / 60) }) }}</span></template>
+        </div>
+      </div>
+    </div>
+
     <!-- trip finished: the menu shows the details -->
     <div v-else-if="d.finished" class="idle done">
       <span class="grade">{{ d.result.grade }}</span>
-      <span class="idle-text">{{ tr("hud.done", { points: d.result.points }) }}</span>
+      <span class="idle-text">{{ d.shift ? tr("hud.shiftDone", { n: d.shift.count, points: d.result.points }) : tr("hud.done", { points: d.result.points }) }}</span>
     </div>
 
     <template v-else>
@@ -45,6 +77,13 @@
         <div class="lb-stop">{{ led.stop }}</div>
         <div class="lb-line">{{ led.line }} → {{ led.dest }}</div>
       </section>
+      <!-- a shift: which trip it is, how late it began, how long the shift lasts -->
+      <div v-if="d.shift" class="shiftbar">
+        <b>{{ tr("hud.shiftTrip", { n: d.shift.number }) }}</b>
+        <span v-if="d.shift.depot" class="muted">{{ tr("hud.shiftDepot") }}</span>
+        <span v-if="d.shift.lateStart > 60" class="late">{{ tr("hud.lateStart", { min: Math.ceil(d.shift.lateStart / 60) }) }}</span>
+        <span class="muted end">{{ tr("hud.shiftEnds", { time: hm(d.shift.endsIn) }) }}</span>
+      </div>
 
       <!-- the line diagram: the next stop opened up at the top, the stops after it on the line's colour -->
       <section class="line" :key="d.index">
@@ -142,6 +181,11 @@ const TEXT = {
     "hud.openDoors": "Open the doors", "hud.closeDoors": "Close the doors and go", "hud.gettingOff": "{n} getting off", "hud.boarding": "{n} boarding",
     "hud.due": "due {time}", "hud.waiting": "{n} waiting", "hud.stopRequested": "Stop requested",
     "hud.onboard": "on board", "hud.onboardTip": "Passengers on board / capacity", "hud.scoreTip": "Score of this trip", "hud.progress": "Progress along the line",
+    "hud.layover": "Layover, next trip", "hud.layoverIn": "in {min} min", "hud.layoverNow": "Boarding", "hud.lateBy": "late by {min} min",
+    "hud.layoverAway": "Get back in the bus: the shift waits, the time goes on.", "hud.layoverLoading": "The dispatcher is preparing the trip…",
+    "hud.layoverWait": "Trip {n} of the shift. Departs {time}; the shift ends {end}.", "hud.service": "Service run to the first stop", "hud.serviceSign": "Služební jízda",
+    "hud.serviceDue": "Due at {time}", "hud.shiftTrip": "Shift: trip {n}", "hud.shiftDepot": "from the depot", "hud.lateStart": "began {min} min late",
+    "hud.shiftEnds": "ends in {time}", "hud.shiftDone": "Shift finished: {n} trips, {points} points on average. Open the menu for the summary.",
     "hud.onTime": "On time", "m": "m", "km": "km", "ft": "ft", "mi": "mi",
     "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
     "note.Passenger fell": "Passenger fell",
@@ -155,6 +199,11 @@ const TEXT = {
     "hud.openDoors": "Відчиніть двері", "hud.closeDoors": "Зачиніть двері й рушайте", "hud.gettingOff": "виходить {n}", "hud.boarding": "заходить {n}",
     "hud.due": "за розкладом {time}", "hud.waiting": "чекає {n}", "hud.stopRequested": "Зупинку замовлено",
     "hud.onboard": "у салоні", "hud.onboardTip": "Пасажирів у салоні / місткість", "hud.scoreTip": "Бали за рейс", "hud.progress": "Пройдено по маршруту",
+    "hud.layover": "Стоянка, наступний рейс", "hud.layoverIn": "через {min} хв", "hud.layoverNow": "Посадка", "hud.lateBy": "із запізненням {min} хв",
+    "hud.layoverAway": "Поверніться в автобус: зміна чекає, час іде.", "hud.layoverLoading": "Диспетчер готує рейс…",
+    "hud.layoverWait": "Рейс {n} зміни. Відправлення {time}; зміна закінчується {end}.", "hud.service": "Службовий рейс до першої зупинки", "hud.serviceSign": "Služební jízda",
+    "hud.serviceDue": "Треба бути о {time}", "hud.shiftTrip": "Зміна: рейс {n}", "hud.shiftDepot": "з депо", "hud.lateStart": "почався із запізненням {min} хв",
+    "hud.shiftEnds": "закінчується через {time}", "hud.shiftDone": "Зміну завершено: {n} рейсів, у середньому {points} балів. Підсумок у меню.",
     "hud.onTime": "Вчасно", "m": "м", "km": "км", "ft": "фт", "mi": "миль",
     "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
     "note.Passenger fell": "Пасажир упав",
@@ -170,7 +219,8 @@ function tr(key, p) {
 const noteText = t => (TEXT[lang] && TEXT[lang]["note." + t]) || t
 
 // ---- the numbers
-const lineColour = computed(() => (d.value && ((d.value.route && d.value.route.colour) || (d.value.armed && d.value.armed.colour))) || "#4aa3df")
+const lineColour = computed(() => (d.value && ((d.value.route && d.value.route.colour) || (d.value.armed && d.value.armed.colour)
+  || (d.value.layover && d.value.layover.colour) || (d.value.service && d.value.service.colour))) || "#4aa3df")
 const armedDist = computed(() => {
   const a = d.value && d.value.armed
   if (!a) return ""
@@ -181,6 +231,32 @@ const armedDist = computed(() => {
   }
   return m < 1000 ? Math.round(m / 10) * 10 + " " + tr("m") : (m / 1000).toFixed(1) + " " + tr("km")
 })
+function distLabel(m, units) {
+  if (units === "mph") {
+    const ft = m * 3.28084
+    return ft < 1000 ? Math.round(ft / 10) * 10 + " " + tr("ft") : (m / 1609.344).toFixed(1) + " " + tr("mi")
+  }
+  return m < 1000 ? Math.round(m / 10) * 10 + " " + tr("m") : (m / 1000).toFixed(1) + " " + tr("km")
+}
+const serviceDist = computed(() => (d.value && d.value.service && d.value.service.dist != null ? distLabel(d.value.service.dist, d.value.service.units) : ""))
+// the layover board: the wait (or the delay) is the big number
+const layoverText = computed(() => {
+  const l = d.value && d.value.layover
+  if (!l) return ""
+  if (l.late > 60) return tr("hud.lateBy", { min: Math.ceil(l.late / 60) })
+  if (l.remaining > 90) return tr("hud.layoverIn", { min: Math.ceil(l.remaining / 60) })
+  return tr("hud.layoverNow")
+})
+const layoverCls = computed(() => (d.value && d.value.layover && d.value.layover.late > 60 ? "late" : ""))
+const layoverHint = computed(() => {
+  const l = d.value && d.value.layover
+  if (!l) return ""
+  if (l.away) return tr("hud.layoverAway")
+  if (l.loading) return tr("hud.layoverLoading")
+  return tr("hud.layoverWait", { n: l.number, time: timeLabel(l.departs), end: hm(l.endsIn) })
+})
+// hours:minutes of a length of time in seconds
+const hm = sec => Math.floor(sec / 3600) + ":" + pad(Math.floor((sec % 3600) / 60))
 // dark text on a light line colour, white on a dark one
 const lineInk = computed(() => {
   const m = /^#([0-9a-f]{6})$/i.exec(lineColour.value)
@@ -310,6 +386,9 @@ onMounted(() => {
 .armed-stop { font-size: 20px; font-weight: 800; line-height: 1.2; }
 .armed-dist { font-size: 34px; font-weight: 800; color: var(--line); line-height: 1.1; }
 .armed-hint { color: var(--muted); font-size: 13px; line-height: 1.3; }
+.armed-dist.late, .shiftbar .late, .armed-hint .late { color: var(--late); }
+.shiftbar { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 0 4px; font-size: 13px; color: var(--ink);
+  b { font-weight: 800; } .muted { color: var(--muted); } .end { margin-left: auto; } }
 .idle.done .grade { flex: none; font-size: 30px; font-weight: 800; color: var(--line); }
 
 // ---- destination blind

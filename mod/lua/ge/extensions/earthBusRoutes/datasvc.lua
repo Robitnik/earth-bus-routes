@@ -97,6 +97,11 @@ function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
 function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
+-- shifts (plan 006 B): the real trips that follow a timetable trip at its terminus; the depot (or a bus station) near a point
+function M.shift(pid, start, day, mins, cb)
+  M.get(('/v1/shift?pid=%d&start=%d&day=%d&mins=%d'):format(math.floor(pid), math.floor(start), math.floor(day), math.floor(mins)), cb, { urgent = true, total = 30 })
+end
+function M.depot(lat, lon, cb) M.get(('/v1/depot?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 
 local function startNext()
   local job = table.remove(queue, 1)

@@ -1,9 +1,11 @@
 // The menu's two languages. The game language Ukrainian / Russian / Belarusian -> Ukrainian, anything else English; a switch on the
 // page overrides it (kept in localStorage when the browser lets us).
 import { ref } from "vue"
+import { SHIFT_EN, SHIFT_UK } from "./shiftText.js"
 
 const DICT = {
   en: {
+    ...SHIFT_EN,
     "title": "Bus routes",
     "crumb.stops": "Stops near you",
     "back": "Back", "close": "Close", "refresh": "Refresh", "retry": "Try again",
@@ -107,6 +109,7 @@ const DICT = {
     "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
   },
   uk: {
+    ...SHIFT_UK,
     "title": "Автобусні маршрути",
     "crumb.stops": "Зупинки поруч",
     "back": "Назад", "close": "Закрити", "refresh": "Оновити", "retry": "Спробувати знову",
