@@ -28,6 +28,10 @@ class Queries(unittest.TestCase):
 
     def test_route_query_is_an_integer_only(self):
         self.assertIn("rel(6962840)", d.route_query("6962840"))
+        q = d.route_query("6962840")
+        self.assertIn("around.w:30", q)                      # the bus stops of the other side of the road come with the route
+        self.assertIn("out body geom", q)
+        self.assertEqual(d.route_key(6962840), "route2_6962840")
         with self.assertRaises(ValueError):
             d.route_query("1);out;(")
 

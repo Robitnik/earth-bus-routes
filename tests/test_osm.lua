@@ -186,4 +186,79 @@ function T.reversed_route_runs_the_same_road_the_other_way()
   assert(#sched.generate(b, 2) > 5)
 end
 
+function T.a_circular_line_starts_where_the_map_says()
+  local r = assert(osm.parseRoute(H.fixture('route_7185111')))
+  assert(r.rotated and r.loop and #r.stops == 14)
+  assert(r.stops[1].name == 'Police nad Metují, aut.st.' and r.stops[#r.stops].name == r.stops[1].name,
+    'a trip starts and ends at the bus station, not at the school: ' .. r.stops[1].name .. ' / ' .. r.stops[#r.stops].name)
+  assert(r.stops[1].along < 5 and math.abs(r.stops[#r.stops].along - r.length) < 5)
+  for i, s in ipairs(r.stops) do
+    assert(s.off <= 40, ('stop %d %s is %.0f m off the road'):format(i, s.name, s.off))
+    if i > 1 then assert(s.along >= r.stops[i - 1].along - 30, ('stop %d goes backwards'):format(i)) end
+  end
+  -- the school, the old first stop, is the second now
+  assert(r.stops[2].name == 'Police nad Metují, škola')
+end
+
+function T.same_stop_name_reads_abbreviations()
+  assert(osm.sameStopName('Police nad Metují, aut.st.', 'Police nad Metují, autobusové stanoviště'))
+  assert(osm.sameStopName('Náchod, aut. nádraží', 'Náchod, autobusové nádraží'))
+  assert(not osm.sameStopName('Police nad Metují, škola', 'Police nad Metují, autobusové stanoviště'))
+  assert(not osm.sameStopName('Police', 'Police nad Metují'))
+  assert(not osm.sameStopName('', 'x'))
+end
+
+-- A straight road going east at latitude 50, three stops; each platform 10 m south (the right of the way of travel) unless
+-- `north` says it is on the north side. `twins`: the stops that also have the platform of the other side, not listed in the relation.
+local function eastRoad(north, twins)
+  local d = 10 / 111195
+  local pts, members, nodes = {}, {}, {}
+  for i = 0, 8 do pts[#pts + 1] = { lat = 50.0, lon = 16.0 + i * 0.005 } end
+  members[1] = { type = 'way', ref = 10, role = '', geometry = pts }
+  local names = { 'Alpha', 'Bravo', 'Charlie' }
+  local lons = { 16.004, 16.02, 16.036 }
+  for i, nm in ipairs(names) do
+    local lat = (north and north[i]) and (50.0 + d) or (50.0 - d)
+    members[#members + 1] = { type = 'node', ref = 100 + i, role = 'platform', lat = lat, lon = lons[i] }
+    nodes[#nodes + 1] = { type = 'node', id = 100 + i, lat = lat, lon = lons[i], tags = { name = nm, highway = 'bus_stop', public_transport = 'platform' } }
+    if twins and twins[i] then
+      local tl = (north and north[i]) and (50.0 - d) or (50.0 + d)
+      nodes[#nodes + 1] = { type = 'node', id = 200 + i, lat = tl, lon = lons[i], tags = { name = nm, highway = 'bus_stop', public_transport = 'platform' } }
+    end
+  end
+  local els = { { type = 'relation', id = 1, tags = { type = 'route', route = 'bus', ref = 'X', ['public_transport:version'] = '2', from = 'Alpha', to = 'Charlie' }, members = members } }
+  for _, n in ipairs(nodes) do els[#els + 1] = n end
+  return { elements = els }
+end
+
+function T.the_platform_on_the_right_of_the_way_of_travel_is_taken()
+  local geo = require('earthBusRoutes/geomath')
+  -- Bravo's listed platform is on the north (the left going east); its twin on the south is not listed
+  local r = assert(osm.parseRoute(eastRoad({ [2] = true }, { [2] = true })))
+  assert(#r.stops == 3)
+  assert(r.stops[1].id == 101 and r.stops[3].id == 103, 'platforms already on the right stay')
+  assert(r.stops[2].id == 202, 'the twin on the right is taken: ' .. tostring(r.stops[2].id))
+  assert(geo.sideOf(r.path, r.cum, r.stops[2].along, r.stops[2].lat, r.stops[2].lon) > 0)
+  assert(r.stops[2].off < 15)
+  -- the other direction: the platform that was on the left is on the right
+  local b = osm.reversed(r)
+  assert(b.stops[1].name == 'Charlie' and b.stops[2].name == 'Bravo')
+  assert(b.stops[2].id == 102, 'going back the north platform is the right one: ' .. tostring(b.stops[2].id))
+  assert(geo.sideOf(b.path, b.cum, b.stops[2].along, b.stops[2].lat, b.stops[2].lon) > 0)
+  -- the others had no twin: they stay (the nearest there is)
+  assert(b.stops[1].id == 103 and b.stops[3].id == 101)
+end
+
+function T.a_platform_already_on_the_right_is_kept()
+  local r = assert(osm.parseRoute(eastRoad(nil, { true, true, true })))
+  for i, id in ipairs({ 101, 102, 103 }) do assert(r.stops[i].id == id, 'stop ' .. i .. ' ' .. r.stops[i].id) end
+end
+
+function T.without_twins_nothing_changes()
+  local r = assert(osm.parseRoute(eastRoad({ true, true, true }, nil)))
+  for i, id in ipairs({ 101, 102, 103 }) do assert(r.stops[i].id == id) end
+  local b = osm.reversed(r)
+  assert(b.stops[1].id == 103)
+end
+
 return T

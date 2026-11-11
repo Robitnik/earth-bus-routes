@@ -89,6 +89,16 @@ function M.alongCandidates(path, cum, lat, lon, maxOff, sepM)
   return out
 end
 
+-- On which side of the way of travel a point lies, at `along` metres on the polyline: > 0 on the right (the platform of a
+-- stop where traffic keeps right), < 0 on the left.
+function M.sideOf(path, cum, along, lat, lon)
+  local plat, plon, bearing = M.pointAt(path, cum, along)
+  if not plat then return 0 end
+  local x, y = M.toXY(plat, plon, lat, lon)
+  local b = math.rad(bearing or 0)
+  return x * math.cos(b) - y * math.sin(b)
+end
+
 -- The point `m` metres along a polyline (clamped): lat, lon, bearing
 function M.pointAt(path, cum, m)
   if #path == 0 then return nil end

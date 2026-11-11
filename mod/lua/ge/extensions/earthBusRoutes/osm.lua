@@ -343,6 +343,72 @@ function M.orderedAlong(path, cum, length, stops)
   return path, cum, length
 end
 
+-- Do two names mean one stop? "Police nad Metují, aut.st." and "Police nad Metují, autobusové stanoviště": the same words, each
+-- the start of the other's.
+function M.sameStopName(a, b)
+  local function words(s)
+    local out = {}
+    for w in M.normName(s):gmatch('%S+') do out[#out + 1] = w end
+    return out
+  end
+  local x, y = words(a), words(b)
+  if #x == 0 or #x ~= #y then return false end
+  for i = 1, #x do
+    local p, q = x[i], y[i]
+    if #p > #q then p, q = q, p end
+    if q:sub(1, #p) ~= p then return false end
+  end
+  return true
+end
+
+M.TWIN_M = 100         -- a platform of the same name this near a stop is its twin on the other side of the road
+M.SIDE_OFF_M = 40      -- a platform this near the line is on the road
+
+-- Of a stop's platform and its twins (s.alts), the one on the right of the way of travel and nearest the road; the stop is moved
+-- there. Does nothing without a twin on the right, or when the stop is on the right already.
+function M.pickRight(path, cum, s)
+  if not s.alts or #s.alts == 0 then return false end
+  local function measure(c)
+    local a, off = geo.along(path, cum, c.lat, c.lon, (s.along or 0) - 300, (s.along or 0) + 300)
+    if not a then return nil end
+    return { along = a, off = off, side = geo.sideOf(path, cum, a, c.lat, c.lon) }
+  end
+  local mine = measure(s)
+  if mine and mine.side > 0 and mine.off <= M.SIDE_OFF_M then return false end
+  local best, bestM
+  for _, c in ipairs(s.alts) do
+    local m = measure(c)
+    if m and m.side > 0 and m.off <= M.SIDE_OFF_M and (not bestM or m.off < bestM.off) then best, bestM = c, m end
+  end
+  if not best then return false end
+  local old = { id = s.id, lat = s.lat, lon = s.lon }
+  for i, c in ipairs(s.alts) do if c == best then table.remove(s.alts, i) break end end
+  s.alts[#s.alts + 1] = old
+  s.id, s.lat, s.lon, s.along, s.off = best.id, best.lat, best.lon, bestM.along, bestM.off
+  return true
+end
+
+-- A closed road (a loop) turned to start at the stop `pick`: the stops after it first, the ones before it after, and the stop it
+-- started at again at the end. Returns path, cum, length, stops.
+local function rotateLoop(path, cum, length, stops, pick)
+  local a0 = stops[pick].along
+  local p2 = M.rotatePath(path, cum, a0)
+  local cum2, len2 = geo.cumulative(p2)
+  local out = {}
+  local n = #stops - 1                       -- the last stop is the first one again
+  for k = 0, n - 1 do
+    local s = stops[(pick - 1 + k) % n + 1]
+    s.along = (s.along - a0) % length
+    out[#out + 1] = s
+  end
+  local back = {}
+  for key, v in pairs(stops[pick]) do back[key] = v end
+  back.along = len2
+  out[#out + 1] = back
+  for i, s in ipairs(out) do s.index = i end
+  return p2, cum2, len2, out
+end
+
 -- The full route: data = the answer of overpass.routeQuery (relation with geometry first, then its member nodes / ways
 -- with tags). Returns route table (see fields below) or nil, why.
 function M.parseRoute(data)
@@ -442,16 +508,56 @@ function M.parseRoute(data)
   if #stops < 2 then return nil, 'fewer than two distinct stops in the relation' end
   for i, s in ipairs(stops) do s.index = i end
 
+  -- the platform on the right of the way of travel, when the map has one on each side (the answer holds the bus stops near the
+  -- road too, not only the ones the relation lists)
+  if #path >= 2 then
+    local listed = {}
+    for _, m in ipairs(rel.members or {}) do if m.type == 'node' then listed[m.ref] = true end end
+    local extras = {}
+    for i = 2, #elems do
+      local e = elems[i]
+      local tg = e.tags or {}
+      if e.type == 'node' and not listed[e.id] and e.lat and tg.name and (tg.highway == 'bus_stop' or tg.public_transport == 'platform') then
+        extras[#extras + 1] = { id = e.id, lat = e.lat, lon = e.lon, name = tg.name }
+      end
+    end
+    if #extras > 0 then
+      for _, s in ipairs(stops) do
+        s.alts = {}
+        for _, x in ipairs(extras) do
+          if x.id ~= s.id and M.normName(x.name) == M.normName(s.name) and geo.dist(x.lat, x.lon, s.lat, s.lon) <= M.TWIN_M then
+            s.alts[#s.alts + 1] = { id = x.id, lat = x.lat, lon = x.lon }
+          end
+        end
+        M.pickRight(path, cum, s)
+      end
+    end
+  end
+
   local first, last = stops[1], stops[#stops]
   local loop = M.normName(first.name) == M.normName(last.name) and geo.dist(first.lat, first.lon, last.lat, last.lon) < 150
+  local rotated = false
+  -- a circular line starts where the map says it does ("from" names the bus station, the relation lists the school first)
+  if loop and #stops >= 4 and tags.from and geo.dist(path[1].lat, path[1].lon, path[#path].lat, path[#path].lon) < M.LOOP_CLOSED_M then
+    for i = 2, #stops - 1 do
+      if M.sameStopName(stops[i].name, tags.from) then
+        path, cum, length, stops = rotateLoop(path, cum, length, stops, i)
+        first, last = stops[1], stops[#stops]
+        rotated = true
+        break
+      end
+    end
+  end
   local head = M.routeHead(rel, tags)
   head.nodes = nil
   head.stops, head.path, head.cum, head.length = stops, path, cum, length
   head.gaps, head.loop = gaps, loop
+  head.rotated = rotated or nil
   head.incomplete = gaps > 0 or #stops < 2 or (tags.complete == 'no')
   head.kind = M.kind(head)
   head.from = head.from or first.name
   head.to = head.to or last.name
+  if loop then head.from, head.to = first.name, last.name end
   return head
 end
 
@@ -478,7 +584,7 @@ function M.reversed(route)
   for i = n, 1, -1 do
     local s = route.stops[i]
     stops[#stops + 1] = { id = s.id, name = s.name, lat = s.lat, lon = s.lon, role = s.role, off = s.off, station = s.station,
-      along = math.min(a1 - a0, math.max(0, a1 - (s.along or 0))) }
+      along = math.min(a1 - a0, math.max(0, a1 - (s.along or 0))), alts = s.alts }
     stops[#stops].index = #stops
   end
   local inside = { }
@@ -492,6 +598,14 @@ function M.reversed(route)
   local path = {}
   for i = #inside, 1, -1 do path[#path + 1] = inside[i] end
   local cum, length = geo.cumulative(path)
+  for _, s in ipairs(stops) do
+    if s.alts then
+      local alts = {}
+      for k, v in ipairs(s.alts) do alts[k] = v end
+      s.alts = alts
+      M.pickRight(path, cum, s)               -- going the other way the platform on the right is the one across the road
+    end
+  end
   local name = route.name
   if route.from and route.to then name = (route.ref or '') .. ': ' .. route.to .. ' => ' .. route.from end
   local r = {}

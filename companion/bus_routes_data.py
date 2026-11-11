@@ -37,7 +37,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.1"
+VERSION = "0.5.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -96,7 +96,10 @@ def nearby_query(lat, lon, radius=RADIUS_M):
 
 
 def route_query(rel_id):
-    return f"[out:json][timeout:50];rel({int(rel_id)});out body geom;(node(r);way(r););out tags center;"
+    # the relation with its geometry, its members, and the bus stops within 30 m of its ways: the platform of the other side of
+    # the road is not a member (a stop is listed once, for one direction), but the other direction's bus stops there
+    return (f"[out:json][timeout:60];rel({int(rel_id)})->.r;.r out body geom;(node(r.r);way(r.r););out tags center;"
+            f"way(r.r)->.w;(node[highway=bus_stop](around.w:30);node[public_transport=platform](around.w:30););out tags center;")
 
 
 def nearby_key(lat, lon):
@@ -104,7 +107,7 @@ def nearby_key(lat, lon):
 
 
 def route_key(rel_id):
-    return f"route_{int(rel_id)}"
+    return f"route2_{int(rel_id)}"          # (route_: before the bus stops near the road were asked for)
 
 
 def stop_sequence(members):
