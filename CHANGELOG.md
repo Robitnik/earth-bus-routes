@@ -1,7 +1,10 @@
 # Changelog
 
-## 0.6.1 (not released yet)
+## 0.7.0 (not released yet)
 
+- **Towns are found as you type, in milliseconds.** The data service keeps the towns and villages of the countries round you on this computer (GeoNames: Czechia 1.6 MB, Poland 2 MB, plus the world's big towns, downloaded once in the background and refreshed monthly). Typing "Pol" shows Police nad Metují at once (2 to 30 ms); Enter adds the geocoder's answer in one request (under a second, was three requests and up to two minutes when it fell back to Overpass). The map database is asked only when neither knows the name.
+- **The map of towns opens at once** from the same files (8 ms; was an Overpass query that often failed after minutes).
+- Data service 0.7.0 (update it on the Add-ons page too). Towns © GeoNames, CC BY 4.0 (in the menu's footer).
 - **"From here" / "To here" / "Through" read the line's own words when its list of stops is out of order.** At Police nad Metují the OSM relation of 360 to Teplice lists its stops shuffled (the bus station 8th of 16) and 363 starts its list at the school next door: both were under "Through". A station in the middle of the list that the line's tags *and* name call its start or end is now that end (when the two disagree, the order stays). "aut.st." and "autobusové stanoviště" are one name.
 - **A relation whose stops the road cannot follow** (two or more steps backwards) is laid out by the road, like an old relation: 360 from Police now starts at the bus station, then the school.
 

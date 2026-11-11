@@ -11,9 +11,10 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
   GET /v1/path?pts=lat,lon;lat,lon;..   the road route through 2..25 points (OSRM): {points, legs, dist, dur, source}
   GET /v1/along?pts=...                 the bus stops within 30 m of that road route
   GET /v1/stations?lat=..&lon=..        the bus stations within 25 km of a point
-  GET /v1/search?q=..&lat=..&lon=..     stations and stops by name within 40 km of a point (&local=1: only what this service
-                                        has already seen, answered at once)
-  GET /v1/towns?lat=..&lon=..           the cities, towns and villages within 40 km of a point (for the map)
+  GET /v1/search?q=..&lat=..&lon=..     towns ("places") and stations / stops by name (&local=1: only what is on this
+                                        computer, answered in milliseconds; else the geocoder too, ~1 s)
+  GET /v1/towns?lat=..&lon=..           the cities, towns and villages within 40 km of a point (for the map; from GeoNames
+                                        files kept on this computer, else Overpass)
   GET /v1/progress                      what the service is waiting for right now (for a progress bar)
   GET /v1/lines?ref=..&lat=..&lon=..    the bus lines with this number within 40 km (&local=1 likewise)
   GET /v1/status                        what it did lately (for the Add-ons page's log)
@@ -21,10 +22,11 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
 Every answer is {"ok": true, "cached": bool, "data": <Overpass JSON>} or {"ok": false, "error": "..."}.
 Run it from BeamNG.Earth's Add-ons page (a "companion"), or by hand: python bus_routes_data.py [--port N] [--cache DIR]
 
-Map data (c) OpenStreetMap contributors, ODbL. Standard library only. MIT licence.
+Map data (c) OpenStreetMap contributors, ODbL. Towns (c) GeoNames, CC BY 4.0. Standard library only. MIT licence.
 """
 import argparse
 import hashlib
+import io
 import math
 import json
 import os
@@ -37,9 +39,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.6.0"
+VERSION = "0.7.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -63,7 +66,7 @@ PHOTON_COOLDOWN_S = 60          # after a failure the geocoder is left alone thi
 _photon_down_until = 0.0
 PLACE_KINDS = {"city": 5, "town": 4, "municipality": 3, "village": 3, "borough": 2, "suburb": 2, "hamlet": 2, "quarter": 1,
                "neighbourhood": 1, "locality": 1}
-FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns"]
+FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer"]
 STATIONS_M = 25000
 STATIONS_CELL_DEG = 0.05
 OSRM = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"]
@@ -607,8 +610,11 @@ def label_of(key):
 
 # ---- the geocoder: names of places and stops, fast ----------------------------------------------------------------------
 
-def photon_url(q, lat, lon, tag, limit):
-    qs = urllib.parse.urlencode({"q": q, "lat": f"{lat:.4f}", "lon": f"{lon:.4f}", "limit": limit, "osm_tag": tag})
+def photon_url(q, lat, lon, tags, limit):
+    """tags: one "key:value" filter or a list of them (Photon ORs them): places and stops come in one answer."""
+    tags = [tags] if isinstance(tags, str) else list(tags)
+    qs = urllib.parse.urlencode([("q", q), ("lat", f"{lat:.4f}"), ("lon", f"{lon:.4f}"), ("limit", limit)] +
+                                [("osm_tag", t) for t in tags])
     return f"{PHOTON}?{qs}"
 
 
@@ -645,33 +651,32 @@ def photon_get(url):
         return json.loads(r.read(MAX_BYTES).decode("utf-8"))
 
 
+PHOTON_TAGS = ("place", "amenity:bus_station", "highway:bus_stop")
+
+
 def geo_search(q, lat, lon, getter=None, clock=time.monotonic):
     """Places and bus stops named like `q`, near (lat, lon): {"elements": [Overpass-like nodes of the stops], "places": [...],
     "source": "photon"}; RuntimeError when the geocoder does not answer (and for a minute after, without trying again: it is
-    a free public service, and a search must not wait for its timeout every time). Three small requests, one after another."""
+    a free public service, and a search must not wait for its timeout every time). One request (~0.7 s): places and stops
+    together."""
     global _photon_down_until
     if getter is None and clock() < _photon_down_until:
         raise RuntimeError("photon: resting after a failure")
     getter = getter or photon_get
-    jobs = (("place", "place", 6), ("station", "amenity:bus_station", 8), ("stop", "highway:bus_stop", 12))
-    res, errors = {}, []
-    for name, tag, limit in jobs:
-        try:
-            res[name] = getter(photon_url(q, lat, lon, tag, limit))
-        except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
-            errors.append(f"photon: {type(e).__name__}")
-            break                                    # one failure: the rest would only wait as long
-    if not res:
+    try:
+        data = getter(photon_url(q, lat, lon, PHOTON_TAGS, 30))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
         _photon_down_until = clock() + PHOTON_COOLDOWN_S
-        raise RuntimeError("; ".join(errors[:1]) or "photon: no answer")
-    places = parse_photon(res.get("place"), "place")
+        raise RuntimeError(f"photon: {type(e).__name__}")
+    places = parse_photon(data, "place")
     places.sort(key=lambda p: -PLACE_KINDS.get(p["kind"], 0))
+    stops = parse_photon(data, "stop")
+    stops.sort(key=lambda it: it["osm_value"] != "bus_station")          # bus stations first
     elements = []
-    for name in ("station", "stop"):
-        for it in parse_photon(res.get(name), "stop"):
-            tags = {"name": it["name"]}
-            tags["amenity" if it["osm_value"] == "bus_station" else "highway"] = it["osm_value"]
-            elements.append({"type": "node", "id": it["id"], "lat": it["lat"], "lon": it["lon"], "tags": tags})
+    for it in stops:
+        tags = {"name": it["name"]}
+        tags["amenity" if it["osm_value"] == "bus_station" else "highway"] = it["osm_value"]
+        elements.append({"type": "node", "id": it["id"], "lat": it["lat"], "lon": it["lon"], "tags": tags})
     return {"elements": elements, "places": [{k: p[k] for k in ("name", "lat", "lon", "kind", "state", "country")} for p in places],
             "source": "photon"}
 
@@ -682,6 +687,293 @@ def geo_key(q, lat, lon):
 
 
 # ---- cache ----------------------------------------------------------------------------------------------------------
+
+# ---- towns from this computer: GeoNames (the towns of the countries round the player, downloaded once) ---------------------
+
+GEONAMES = "https://download.geonames.org/export/dump/"
+GEONAMES_BASE = "cities15000"         # every town of 15 000 people or more in the world: which countries are round a point
+GEONAMES_MAX_BYTES = 100 * 1024 * 1024
+GEONAMES_REFRESH_S = 30 * 86400
+COUNTRY_NEAR_M = 60000                # the countries of the big towns this near a point are loaded
+PLACE_SKIP = {"PPLX", "PPLH", "PPLQ", "PPLW", "PPLCH"}     # parts of towns, historical, abandoned, destroyed
+
+
+def place_kind(code, pop):
+    if code == "PPLC" or pop >= 50000:
+        return "city"
+    if code in ("PPLA", "PPLA2") or pop >= 3000:
+        return "town"
+    return "village"
+
+
+def parse_geonames(lines, keep_alt=False):
+    """{geonameid: (name, folded names, lat, lon, kind, population, country, folded other names)} of the populated places of
+    a GeoNames dump (other names, "Prague" for Praha, only with keep_alt)."""
+    out = {}
+    for line in lines:
+        f = line.rstrip("\n").split("\t")
+        if len(f) < 15 or f[6] != "P" or f[7] in PLACE_SKIP:
+            continue
+        try:
+            lat, lon, pop = float(f[4]), float(f[5]), int(f[14] or 0)
+        except ValueError:
+            continue
+        names = {n for n in (fold(f[1]), fold(f[2])) if n}
+        alt = {fold(a) for a in f[3].split(",") if a} - names if keep_alt else ()
+        out[f[0]] = (f[1], tuple(names), lat, lon, place_kind(f[7], pop), pop, f[8], tuple(n for n in alt if n))
+    return out
+
+
+def download_file(url, dest, max_bytes=GEONAMES_MAX_BYTES):
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        size = int(r.headers.get("Content-Length") or 0)
+        if size > max_bytes:
+            raise ValueError(f"{size // 1048576} MB is too big")
+        tmp = dest.with_suffix(".part")
+        with open(tmp, "wb") as f:
+            got = 0
+            while True:
+                b = r.read(65536)
+                if not b:
+                    break
+                got += len(b)
+                if got > max_bytes:
+                    raise ValueError("too big")
+                f.write(b)
+    os.replace(tmp, dest)
+
+
+def _dist_m(lat, lon, la, lo):
+    k = math.cos(math.radians(lat)) * 111320
+    return math.hypot((lo - lon) * k, (la - lat) * 110574)
+
+
+class Gazetteer:
+    """Cities, towns and villages known on this computer: a name is found in milliseconds and the map of towns needs no
+    public server. The world's big towns (GeoNames cities15000, 3 MB) tell which countries are round the player; those
+    countries' files (Czechia 1.6 MB) come once, in the background, and are refreshed monthly. Data (c) GeoNames, CC BY 4.0.
+    Without a folder it knows nothing (and downloads nothing)."""
+
+    def __init__(self, directory=None, fetch=download_file, clock=time.time):
+        self.dir = pathlib.Path(directory) if directory else None
+        self.fetch, self.clock = fetch, clock
+        self.places = {}              # geonameid -> tuple (parse_geonames)
+        self.base = {}
+        self.countries = set()        # loaded
+        self.failed = {}              # country -> when it failed (not tried again for an hour)
+        self._lock = threading.Lock()
+        self._busy = threading.Lock()
+        self._grid = {}
+        self._near = {}
+        self._words = {}
+
+    @property
+    def enabled(self):
+        return self.dir is not None
+
+    def _file(self, name):
+        """The local copy of a GeoNames file (downloaded when missing or a month old); None when it cannot be had."""
+        dest = self.dir / f"{name}.zip"
+        fresh = dest.is_file() and self.clock() - dest.stat().st_mtime < GEONAMES_REFRESH_S
+        if not fresh:
+            token = ACTIVITY.begin("geonames", f"towns ({name})")
+            try:
+                ACTIVITY.update(token, state="running", mirror=1, of=1)
+                self.dir.mkdir(parents=True, exist_ok=True)
+                self.fetch(GEONAMES + f"{name}.zip", dest)
+                say(f"towns: downloaded {name}.zip ({dest.stat().st_size // 1024} KB)")
+            except (urllib.error.URLError, OSError, ValueError, TimeoutError) as e:
+                say(f"towns: {name}.zip: {type(e).__name__} {str(e)[:80]}")
+                if not dest.is_file():
+                    return None                                   # an old copy is better than none
+            finally:
+                ACTIVITY.end(token)
+        return dest
+
+    def _read(self, name, keep_alt=False):
+        path = self._file(name)
+        if path is None:
+            return None
+        try:
+            with zipfile.ZipFile(path) as z:
+                with z.open(f"{name}.txt") as f:
+                    return parse_geonames(io.TextIOWrapper(f, encoding="utf-8"), keep_alt)
+        except (OSError, KeyError, ValueError, zipfile.BadZipFile) as e:
+            say(f"towns: {name}.zip unreadable: {e}")
+            return None
+
+    def _add(self, rows):
+        with self._lock:
+            places = dict(self.places)
+            for gid, p in rows.items():
+                old = places.get(gid)
+                if old and old[7] and not p[7]:
+                    p = p[:7] + (old[7],)                 # a country's row keeps the other names the world file gave
+                places[gid] = p
+            grid, words = {}, {}
+            for gid, p in places.items():
+                grid.setdefault((int(p[2] // 0.5), int(p[3] // 0.5)), []).append(gid)
+                for n in p[1] + p[7]:
+                    for w in n.split():
+                        words.setdefault(w[:2], set()).add(gid)
+            self.places, self._grid, self._words = places, grid, words
+
+    def countries_near(self, lat, lon):
+        key = (round(lat, 1), round(lon, 1), len(self.base))
+        if key not in self._near:
+            self._near[key] = self._countries_near(lat, lon)
+        return self._near[key]
+
+    def _countries_near(self, lat, lon):
+        out = []
+        for p in sorted(self.base.values(), key=lambda p: _dist_m(lat, lon, p[2], p[3]))[:40]:
+            if (_dist_m(lat, lon, p[2], p[3]) <= COUNTRY_NEAR_M or not out) and p[6] and p[6] not in out:
+                out.append(p[6])
+        return out[:3]
+
+    def ensure(self, lat, lon):
+        """Load (download when needed) the base file and the countries round (lat, lon). Blocking; one at a time."""
+        if not self.enabled:
+            return False
+        with self._busy:
+            if not self.base:
+                base = self._read(GEONAMES_BASE, keep_alt=True)
+                if base is None:
+                    return False
+                self.base = base
+                self._add(base)
+            for cc in self.countries_near(lat, lon):
+                if cc in self.countries or self.clock() - self.failed.get(cc, -1e9) < 3600:
+                    continue
+                rows = self._read(cc)
+                if rows is None:
+                    self.failed[cc] = self.clock()
+                    continue
+                self.countries.add(cc)
+                self._add(rows)
+                say(f"towns: {cc} loaded, {len(rows)} places")
+        return True
+
+    def preload(self):
+        """At start: the base file and every country file already here (no download but a stale base)."""
+        if not self.enabled or not self.dir.is_dir():
+            return
+        with self._busy:
+            if not self.base:
+                self.base = self._read(GEONAMES_BASE, keep_alt=True) or {}
+                self._add(self.base)
+            for f in sorted(self.dir.glob("??.zip")):
+                cc = f.stem
+                if cc not in self.countries:
+                    rows = self._read(cc)
+                    if rows:
+                        self.countries.add(cc)
+                        self._add(rows)
+        if self.places:
+            say(f"towns: {len(self.places)} places on this computer ({', '.join(sorted(self.countries)) or 'big towns only'})")
+
+    def want(self, lat, lon):
+        """ensure() in the background (a search answers with what is loaded now)."""
+        if self.enabled and not self._busy.locked() and not self.ready(lat, lon):
+            threading.Thread(target=self.ensure, args=(lat, lon), daemon=True).start()
+
+    def ready(self, lat, lon):
+        return bool(self.base) and all(cc in self.countries for cc in self.countries_near(lat, lon))
+
+    @staticmethod
+    def _row(p, dist):
+        return {"name": p[0], "lat": p[2], "lon": p[3], "kind": p[4], "population": p[5], "country": p[6], "dist": round(dist)}
+
+    # how well a name answers what was typed: the name itself, a name starting with it, words starting with the words;
+    # another language's name a little less; then nearer and bigger (25 km weigh as much as ten times the people)
+    MATCH_COST = {"exact": 0.0, "start": 0.5, "words": 1.0}
+    OTHER_NAME_COST = 1.5
+
+    @staticmethod
+    def _match(q, words, names):
+        best = None
+        for n in names:
+            if n == q:
+                return "exact"
+            if n.startswith(q):
+                best = "start"
+            elif best is None:
+                parts = n.split()
+                if all(any(pt.startswith(w) for pt in parts) for w in words):
+                    best = "words"
+        return best
+
+    def search(self, text, lat, lon, limit=8):
+        """Places whose name's words start with the words typed ("suchy d" finds Suchý Důl), the best first (see MATCH_COST)."""
+        q = " ".join(fold(text).split())
+        words = q.split()
+        if not words:
+            return []
+        with self._lock:
+            places, index = self.places, self._words
+        cands = None
+        for w in words:
+            got = index.get(w[:2], set()) if len(w) >= 2 else None
+            if got is None:
+                continue
+            cands = set(got) if cands is None else cands & got
+        if cands is None:
+            return []
+        hits = []
+        for gid in cands:
+            p = places[gid]
+            m = self._match(q, words, p[1])
+            cost = self.MATCH_COST[m] if m else None
+            if cost is None:
+                m = self._match(q, words, p[7])
+                if not m:
+                    continue
+                cost = self.MATCH_COST[m] + self.OTHER_NAME_COST
+            d = _dist_m(lat, lon, p[2], p[3])
+            hits.append((cost + d / 25000 - math.log10(p[5] + 10), p, d))
+        hits.sort(key=lambda h: h[0])
+        out, seen = [], set()
+        for _, p, d in hits:
+            sig = (p[0], round(p[2], 2), round(p[3], 2))
+            if sig in seen:
+                continue
+            seen.add(sig)
+            out.append(self._row(p, d))
+            if len(out) >= limit:
+                break
+        return out
+
+    def towns(self, lat, lon, radius=TOWNS_M):
+        """The places within `radius`, the biggest first (as slim_towns)."""
+        with self._lock:
+            grid, places = self._grid, self.places
+        out, cy, cx = [], int(lat // 0.5), int(lon // 0.5)
+        for gy in range(cy - 1, cy + 2):
+            for gx in range(cx - 2, cx + 3):          # a degree of longitude is shorter
+                for gid in grid.get((gy, gx), ()):
+                    p = places[gid]
+                    d = _dist_m(lat, lon, p[2], p[3])
+                    if d <= radius:
+                        out.append(self._row(p, d))
+        out.sort(key=lambda t: (-TOWN_RANK[t["kind"]], -t["population"], t["name"]))
+        return out
+
+
+def merge_places(first, more, near_m=3000):
+    """`first`, then those of `more` that are not the same town again (one name within 3 km)."""
+    out = list(first)
+    for p in more:
+        if not any(fold(p.get("name")) == fold(o.get("name")) and _dist_m(p["lat"], p["lon"], o["lat"], o["lon"]) <= near_m
+                   for o in out):
+            out.append(p)
+    return out[:10]
+
+
+def merge_elements(first, more):
+    seen = {(e.get("type"), e.get("id")) for e in first}
+    return list(first) + [e for e in more if (e.get("type"), e.get("id")) not in seen]
+
 
 def default_cache_dir():
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
@@ -796,8 +1088,9 @@ def _fetch_osrm(pts, bases, getter, sleep, token):
 
 
 class Service:
-    def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm, geocoder=geo_search):
+    def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm, geocoder=geo_search, places=None):
         self.cache, self.upstream, self.ttl, self.router, self.geocoder = cache, upstream, ttl, router, geocoder
+        self.places = places or Gazetteer(None)
         # the stops along a road are a big query: one round of mirrors, so the answer comes (or fails) before the mod stops waiting
         self.upstream_once = (lambda q: fetch_upstream(q, rounds=1)) if upstream is fetch_upstream else upstream
         self.started = time.time()
@@ -815,6 +1108,37 @@ class Service:
             finally:
                 ACTIVITY.end(token)
         return self.get(geo_key(q, lat, lon), (q, lat, lon), upstream=ask)
+
+    def local_search(self, q, lat, lon):
+        """Only what is on this computer, in milliseconds: {"elements": stops, "places": towns, "local": true}."""
+        self.places.want(lat, lon)
+        return {"elements": self.index.search(q, lat, lon), "places": self.places.search(q, lat, lon), "local": True}
+
+    def search(self, q, lat, lon):
+        """(text, cached): the towns and stops on this computer first, the geocoder's (one request, ~1 s) after them; the
+        slow map database only when neither knows the name."""
+        local = self.local_search(q, lat, lon)
+        try:
+            text, cached = self.geocode(q, lat, lon)
+            geo = json.loads(text)
+        except (RuntimeError, ValueError) as e:
+            say(f"search: {e}; what is on this computer only")
+            geo, cached = {}, True
+        out = {"elements": merge_elements(local["elements"], geo.get("elements") or []),
+               "places": merge_places(local["places"], geo.get("places") or []),
+               "source": geo.get("source") or "local"}
+        if not out["elements"] and not out["places"]:
+            return self.get(search_key(q, lat, lon), search_query(q, lat, lon))
+        return json.dumps(out, separators=(",", ":"), ensure_ascii=False), cached
+
+    def towns(self, lat, lon):
+        """(text, cached): the towns round a point from the GeoNames files (downloaded the first time, ~2 s), else Overpass."""
+        if self.places.enabled and self.places.ensure(lat, lon) and self.places.ready(lat, lon):
+            return json.dumps({"towns": self.places.towns(lat, lon), "source": "geonames"}, separators=(",", ":"),
+                              ensure_ascii=False), True
+        c = TOWNS_CELL_DEG
+        slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
+        return self.get(towns_key(lat, lon), towns_query(slat, slon), post=slim_towns)
 
     def load_index(self):
         """Index the cache folder (call from a thread at start: it can hold many answers)."""
@@ -949,9 +1273,7 @@ def make_handler(service, port):
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
                         return self.fail(400, "lat / lon out of range")
-                    c = TOWNS_CELL_DEG
-                    slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
-                    text, cached = service.get(towns_key(lat, lon), towns_query(slat, slon), post=slim_towns)
+                    text, cached = service.towns(lat, lon)
                 elif u.path == "/v1/search":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
@@ -959,16 +1281,10 @@ def make_handler(service, port):
                     if len(fold(q["q"][0]).strip()) < 2:
                         return self.fail(400, "search text too short")
                     if q.get("local"):
-                        found = service.index.search(q["q"][0], lat, lon)
-                        text, cached = json.dumps({"elements": found, "local": True}, separators=(",", ":"), ensure_ascii=False), True
+                        text, cached = json.dumps(service.local_search(q["q"][0], lat, lon), separators=(",", ":"),
+                                                  ensure_ascii=False), True
                     else:
-                        try:
-                            text, cached = service.geocode(q["q"][0], lat, lon)
-                            if not json.loads(text).get("elements") and not json.loads(text).get("places"):
-                                raise RuntimeError("the geocoder found nothing")
-                        except (RuntimeError, ValueError):
-                            # no geocoder, or it knows nothing of this name: the map database itself (slow)
-                            text, cached = service.get(search_key(q["q"][0], lat, lon), search_query(q["q"][0], lat, lon))
+                        text, cached = service.search(q["q"][0], lat, lon)
                 elif u.path == "/v1/lines":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
@@ -1003,11 +1319,14 @@ class QuietServer(ThreadingHTTPServer):
 
 
 def serve(port=PORT, cache_dir=None, service=None):
-    service = service or Service(Cache(cache_dir or default_cache_dir()))
+    if service is None:
+        cache = Cache(cache_dir or default_cache_dir())
+        service = Service(cache, places=Gazetteer(pathlib.Path(cache.dir).parent / "places"))
     httpd = QuietServer(("127.0.0.1", port), make_handler(service, port))
     httpd.daemon_threads = True
     say(f"{APP} {VERSION} listening on 127.0.0.1:{port}, cache {service.cache.dir}")
     threading.Thread(target=service.load_index, daemon=True).start()
+    threading.Thread(target=service.places.preload, daemon=True).start()
     return httpd, service
 
 

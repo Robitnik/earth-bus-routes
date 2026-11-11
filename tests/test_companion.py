@@ -8,6 +8,8 @@ import threading
 import time
 import unittest
 import urllib.error
+import zipfile
+import zlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "companion"))
@@ -101,31 +103,29 @@ GEO = {"elements": [{"type": "node", "id": 21, "lat": 50.58, "lon": 16.33, "tags
        "places": [{"name": "Broumov", "lat": 50.58, "lon": 16.33, "kind": "town", "state": "KHK", "country": "CZ"}], "source": "photon"}
 
 
+PHOTON_ALL = {"features": PHOTON_STOP["features"] + PHOTON_PLACE["features"] + PHOTON_STATION["features"]}
+
+
 class Geocoder(unittest.TestCase):
-    def fake(self, fail=()):
+    def fake(self, urls=None):
         def getter(url):
-            if "bus_station" in url:
-                if "station" in fail:
-                    raise urllib.error.URLError("down")
-                return PHOTON_STATION
-            if "bus_stop" in url:
-                return PHOTON_STOP
-            return PHOTON_PLACE
+            if urls is not None:
+                urls.append(url)
+            return PHOTON_ALL
         return getter
 
-    def test_places_and_stops_from_three_small_requests(self):
-        r = d.geo_search("Broumov", 50.4157, 16.1626, getter=self.fake())
+    def test_places_and_stops_from_one_request(self):
+        urls = []
+        r = d.geo_search("Broumov", 50.4157, 16.1626, getter=self.fake(urls))
+        self.assertEqual(len(urls), 1)
+        for tag in ("osm_tag=place", "osm_tag=amenity%3Abus_station", "osm_tag=highway%3Abus_stop"):
+            self.assertIn(tag, urls[0])
         self.assertEqual(r["source"], "photon")
         names = [p["name"] + ":" + p["kind"] for p in r["places"]]
         self.assertEqual(names, ["Broumov:town", "Broumov:municipality"])       # no cadastral community, no duplicate, towns first
         self.assertEqual([e["tags"]["name"] for e in r["elements"]], ["Broumov, železniční stanice", "Broumov, nemocnice"])
         self.assertEqual(r["elements"][0]["tags"]["amenity"], "bus_station")
         self.assertEqual(r["elements"][1]["tags"]["highway"], "bus_stop")        # (the house is not a stop)
-
-    def test_a_failure_after_the_first_request_keeps_what_came(self):
-        r = d.geo_search("Broumov", 50.4157, 16.1626, getter=self.fake(fail=("station",)))
-        self.assertEqual(len(r["elements"]), 0)           # the places came; the stops request failed and the rest was not tried
-        self.assertTrue(r["places"])
 
     def test_all_failing_is_an_error(self):
         def getter(url):
@@ -143,7 +143,7 @@ class Geocoder(unittest.TestCase):
         d._photon_down_until = 0.0
         with self.assertRaises(RuntimeError):
             d.geo_search("x", 50.0, 16.0, getter=down)
-        self.assertEqual(len(calls), 1)                  # the first request failed: the other two were not tried
+        self.assertEqual(len(calls), 1)
         saved = d.photon_get
         d.photon_get = lambda url: calls.append("real") or {}
         try:
@@ -194,6 +194,107 @@ class Towns(unittest.TestCase):
         self.assertEqual([t["name"] for t in out], ["Hradec Králové", "Náchod", "Broumov", "Hlavňov"])
         self.assertEqual(out[2]["population"], 7500)
         self.assertEqual(out[3]["population"], 0)
+
+
+def geonames_zip(folder, name, rows):
+    """A GeoNames dump file of `rows` (name, lat, lon, code, population, country, alternates) in folder/name.zip."""
+    lines = []
+    for i, (nm, lat, lon, code, pop, cc, alt) in enumerate(rows):
+        f = [str(zlib.crc32(f"{nm}|{lat}|{lon}".encode())), nm, d.fold(nm), alt, str(lat), str(lon), "P", code, cc, "", "", "", "", "", str(pop), "", "", "", ""]
+        lines.append("\t".join(f))
+    with zipfile.ZipFile(pathlib.Path(folder) / f"{name}.zip", "w") as z:
+        z.writestr(f"{name}.txt", "\n".join(lines) + "\n")
+
+
+BASE = [("Náchod", 50.4167, 16.1629, "PPLA3", 20000, "CZ", "Nachod"), ("Kłodzko", 50.4346, 16.6612, "PPLA3", 27000, "PL", ""),
+        ("Pemba", -5.03, 39.75, "PPLA", 20000, "TZ", "Pol,Pemba Town"),
+        ("Praha", 50.088, 14.4208, "PPLC", 1165581, "CZ", "Prague,Prag")]
+CZ = [("Police nad Metují", 50.5369, 16.2335, "PPL", 4316, "CZ", ""), ("Machov", 50.4993, 16.2769, "PPL", 1109, "CZ", ""),
+      ("Hlavňov", 50.5555, 16.2562, "PPL", 0, "CZ", ""), ("Hlavňov", 49.5887, 15.4765, "PPL", 0, "CZ", ""),
+      ("Police", 50.62, 16.1, "PPLX", 0, "CZ", ""), ("Police", 49.92, 17.2, "PPL", 200, "CZ", ""),
+      ("Praha", 50.088, 14.4208, "PPLC", 1165581, "CZ", "")]
+PL = [("Kudowa-Zdrój", 50.4433, 16.2431, "PPL", 10000, "PL", "")]
+
+
+class Towns2(unittest.TestCase):
+    """GeoNames on this computer: towns found in milliseconds, the map of towns without Overpass."""
+
+    def gaz(self, tmp, fetched):
+        def fetch(url, dest):
+            name = url.rsplit("/", 1)[1][:-4]
+            fetched.append(name)
+            geonames_zip(tmp, name, {"cities15000": BASE, "CZ": CZ, "PL": PL}[name])
+        return d.Gazetteer(tmp, fetch=fetch)
+
+    def test_downloads_the_countries_round_and_finds_towns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fetched = []
+            g = self.gaz(tmp, fetched)
+            self.assertEqual(g.search("police", 50.53, 16.23), [])               # nothing yet
+            self.assertTrue(g.ensure(50.53, 16.23))
+            self.assertEqual(fetched, ["cities15000", "CZ", "PL"])               # Kłodzko is 30 km away: Poland too
+            self.assertTrue(g.ready(50.53, 16.23))
+            hits = g.search("police", 50.53, 16.23)
+            self.assertEqual(hits[0]["name"], "Police nad Metují")                 # (not the part of a town, PPLX)
+            self.assertEqual(hits[0]["kind"], "town")
+            self.assertEqual(g.search("nachod", 50.53, 16.23)[0]["name"], "Náchod")   # without accents
+            self.assertEqual(g.search("Prague", 50.53, 16.23)[0]["name"], "Praha")    # another language's name
+            self.assertEqual(g.search("hlavnov", 50.53, 16.23)[0]["lat"], 50.5555)    # the nearer of two
+            # the town you are in beats a village of exactly that name 100 km away, and a far town's other name
+            self.assertEqual(g.search("Police", 50.53, 16.23)[0]["name"], "Police nad Metují")
+            self.assertEqual(g.search("Pol", 50.53, 16.23)[0]["name"], "Police nad Metují")
+            self.assertEqual(g.search("suchy d", 50.53, 16.23), [])               # (no such place here: no error)
+            self.assertEqual(g.search("Prague", 50.53, 16.23)[0]["population"], 1165581)   # Prague kept after the CZ file
+            g.ensure(50.53, 16.23)
+            self.assertEqual(len(fetched), 3)                                     # kept: no second download
+            towns = [t["name"] for t in g.towns(50.53, 16.23)]
+            self.assertEqual(towns, ["Kłodzko", "Náchod", "Kudowa-Zdrój", "Police nad Metují", "Machov", "Hlavňov"])  # biggest first
+            self.assertNotIn("Praha", towns)                                      # 140 km away
+            self.assertEqual(g.towns(50.53, 16.23)[0]["kind"], "town")
+            # a fresh start finds the files without downloading
+            fetched2 = []
+            g2 = self.gaz(tmp, fetched2)
+            g2.preload()
+            self.assertEqual(fetched2, [])
+            self.assertTrue(g2.ready(50.53, 16.23))
+
+    def test_a_failed_download_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            def down(url, dest):
+                raise urllib.error.URLError("offline")
+            g = d.Gazetteer(tmp, fetch=down)
+            self.assertFalse(g.ensure(50.5, 16.2))
+            self.assertEqual(g.search("police", 50.5, 16.2), [])
+            self.assertFalse(d.Gazetteer(None).ensure(50.5, 16.2))
+
+    def test_search_puts_this_computer_first_and_needs_no_server(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fetched = []
+            g = self.gaz(pathlib.Path(tmp) / "places", fetched)
+            (pathlib.Path(tmp) / "places").mkdir()
+            g.ensure(50.53, 16.23)
+
+            def no_geocoder(q, lat, lon):
+                raise RuntimeError("photon: down")
+
+            def no_overpass(query):
+                raise AssertionError("the map database is not asked when the towns are known")
+            svc = d.Service(d.Cache(pathlib.Path(tmp) / "cache"), upstream=no_overpass, geocoder=no_geocoder, places=g)
+            text, _ = svc.search("Police", 50.53, 16.23)
+            out = json.loads(text)
+            self.assertEqual(out["places"][0]["name"], "Police nad Metují")
+            self.assertEqual(out["source"], "local")
+            loc = svc.local_search("mach", 50.53, 16.23)
+            self.assertEqual((loc["local"], loc["places"][0]["name"]), (True, "Machov"))
+            towns = json.loads(svc.towns(50.53, 16.23)[0])
+            self.assertEqual(towns["source"], "geonames")
+            # the geocoder's places come after ours, without the same town twice
+            svc2 = d.Service(d.Cache(pathlib.Path(tmp) / "cache2"), upstream=no_overpass, places=g,
+                             geocoder=lambda q, lat, lon: {"elements": [], "source": "photon", "places": [
+                                 {"name": "Police nad Metují", "lat": 50.537, "lon": 16.234, "kind": "town"},
+                                 {"name": "Police", "lat": 49.9, "lon": 17.2, "kind": "village"}]})
+            names = [p["name"] for p in json.loads(svc2.search("Police", 50.53, 16.23)[0])["places"]]
+            self.assertEqual(names, ["Police nad Metují", "Police"])
 
 
 class Progress(unittest.TestCase):
