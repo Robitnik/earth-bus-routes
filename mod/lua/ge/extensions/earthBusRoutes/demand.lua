@@ -119,6 +119,59 @@ function M.destination(route, w, central, i, hour, weekend, rand)
   return n
 end
 
+-- ---- shared stops (plan 007 T5) ----------------------------------------------------------------------------------------------
+-- The people of a stop belong to a LINE (a direction of it): each stop keeps, per line, when a bus of that line last took people
+-- and how many. A bus of the AI that has just served a stop leaves fewer waiting for the player of the same line, and the player
+-- leaves fewer for it; the people of another line are never in either's crowd. `book` is off (a no-op) until the fleet switches
+-- it on, so a trip without AI buses is exactly what it was.
+M.CELL_DEG = 0.0004                     -- ~ 44 m: the stops of a platform pair (both sides of a street) share a cell, neighbours are looked at too
+
+function M.newBook() return { active = false, cells = {} } end
+M.book = M.newBook()
+
+local function cellOf(lat, lon) return math.floor(lat / M.CELL_DEG + 0.5), math.floor(lon / M.CELL_DEG + 0.5) end
+
+-- one key per line and direction: a bus of 305 towards A takes no one of 305 towards B
+function M.lineKey(route)
+  local stops = route.stops or {}
+  local to = route.to or (stops[#stops] and stops[#stops].name) or ''
+  return tostring(route.ref or route.id or '?') .. '>' .. tostring(to)
+end
+
+-- a bus of `line` took `taken` people at the stop at (lat, lon) at `clock` (s)
+function M.markServed(book, lat, lon, line, clock, taken)
+  if not book or not book.active or not lat or not lon then return end
+  local cx, cy = cellOf(lat, lon)
+  local key = cx .. ',' .. cy
+  local cell = book.cells[key]
+  if not cell then cell = {} book.cells[key] = cell end
+  cell[line] = { at = clock, taken = taken or 0 }
+end
+
+-- The time (s) that people of `line` have been collecting at the stop at (lat, lon) when a bus comes at `clock`: `since` (the
+-- headway the caller counts) unless another bus of the line took them more recently (within the cell and its neighbours).
+function M.sharedSince(book, lat, lon, line, clock, since)
+  if not book or not book.active or not lat or not lon then return since end
+  local cx, cy = cellOf(lat, lon)
+  local best = since
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      local cell = book.cells[(cx + dx) .. ',' .. (cy + dy)]
+      local s = cell and cell[line]
+      if s and s.at <= clock and clock - s.at < best then best = math.max(0, clock - s.at) end
+    end
+  end
+  return best
+end
+
+-- keep the book small: what is older than an hour is forgotten
+function M.pruneBook(book, clock)
+  for k, cell in pairs(book.cells) do
+    for line, s in pairs(cell) do if s.at < clock - 3600 then cell[line] = nil end end
+    if next(cell) == nil then book.cells[k] = nil end
+  end
+end
+
 function M.capacity(info)
   local seats = (info and info.seats) or M.SEATS
   local standing = (info and info.standing) or M.STANDING

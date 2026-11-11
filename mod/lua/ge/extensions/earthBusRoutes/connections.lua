@@ -17,6 +17,13 @@ M.WIN_MIN = 8              -- the window of arrivals asked of the service, +- mi
 M.NEAR_M = 150             -- stops this near count as the same hub
 M.ANNOUNCE_M = 700         -- the message comes when the bus is this near the stop
 M.SPEED_M_S = 6.5
+M.LIVE_EXTRA_S = 180       -- a transfer bus that is physical but still not at the hub this long after its time: the timer decides
+
+-- Live transfers (plan 007 T5): fleetrun.lua sets M.live = { request(req) -> token|nil, status(token) -> 'pending' | 'live' | 'ready' |
+-- 'fallback' | 'gone', cancel(token) }. With a token the transfer is credited when the bus of the other line is physically standing
+-- at the hub with the doors open ('ready'), not when the clock says so; 'fallback' (or no provider, or no token) leaves the timer
+-- logic below exactly as it was.
+M.live = nil
 
 function M.enabled(t) return t.opts.transfers ~= false end
 
@@ -77,11 +84,19 @@ function M.offer(t, idx, eta)
     if after >= 0 and after <= M.MAX_AFTER_S then
       t.connOffers = t.connOffers + 1
       t.offered[idx] = { ref = a.ref, to = a.to, at = a.at, approx = a.approx, after = after }
+      M.requestLive(t, idx)
       return t.offered[idx]
     end
   end
   t.offered[idx] = false
   return nil
+end
+
+function M.requestLive(t, idx)
+  local live, item = M.live, t.offered[idx]
+  if not (live and item) then return end
+  local ok, tok = pcall(live.request, { ref = item.ref, to = item.to, at = item.at, idx = idx, stop = t.route.stops[idx], approx = item.approx })
+  if ok and tok then item.live = tok end
 end
 
 local function people(t, idx, item)
@@ -129,7 +144,7 @@ function M.arrive(t)
   if not item then return end
   local wait = item.at - t.clock
   if wait <= 0 or wait > M.MAX_WAIT_S then return end          -- it came before us, or too far off to wait for
-  t.hold = { ref = item.ref, at = item.at, approx = item.approx, people = people(t, idx, item), idx = idx, from = t.clock }
+  t.hold = { ref = item.ref, at = item.at, approx = item.approx, people = people(t, idx, item), idx = idx, from = t.clock, live = item.live }
   dispatch.say(t, 'connectionWait', { ref = item.ref, time = clockLabel(item.at) }, 'transfer')
 end
 
@@ -146,8 +161,16 @@ function M.step(t, dt, doorsOpen)
   M.announce(t)
   local h = t.hold
   if not h or t.phase ~= 'atStop' then return end
-  if t.clock >= h.at and doorsOpen then
-    waive(t, h.at)
+  local viaBus = false
+  if h.live and M.live then
+    local ok, state = pcall(M.live.status, h.live)
+    if not ok or state == 'fallback' or state == 'gone' or t.clock > h.at + M.LIVE_EXTRA_S then h.live = nil
+    elseif state == 'ready' then viaBus = true end
+  else
+    h.live = nil
+  end
+  if (h.live and viaBus or (not h.live and t.clock >= h.at)) and doorsOpen then
+    waive(t, h.live and t.clock or h.at)
     t.hold = nil
     t.connCount = t.connCount + 1
     t.boardLeft = (t.boardLeft or 0) + h.people
@@ -161,6 +184,7 @@ end
 function M.leave(t)
   local h = t.hold
   if not h then return end
+  if h.live and M.live then pcall(M.live.cancel, h.live) end
   waive(t, math.min(t.clock, h.at))
   t.hold = nil
   t.connCount = t.connCount + 1

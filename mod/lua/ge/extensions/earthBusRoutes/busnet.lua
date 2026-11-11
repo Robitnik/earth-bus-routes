@@ -314,6 +314,32 @@ local function matchStops(line, spec)
   return out
 end
 
+M.matchStops = matchStops
+
+-- The trip of line `ref` that is due at a station (spec as above) near `at` (s, the expected arrival with its delay): the best
+-- within `tol` seconds. Returns trip, stopIndex, eta or nil. (The fleet's live transfers: "line 360 arrives at the hub at 8:12".)
+function M.findArrival(net, spec, ref, at, tol)
+  tol = tol or 240
+  local best, bestI, bestEta, bestD
+  for _, id in ipairs(net.order) do
+    local line = net.lines[id]
+    if tostring(line.ref) == tostring(ref) then
+      local idx = matchStops(line, spec)
+      for _, t in ipairs(line.trips) do
+        if t.start - net.maxDelay > at + tol + 3600 then break end
+        for _, i in ipairs(idx) do
+          if i > 1 then                                           -- (a trip that begins here is not an arrival of a bus coming in)
+            local eta = t.start + t.arr[i] + t.delay
+            local d = math.abs(eta - at)
+            if d <= tol and (not bestD or d < bestD) then best, bestI, bestEta, bestD = t, i, eta, d end
+          end
+        end
+      end
+    end
+  end
+  return best, bestI, bestEta
+end
+
 -- The next departures of a station at `clock`: { { key, ref, colour, head, at (scheduled s), eta (expected s, with the delay),
 -- inS (s until eta), delay, state ('sched' not started | 'run' on its way | 'stop' standing here), next (the stop it is at or
 -- heading for, by name), physical } ... } by expected time, at most n. A trip that ends at the station has no departure.

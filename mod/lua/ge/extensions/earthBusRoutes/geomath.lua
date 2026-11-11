@@ -66,9 +66,20 @@ function M.alongCandidates(path, cum, lat, lon, maxOff, sepM)
   sepM = sepM or 80
   local n = #path - 1
   local offs, alongs = {}, {}
+  -- a segment whose box (grown by maxOff) misses the point is farther than maxOff: it cannot be a candidate, and its exact
+  -- distance is only needed when nothing is near at all (below). This keeps a long route cheap to search every half second.
+  local mLat = maxOff / (R * rad) * 1.05
+  local mLon = mLat / math.max(0.05, math.cos(lat * rad))
+  local lo, hi, loN, hiN = lat - mLat, lat + mLat, lon - mLon, lon + mLon
   for i = 1, n do
-    local off, t, len = M.pointSegment(lat, lon, path[i].lat, path[i].lon, path[i + 1].lat, path[i + 1].lon)
-    offs[i], alongs[i] = off, cum[i] + t * len
+    local a, b = path[i], path[i + 1]
+    local alat, blat, alon, blon = a.lat, b.lat, a.lon, b.lon
+    if (alat < lo and blat < lo) or (alat > hi and blat > hi) or (alon < loN and blon < loN) or (alon > hiN and blon > hiN) then
+      offs[i] = math.huge
+    else
+      local off, t, len = M.pointSegment(lat, lon, alat, alon, blat, blon)
+      offs[i], alongs[i] = off, cum[i] + t * len
+    end
   end
   local out = {}
   for i = 1, n do
@@ -82,6 +93,12 @@ function M.alongCandidates(path, cum, lat, lon, maxOff, sepM)
     end
   end
   if #out == 0 and n >= 1 then
+    for i = 1, n do
+      if offs[i] == math.huge then
+        local off, t, len = M.pointSegment(lat, lon, path[i].lat, path[i].lon, path[i + 1].lat, path[i + 1].lon)
+        offs[i], alongs[i] = off, cum[i] + t * len
+      end
+    end
     local best = 1
     for i = 2, n do if offs[i] < offs[best] then best = i end end
     out[1] = { along = alongs[best], off = offs[best] }
@@ -108,14 +125,16 @@ function M.pointAt(path, cum, m)
     local a, b = path[#path - 1], path[#path]
     return b.lat, b.lon, M.bearing(a.lat, a.lon, b.lat, b.lon)
   end
-  for i = 2, #path do
-    if cum[i] >= m then
-      local a, b = path[i - 1], path[i]
-      local seg = cum[i] - cum[i - 1]
-      local t = seg > 0 and (m - cum[i - 1]) / seg or 0
-      return a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t, M.bearing(a.lat, a.lon, b.lat, b.lon)
-    end
+  -- the first vertex at or past m, by bisection (cum never decreases): the route can have thousands of points
+  local lo, hi = 1, #path
+  while hi - lo > 1 do
+    local mid = math.floor((lo + hi) / 2)
+    if cum[mid] >= m then hi = mid else lo = mid end
   end
+  local a, b = path[hi - 1], path[hi]
+  local seg = cum[hi] - cum[hi - 1]
+  local t = seg > 0 and (m - cum[hi - 1]) / seg or 0
+  return a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t, M.bearing(a.lat, a.lon, b.lat, b.lon)
 end
 
 return M

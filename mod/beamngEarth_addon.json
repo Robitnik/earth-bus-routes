@@ -174,7 +174,27 @@
         "off"
       ],
       "default": "on",
-      "help": "The buses of the lines round you run to their timetables: moving dots on the map in the menu and a live board of the next departures at a station. Nothing is spawned in the world."
+      "help": "The buses of the lines round you run to their timetables: moving dots on the map in the menu and a live board of the next departures at a station. Nothing is spawned in the world by this option alone (see AI buses)."
+    },
+    {
+      "key": "aiBuses",
+      "label": "AI buses on the lines",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "A few real buses of the lines round you drive their routes by the timetable, stop at the stops and open their doors; a transfer you are asked to wait for becomes a bus you can see arrive. They are made and put away out of your sight. Needs 'Buses of the lines on the map'."
+    },
+    {
+      "key": "busFleet",
+      "label": "Number of AI buses",
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 6,
+      "help": "How many real AI buses are kept ready at most (0 = none). More buses need more of the computer."
     },
     {
       "key": "units",

@@ -122,7 +122,9 @@ local function sinceLast(t, i)
   local late = 0
   local sched = M.scheduledArrival(t, i)
   if sched then late = math.max(0, t.clock - sched) end
-  return headway + late
+  -- an AI bus of the same line that took the people of this stop a moment ago leaves fewer (demand.lua, shared stops)
+  local stop = t.route.stops[i]
+  return demand.sharedSince(demand.book, stop and stop.lat, stop and stop.lon, demand.lineKey(t.route), t.clock, headway + late)
 end
 
 local function makeWaiting(t)
@@ -179,6 +181,8 @@ local function depart(t)
   dispatch.leave(t, i)
   scoring.departed(t.score, early, t.lastBoard, t.lastAlight, math.max(0, t.boardLeft or 0))
   emit(t, 'departed', { index = i, stop = M.stop(t, i), early = early, boarded = t.lastBoard, alighted = t.lastAlight })
+  local here = M.stop(t, i)
+  if here then demand.markServed(demand.book, here.lat, here.lon, demand.lineKey(t.route), t.clock, t.lastBoard) end
   t.lastDeparture = t.clock
   t.departedStops = t.departedStops + 1
   t.idx = i + 1
