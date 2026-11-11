@@ -61,6 +61,12 @@
       <template v-if="res.lateTrips"> · {{ t("shiftres.late") }}: {{ res.lateTrips }}</template>
       · {{ t("shiftres.revenue") }}: {{ res.revenue.toFixed(2) }}
     </p>
+    <!-- the career (stage E): the shift's pay, a new rank, achievements -->
+    <p v-if="res.career" class="career-note">
+      <b v-if="res.career.earned">{{ t("res.credits", { n: res.career.earned }) }}</b>
+      <b v-if="res.career.rankUp">{{ t("res.rankUp", { rank: t("rank." + res.career.rankUp) }) }}</b>
+      <span v-for="id in res.career.unlocked" :key="id">★ {{ t("res.unlocked") }}: {{ t("ach." + id) }}</span>
+    </p>
     <ol class="trips">
       <li v-for="(tr, i) in res.trips" :key="i">
         <span class="plate" :style="{ background: tr.colour || '#4aa3df', color: ink(tr.colour) }">{{ tr.ref }}</span>
@@ -118,4 +124,5 @@ p { margin: 0; line-height: 1.4; }
   .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .g { font-size: 20px; min-width: 24px; text-align: center; color: var(--line); } }
 .small { font-size: 13px; }
+.career-note { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; font-size: 14px; b { color: var(--led, inherit); } }
 </style>

@@ -214,6 +214,7 @@ local function launch(plan, sp, depot)
   sh.base = { day = plan.day, ctx = plan.ctx, opts = plan.opts, vehicle = plan.vehicle, vehicleName = plan.vehicleName }
   sh.beganAt = S.markerClock or 0
   S.shift, S.shiftResult = sh, nil
+  pcall(main.careerSetShift, true)          -- the career (stage E): the shift pays at its end, not each trip
   if depot then
     local ok, err = world.teleport(depot.lat, depot.lon, depot.name)
     if not ok then
@@ -348,6 +349,14 @@ function M.finish(now)
   shift.finish(sh, now)
   local res = shift.result(sh)
   sh.layover, sh.run = nil, nil
+  pcall(main.careerSetShift, false)
+  if res.count > 0 then
+    local smooth = true
+    for _, tr in ipairs(res.trips) do if not tr.smooth then smooth = false end end
+    local okC, news = pcall(main.careerShiftDone, { hours = res.minutes / 60, trips = res.count, passengers = res.passengers,
+      punctuality = res.punctuality, grade = res.grade, revenue = res.revenue, smooth = smooth })
+    if okC then res.career = news end      -- { earned, unlocked, rankUp, rank } for the summary page
+  end
   S.shift, S.trip, S.starting = nil, nil, nil
   H.endClockAndGps()
   if res.count == 0 then
@@ -385,6 +394,7 @@ end
 function M.abandon()
   local sh = S.shift
   S.shift = nil
+  pcall(main.careerSetShift, false)
   if sh then
     sh.layover, sh.run = nil, nil
     if not S.trip and not S.starting then H.endClockAndGps() guihooks.trigger('EarthBusRoutesHud', { idle = true }) end

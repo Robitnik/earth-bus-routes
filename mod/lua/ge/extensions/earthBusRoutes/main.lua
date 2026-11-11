@@ -1535,6 +1535,10 @@ end
 
 local function finishTrip(t)
   local res = trip.result(t)
+  -- for the career's achievements: connections waited for (stage C) and the time won on the ghost (stage D, + = faster)
+  res.transfersWaited = res.counts and res.counts.connections or 0
+  local okGs, gs = pcall(ghostrun.state)
+  res.ghostDeltaSec = okGs and gs and gs.delta and -gs.delta or nil
   local record, previous, stats, careerNews = saveStats(t, res)
   local okGhost, ghostNew = pcall(ghostrun.finish, t, res)      -- a better trip replaces the ghost (also in a shift)
   if shiftrun.onTripFinished(t, res) then return end          -- a shift takes the trip over: the dispatcher, not the result page

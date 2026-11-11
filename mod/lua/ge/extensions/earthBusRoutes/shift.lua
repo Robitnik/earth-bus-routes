@@ -151,6 +151,7 @@ function M.record(route, res, info)
     points = res.points or 0, grade = res.grade or 'D', passengers = res.passengers or 0, revenue = res.revenue or 0,
     punctuality = (res.parts and res.parts.punctuality) or 1, served = res.served or 0, planned = res.planned or 0, missed = res.missed or 0,
     minutes = info.minutes or 0, late = info.late or 0, notes = #(res.notes or {}),
+    smooth = (res.parts and res.parts.comfort or 0) >= 0.999,
   }
 end
 

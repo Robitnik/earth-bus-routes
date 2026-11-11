@@ -387,6 +387,22 @@ function T.a_short_shift_ends_when_no_trip_fits_and_shows_the_summary()
   cleanup()
 end
 
+-- the career (stage E): a trip in a shift is not paid on its own; the shift pays at its end and counts for the rank
+function T.a_finished_shift_pays_the_career_once()
+  local m, env, r = setup({ opts = { timeScale = 30 } })
+  local profile
+  _G.jsonWriteFile = function(path, data) if tostring(path):find('profile') then profile = data end return true end
+  openRoute(m, env, r)
+  m.uiStartShift(60, false)
+  assert(driveTrip(m, env, r.stops))
+  local res = m.model().shift.result
+  assert(res and res.count == 1, 'the shift is over')
+  assert(profile and profile.shifts and profile.shifts.count == 1 and profile.shifts.trips == 1, 'the shift is in the profile')
+  assert(res.career and res.career.earned and res.career.earned > 0, 'the summary shows the pay: ' .. tostring(res.career))
+  assert(profile.credits == res.career.earned, 'paid once, by the shift, not by its trip too: ' .. tostring(profile.credits))
+  cleanup()
+end
+
 function T.cancelling_a_trip_ends_the_shift_and_keeps_the_trips_done()
   local m, env, r = setup()
   openRoute(m, env, r)

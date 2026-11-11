@@ -4,7 +4,9 @@ local T = {}
 -- every module of the mod loads (a syntax error or a missing global at load time shows here, not in the game)
 function T.all_modules_load()
   H.reset()
-  for _, n in ipairs({ 'geomath', 'osm', 'schedule', 'demand', 'scoring', 'http', 'datasvc', 'trip', 'menu', 'world', 'main' }) do
+  for _, n in ipairs({ 'geomath', 'osm', 'schedule', 'demand', 'scoring', 'http', 'datasvc', 'trip', 'menu', 'world', 'main',
+    'builder', 'markers', 'quick', 'cabin', 'shift', 'shiftrun', 'connections', 'dispatch', 'ghost', 'ghostrun', 'career', 'careersvc',
+    'speedlimit', 'rules' }) do
     package.loaded['earthBusRoutes/' .. n] = nil
     local ok, m = pcall(require, 'earthBusRoutes/' .. n)
     assert(ok, n .. ': ' .. tostring(m))

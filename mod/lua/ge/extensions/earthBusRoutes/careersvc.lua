@@ -73,6 +73,8 @@ function M.finish(t, res, full)
     points = res.points, grade = res.grade, passengers = res.passengers }
   rec.at = os and os.time and os.time() or 0
   rec.inShift = M.inShift == true
+  rec.transfersWaited = res.transfersWaited or rec.transfersWaited
+  rec.ghostDeltaSec = res.ghostDeltaSec or rec.ghostDeltaSec
   local out = career.recordTrip(p, rec, { light = full == false })
   st.run, st.cache = nil, nil
   career.save(M.io.write, M.PATH, p)
