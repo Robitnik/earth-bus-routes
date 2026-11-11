@@ -450,6 +450,17 @@ class Timetables(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             svc.gtfs_route(d.GTFS_ROUTE + 999)
 
+    def test_an_offline_timetable_route_never_asks_the_router(self):
+        asked = []
+        svc = self.service(lambda q: "{}", router=lambda pts: asked.append(pts) or json.dumps(d.straight_path(pts)))
+        out = json.loads(svc.gtfs_route(d.GTFS_ROUTE + 1, offline=True))
+        way = [m for m in out["elements"][0]["members"] if m["type"] == "way"][0]
+        self.assertEqual((asked, len(way["geometry"])), ([], 3), "straight between its stops, no request")
+        svc.gtfs_route(d.GTFS_ROUTE + 1)                                      # the player opens it: the road is asked and kept
+        n = len(asked)
+        json.loads(svc.gtfs_route(d.GTFS_ROUTE + 1, offline=True))
+        self.assertEqual(len(asked), n, "then the kept road is used, still no request")
+
     def test_local_search_adds_timetable_stops_but_not_a_second_copy(self):
         svc = self.service(lambda q: "{}")
         out = svc.local_search("alpha", 50.0, 16.0)
@@ -930,6 +941,26 @@ class Http(unittest.TestCase):
         s, j = self.get("/v1/route?id=6962840")
         self.assertEqual(s, 200)
         self.assertEqual(j["data"]["elements"][0]["type"], "relation")
+
+    def test_a_kept_route_never_asks_a_public_server(self):
+        # 0.10.1: the mod's background loads (the moving buses) ask with cached=1 and must never queue for Overpass
+        calls = []
+
+        def upstream(query):
+            calls.append(query)
+            return ROUTE
+
+        Http.svc.upstream, saved = upstream, Http.svc.upstream
+        try:
+            s, j = self.get("/v1/route?id=777001&cached=1")
+            self.assertEqual((s, calls), (404, []), "not on this computer: no request")
+            self.assertEqual(self.get("/v1/route?id=777001")[0], 200)          # the player asks: fetched and kept
+            n = len(calls)
+            s, j = self.get("/v1/route?id=777001&cached=1")
+            self.assertEqual((s, j["data"]["elements"][0]["type"], len(calls)), (200, "relation", n))
+        finally:
+            Http.svc.upstream = saved
+        self.assertIn("routecached", d.FEATURES)
 
     def test_info_lists_features(self):
         self.assertEqual(self.get("/v1/info")[1]["features"], d.FEATURES)

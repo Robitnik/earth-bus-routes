@@ -17,14 +17,14 @@ M.MOVE_M = 1000                 -- the net is built again when the player is thi
 M.REFRESH_S = 300               -- ... or this old (real seconds)
 M.RETRY_S = 20                  -- after a refresh that found nothing
 M.TICK_S = 1                    -- positions are computed this often
-M.PUBLISH_S = 2                 -- the open menu gets fresh positions this often
+M.PUBLISH_S = 3                 -- the open menu gets fresh positions this often (a small event, not the whole model)
 M.RADIUS_M = 3000               -- the buses published are those this near the player
 M.MAX_LINES = 30                -- routes loaded for the net (each one of the timetables is a road the service asks the routing servers for)
 M.MAX_BUSES = 80
 M.PARALLEL = 2                  -- routes loaded at once
 M.SWAP_S = 8                    -- a half built net replaces the old one after this long
 
-local S, H                      -- main.lua's state and the functions it lends (publish)
+local S, H, main                -- main.lua's state, the functions it lends (publish) and its module
 local st = { net = nil, job = nil, t = 0, tick = 0, publishT = 0, builtAt = nil, center = nil, buses = nil, clock = nil, failedAt = nil }
 
 local function enabled() return (S.opts.busNet or 'on') ~= 'off' end
@@ -83,20 +83,20 @@ local function pump(job)
     local route = S.routes[id]
     if route then
       pcall(addRoute, job, route)
-    else
+    elseif datasvc.has('routecached') == true then
+      -- only what the service keeps on this computer: a background load never waits for a public server, so it never queues
+      -- in front of the route the player asked for (0.10.0 queued 30 of them: five minutes). The road may be rough (straight
+      -- between stops whose road was never asked for): kept for the dots only, never in S.routes the trips use.
       job.inflight = job.inflight + 1
-      datasvc.route(id, function(data)
+      datasvc.routeKept(id, function(data)
         job.inflight = job.inflight - 1
         if job.dead then return end
         if data then
           local ok, r = pcall(osm.parseRoute, data)
-          if ok and r then
-            S.routes[id] = S.routes[id] or r
-            pcall(addRoute, job, r)
-          end
+          if ok and r then pcall(addRoute, job, r) end
         end
-      end, true)
-    end
+      end)
+    end                                    -- (an older service: only the routes already loaded)
   end
 end
 
@@ -248,7 +248,7 @@ function M.frame(dt)
   st.publishT = st.publishT + M.TICK_S
   if datasvc.watching and st.publishT >= M.PUBLISH_S and st.net and (S.screen == 'nearby' or S.screen == 'lines') then
     st.publishT = 0
-    H.publish()
+    M.sendLive()
   end
 end
 
@@ -257,6 +257,13 @@ function M.net() if enabled() then return st.net end end
 function M.clock() return st.clock end
 
 function M.onTeleport() st.builtAt = -1e9 end
+
+-- The moving dots and the board go to the open menu as a small event of their own: sending the whole model (hundreds of map
+-- stops) every few seconds made the menu stutter (0.10.0)
+function M.sendLive()
+  local spec = main and main.boardSpec and main.boardSpec() or nil
+  guihooks.trigger('EarthBusRoutesBuses', { buses = M.buses(), busNet = M.info(), board = M.boardModel(spec) })
+end
 
 -- ---- attach ----------------------------------------------------------------------------------------------------------------------
 
@@ -271,7 +278,7 @@ local function guard(name, fn, default)
 end
 
 function M.attach(mainModule, state, host)
-  S, H = state, host
+  S, H, main = state, host, mainModule
   M.frame = guard('frame', M.frame, nil)
   M.buses = guard('buses', M.buses, nil)
   M.info = guard('info', M.info, nil)

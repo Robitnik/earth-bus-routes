@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1
+
+- **No more five-minute waits for a route.** The moving buses of 0.10.0 loaded up to 30 lines in the background, and the data service asks the public servers one at a time, so the route you picked waited behind them (300 s and more). Background loads now take only what the service keeps on this computer (a timetable line whose road was never asked for moves straight between its stops on the map); they never ask a public server.
+- **The open menu no longer stutters.** The moving dots and the departure board were sent with the whole menu (hundreds of map stops) every 2 seconds; they now come as a small update of their own every 3 seconds.
+- The departure board on a station's lines page sits below the lines instead of squeezing them into a strip.
+- Data service 0.10.1 (update it too: `/v1/route?id=..&cached=1`).
+
 ## 0.10.0
 
 A big one: shifts, a career, events on the road, a ghost, driving rules, and real buses of the lines (experimental, off by default). Everything new has its switch in the add-on settings.

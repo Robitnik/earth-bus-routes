@@ -95,6 +95,9 @@ end
 function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 -- low: a background load (the virtual bus network): an urgent request of the player may cancel it
 function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id), cb, low and { low = true } or nil) end
+-- a route only if the service has it on this computer (never a request to a public server; service 0.10.1+): for the
+-- background loads, which must not queue in front of what the player asked for
+function M.routeKept(id, cb) M.get(('/v1/route?id=%d&cached=1'):format(id), cb, { fast = true, total = 10 }) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
 function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end

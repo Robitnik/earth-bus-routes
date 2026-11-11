@@ -253,7 +253,6 @@
           </div>
           <div v-if="s.loading === 'route'" class="loading"><span class="spin"></span><div><b>{{ t("lines.loading") }}</b><div class="muted">{{ t("lines.loadingHint") }}</div></div></div>
           <div v-if="s.error" class="notice bad"><p>{{ t("err.generic", { e: s.error }) }}</p></div>
-          <DepartureBoard v-if="s.board" :board="s.board" class="station-board" />
           <div class="tabs station-tabs" role="tablist">
             <button v-for="k in TABS" :key="k" role="tab" :aria-selected="curTab === k" :class="{ on: curTab === k }" @click="call('uiSetTab', k)">
               {{ t("tabs." + k) }}<span class="badge" :class="{ zero: !tabCount(k) }">{{ tabCount(k) }}</span>
@@ -273,6 +272,8 @@
                 </div>
               </div>
             </div>
+            <!-- (inside the list's scroll: it no longer squeezes the lines into a strip, 0.10.0) -->
+            <DepartureBoard v-if="s.board" :board="s.board" class="station-board" />
           </div>
         </section>
 
@@ -478,6 +479,13 @@ import { lang, setLang, t, noteText } from "./i18n.js"
 
 const events = useEvents()
 events.on("EarthBusRoutesState", onState)
+// the moving buses and the live board come on their own, small and often (the whole model only when something changed)
+events.on("EarthBusRoutesBuses", d => {
+  if (!state.value || !d) return
+  state.value.buses = d.buses
+  state.value.busNet = d.busNet
+  state.value.board = d.board
+})
 
 const PARTS = ["punctuality", "service", "comfort", "safety"]
 const rootEl = ref(null)
@@ -747,7 +755,7 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .career-note { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 14px; .earned { font-weight: 700; color: var(--led); } .ach-new { font-weight: 700; } }
 .bus-note { display: flex; align-items: center; gap: 8px; margin: 0; }
 .bus-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--led); box-shadow: 0 0 0 2px #0b1519; flex: none; }
-.station-board { margin: 4px 0 10px; }
+.station-board { margin: 6px 0 4px; flex: none; }
 .map-big { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
 .map-head { display: flex; align-items: center; gap: 12px; .map-town { flex: 1; font-size: 18px; } .btn { padding: 6px 12px; } }
 .map-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2);

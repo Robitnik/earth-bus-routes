@@ -27,6 +27,8 @@ local function setup(opts)
       end
       cb(data, {})
     end,
+    -- the background loads ask only for what the service keeps (0.10.1): never a public server
+    routeKept = function(id, cb) env.kept = (env.kept or 0) + 1 return env.ds.route(id, cb, true) end,
     departures = function(lat, lon, t, day, mins, cb)
       env.depAsked = env.depAsked + 1
       env.depArgs = { lat = lat, lon = lon, t = t, day = day, mins = mins }
@@ -39,6 +41,7 @@ local function setup(opts)
     options = function() return env.opts end, navigate = function() end,
     toast = function(text) env.toasts[#env.toasts + 1] = text end,
   }, { __index = function() return function() end end })
+  env.ds = ds
   package.loaded['earthBusRoutes/datasvc'] = ds
   package.loaded['earthBusRoutes/world'] = world
   package.loaded['earthBusRoutes/busnetrun'] = nil
@@ -46,7 +49,7 @@ local function setup(opts)
   _G.jsonReadFile = function() error('no file') end
   _G.jsonWriteFile = function() return true end
   local last
-  _G.guihooks = { trigger = function(name, data) if name == 'EarthBusRoutesState' then last = data end end }
+  _G.guihooks = { trigger = function(name, data) if name == 'EarthBusRoutesState' then last = data elseif name == 'EarthBusRoutesBuses' then env.live = data end end }
   local m = H.load('mod/lua/ge/extensions/earthBusRoutes/main.lua')
   m.onExtensionLoaded()
   m.onBeamNGEarthWorldReady()
@@ -142,6 +145,19 @@ function T.a_board_for_the_station_on_screen()
   for i = 2, #board.rows do assert(board.rows[i].time >= board.rows[i - 1].time or true) end
   assert(busnetrun.boardModel(nil) == nil)
   assert(model().board == nil, 'no station on screen: no board')
+  cleanup()
+end
+
+
+-- 0.10.1: the background loads never wait for a public server, the dots go to the menu as a small event of their own
+function T.background_loads_ask_only_for_kept_routes_and_the_dots_come_as_a_small_event()
+  local m, model, env, frames = setup({})
+  frames(6)
+  assert((env.kept or 0) >= 1, 'only kept routes are asked for')
+  for _, r in ipairs(env.routeAsked) do assert(r.low == true, 'a background load') end
+  m.uiOpen()
+  frames(4)
+  assert(env.live and env.live.buses and env.live.busNet, 'the live event carries the dots and the net')
   cleanup()
 end
 
