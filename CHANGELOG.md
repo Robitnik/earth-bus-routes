@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.8.0 (not released yet)
+## 0.9.0 (not released yet)
+
+- **Stations and stops on the map.** The Map tab shows every stop round you as a dot; bus stations and the busiest stops get a chip with their name. A town's chip brings the map closer, with a chip for each of its stops ("‹ Whole map" goes back, "Its stations as a list" is the old list). Pick a stop or a station: its lines are shown, with **Route there (GPS)**, **Teleport** and **Lines here** (its From here / To here / Through tabs).
+- The stops come from the data service's own data (the timetables and every stop it has seen): 20 ms for 25 km, nothing asked of the public servers.
+- Data service 0.9.0 (update it on the Add-ons page too): `/v1/mapstops`; the timetable index has the line numbers of each stop (built again once, about a minute).
+
+## 0.8.0
 
 - **Every bus line of the country, with its real timetable (Czechia first).** The data service downloads the national timetable register once (CIS JŘ through the JrUtil project: 13 000 lines, 37 000 stops; 124 MB, about a minute to download and prepare, shown in the progress line), keeps it on this computer and refreshes it weekly. Lines the map lacks now appear: at Police nad Metují bus station 361 and 375 (and 360, 363, 305, each both ways) are listed under From here / To here / Through. A line made from the timetable has all its stops in the right order; the road through them comes from the routing server.
 - **The real timetable is used**: the departures of the line on that weekday (the first shown is the real first bus) and the time at every stop, instead of the generated ones. A "Real timetable" badge marks such a line. The made-up opposite direction of a line is still generated.

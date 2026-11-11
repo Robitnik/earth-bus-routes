@@ -86,6 +86,8 @@ end
 -- the cities, towns and villages round a point (the map of towns)
 function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
+-- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
+function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
 
 local function startNext()

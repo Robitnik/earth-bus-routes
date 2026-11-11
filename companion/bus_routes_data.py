@@ -16,6 +16,8 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
   GET /v1/towns?lat=..&lon=..           the cities, towns and villages within 40 km of a point (for the map; from GeoNames
                                         files kept on this computer, else Overpass)
   GET /v1/gtfs?lat=..&lon=..            the state of the national timetables (downloads them in the background the first time)
+  GET /v1/mapstops?lat=..&lon=..&r=..   the stations and stops within r metres (at most 30 km) for the map: name, place, kind
+                                        (station / stop) and the line numbers calling there; from this computer only
   GET /v1/progress                      what the service is waiting for right now (for a progress bar)
   GET /v1/lines?ref=..&lat=..&lon=..    the bus lines with this number within 40 km (&local=1 likewise)
   GET /v1/status                        what it did lately (for the Add-ons page's log)
@@ -43,7 +45,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.8.0"
+VERSION = "0.9.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -67,7 +69,7 @@ PHOTON_COOLDOWN_S = 60          # after a failure the geocoder is left alone thi
 _photon_down_until = 0.0
 PLACE_KINDS = {"city": 5, "town": 4, "municipality": 3, "village": 3, "borough": 2, "suburb": 2, "hamlet": 2, "quarter": 1,
                "neighbourhood": 1, "locality": 1}
-FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer", "gtfs"]
+FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer", "gtfs", "mapstops"]
 STATIONS_M = 25000
 STATIONS_CELL_DEG = 0.05
 OSRM = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"]
@@ -977,6 +979,7 @@ GTFS_FEEDS = {
     # from OpenStreetMap (ODbL) and open data of towns (CC BY / CC BY-SA / CC0).
     "CZ": {"url": "https://data.jr.ggu.cz/results/latest/JDF_merged_GTFS.zip", "label": "CIS JR (JrUtil)", "mb": 130},
 }
+GTFS_SCHEMA = "2"                    # the index's layout: an index of another layout is built again
 GTFS_DAYS = 28                       # the days from the build day that the index knows the running trips of
 GTFS_REFRESH_S = 7 * 86400
 GTFS_MAX_BYTES = 600 * 1024 * 1024
@@ -1149,17 +1152,18 @@ def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None):
         tmp.unlink()
     db = sqlite3.connect(str(tmp))
     db.executescript("""
-        CREATE TABLE stops(sid TEXT PRIMARY KEY, name TEXT, fname TEXT, lat REAL, lon REAL);
+        CREATE TABLE stops(sid TEXT PRIMARY KEY, name TEXT, fname TEXT, lat REAL, lon REAL, refs TEXT);
         CREATE TABLE patterns(pid INTEGER PRIMARY KEY, ref TEXT, name TEXT, agency TEXT, head TEXT, n INTEGER,
                               stops TEXT, offs TEXT, trips INTEGER);
         CREATE TABLE sp(sid TEXT, pid INTEGER, pos INTEGER);
         CREATE TABLE deps(pid INTEGER, start INTEGER, mask INTEGER);
         CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);
     """)
-    used = set()
+    used = {}                                      # stop -> the line numbers calling there
     for (rid, stops), (pid, offs, head) in patterns.items():
         ref, lname, agency = routes[rid]
-        used.update(stops)
+        for st in stops:
+            used.setdefault(st, set()).add(ref)
         db.execute("INSERT INTO patterns VALUES (?,?,?,?,?,?,?,?,?)",
                    (pid, ref, lname, agency, head, len(stops), ",".join(stops), ",".join(map(str, offs)), counts.get(pid, 0)))
         db.executemany("INSERT INTO sp VALUES (?,?,?)", [(s, pid, k) for k, s in enumerate(stops)])
@@ -1175,12 +1179,13 @@ def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None):
         except ValueError:
             continue
         name = col(ix, row, "stop_name")
-        db.execute("INSERT INTO stops VALUES (?,?,?,?,?)", (sid, name, fold_words(name), lat, lon))
+        db.execute("INSERT INTO stops VALUES (?,?,?,?,?,?)", (sid, name, fold_words(name), lat, lon, ",".join(sorted(used[sid]))))
         n_stops += 1
     db.executescript("CREATE INDEX stops_lat ON stops(lat); CREATE INDEX sp_sid ON sp(sid); CREATE INDEX sp_pid ON sp(pid);"
                      "CREATE INDEX deps_pid ON deps(pid); CREATE INDEX patterns_ref ON patterns(ref);")
     db.execute("INSERT INTO meta VALUES ('today', ?)", (today.strftime("%Y%m%d"),))
     db.execute("INSERT INTO meta VALUES ('days', ?)", (str(days),))
+    db.execute("INSERT INTO meta VALUES ('schema', ?)", (GTFS_SCHEMA,))
     db.commit()
     db.close()
     os.replace(tmp, db_path)
@@ -1205,6 +1210,7 @@ class Gtfs:
         self.failed = {}
         self._lock = threading.RLock()       # one reader at a time (the connections are shared), and a rebuild swaps under it
         self._building = set()
+        self.old = set()                     # countries whose index has an older layout (built again)
 
     @property
     def enabled(self):
@@ -1228,9 +1234,14 @@ class Gtfs:
                 old.close()
             try:
                 db = sqlite3.connect(str(self._path(cc)), check_same_thread=False)
-                db.execute("SELECT 1 FROM meta LIMIT 1")
+                row = db.execute("SELECT v FROM meta WHERE k='schema'").fetchone()
             except sqlite3.Error as e:
                 say(f"timetables: {cc} unreadable: {e}")
+                return False
+            if not row or row[0] != GTFS_SCHEMA:
+                db.close()
+                self.old.add(cc)
+                say(f"timetables: {cc} is of an older layout; it is built again")
                 return False
             self.dbs[cc] = db
             self.state[cc] = {"state": "ready", "pct": 1.0}
@@ -1242,7 +1253,7 @@ class Gtfs:
 
     def stale(self, cc):
         p = self._path(cc)
-        return not p.is_file() or self.clock() - p.stat().st_mtime > GTFS_REFRESH_S
+        return cc in self.old or not p.is_file() or self.clock() - p.stat().st_mtime > GTFS_REFRESH_S
 
     def want(self, countries):
         """Start getting (or refreshing) the feeds of these countries, in the background; those without a feed are skipped."""
@@ -1274,9 +1285,16 @@ class Gtfs:
                 self.state[cc] = {"state": "indexing", "pct": round(pct, 3)}
                 ACTIVITY.update(token, mirror=2, stage="index", pct=int(pct * 100),
                                 label=f"timetables {cc}: indexing ({what}, {int(pct * 100)} %)")
-            r = build_gtfs_index(zip_path, self._path(cc), self.today(), progress=step)
+            fresh = self._path(cc).with_suffix(".new")
+            r = build_gtfs_index(zip_path, fresh, self.today(), progress=step)
             say(f"timetables: {cc} indexed: {r['stops']} stops, {r['patterns']} ways, {r['trips']} trips")
-            self._open(cc)
+            with self._lock:                     # (Windows cannot replace a file that is open: the old index is closed first)
+                db = self.dbs.pop(cc, None)
+                if db is not None:
+                    db.close()
+                os.replace(fresh, self._path(cc))
+                self.old.discard(cc)
+                self._open(cc)
         except (urllib.error.URLError, OSError, ValueError, TimeoutError, zipfile.BadZipFile, KeyError) as e:
             self.failed[cc] = self.clock()
             self.state[cc] = {"state": "failed", "error": f"{type(e).__name__}: {str(e)[:100]}", "pct": 0.0}
@@ -1359,6 +1377,20 @@ class Gtfs:
                                      "bus_routes:source": "gtfs", "bus_routes:trips": str(trips)}})
                 out["stops"] += [by_sid[s] for s in used]
             return out
+
+    def stops_around(self, lat, lon, radius):
+        """[(name, lat, lon, {line numbers})] of the stops within `radius` that some line calls at."""
+        dlat = radius / 110574.0
+        dlon = radius / (111320.0 * max(0.2, math.cos(math.radians(lat))))
+        out = []
+        with self._lock:
+            for db in self.dbs.values():
+                rows = db.execute("SELECT name, lat, lon, refs FROM stops WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?",
+                                  (lat - dlat, lat + dlat, lon - dlon, lon + dlon)).fetchall()
+                for name, la, lo, refs in rows:
+                    if _dist_m(lat, lon, la, lo) <= radius:
+                        out.append((name, la, lo, set((refs or "").split(",")) - {""}))
+        return out
 
     def stops_named(self, text, lat, lon, radius=SEARCH_M, limit=40):
         """[(sid, name, lat, lon, rowid)] whose name's words start with the words typed, nearest first."""
@@ -1667,6 +1699,58 @@ class Service:
                     elements.append(gtfs_node(row))
         return {"elements": elements, "places": self.places.search(q, lat, lon), "local": True}
 
+    MAP_SAME_M = 200          # stops of one name this near are one place on the map (its platforms)
+    MAP_STATION_M = 150       # a stop this near a bus station of the map is that station
+
+    def map_stops(self, lat, lon, radius, limit=600):
+        """{"stops": [{id, name, lat, lon, kind, lines: [numbers]}]} round a point, from this computer only (the timetables and
+        every stop this service has seen): bus stations first, then the stops with most lines; platforms of one stop are one."""
+        self.want_timetables(lat, lon)
+        places = []                                            # [name, lat, lon, refs, kind]
+        for name, la, lo, refs in (self.gtfs.stops_around(lat, lon, radius) if self.gtfs.ready() else []):
+            places.append([name, la, lo, set(refs), "stop"])
+        with self.index._lock:
+            seen = list(self.index.stops.values())
+        known = []
+        for it in seen:
+            if not _near(lat, lon, it["lat"], it["lon"], radius):
+                continue
+            tg = it["tags"]
+            if tg.get("amenity") == "bus_station" or (tg.get("public_transport") == "station"):
+                hit = None
+                for pl in places:
+                    if _dist_m(pl[1], pl[2], it["lat"], it["lon"]) <= self.MAP_STATION_M:
+                        hit = pl
+                        pl[0], pl[4] = it["name"], "station"           # the map's name of a bus station is the one people know
+                if hit is None:
+                    places.append([it["name"], it["lat"], it["lon"], set(), "station"])
+            else:
+                known.append(it)
+        if not self.gtfs.ready():                              # no timetables here: the stops this service has seen
+            for it in known:
+                places.append([it["name"], it["lat"], it["lon"], set(), "stop"])
+        merged, by_name, stations = [], {}, []
+        for pl in sorted(places, key=lambda x: (x[4] != "station", -len(x[3]))):
+            key = fold(pl[0])
+            same = None
+            for m in by_name.get(key, []) + (stations if pl[4] == "station" else []):
+                if _dist_m(m[1], m[2], pl[1], pl[2]) <= self.MAP_SAME_M:
+                    same = m
+                    break
+            if same is None:
+                merged.append(pl)
+                by_name.setdefault(key, []).append(pl)
+                if pl[4] == "station":
+                    stations.append(pl)
+            else:
+                same[3] |= pl[3]
+        merged.sort(key=lambda x: (x[4] != "station", -len(x[3]), _dist_m(lat, lon, x[1], x[2])))
+        def by_number(r):
+            return (int(re.match(r"\d*", r).group() or 10 ** 6), r)
+        out = [{"id": i + 1, "name": m[0], "lat": round(m[1], 6), "lon": round(m[2], 6), "kind": m[4],
+                "lines": sorted(m[3], key=by_number)[:24]} for i, m in enumerate(merged[:limit])]
+        return {"stops": out, "timetables": self.gtfs.ready()}
+
     def nearby(self, lat, lon):
         """(text, cached): the stops and lines around a point: OpenStreetMap's (kept per cell) with the timetables' lines
         merged in; the timetables alone while no map server answers."""
@@ -1916,6 +2000,12 @@ def make_handler(service, port):
                     c = STATIONS_CELL_DEG
                     slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
                     text, cached = service.get(stations_key(lat, lon), stations_query(slat, slon))
+                elif u.path == "/v1/mapstops":
+                    lat, lon = float(q["lat"][0]), float(q["lon"][0])
+                    r = min(30000.0, max(200.0, float(q.get("r", ["25000"])[0])))
+                    if not (-85 <= lat <= 85 and -180 <= lon <= 180):
+                        return self.fail(400, "lat / lon out of range")
+                    text, cached = json.dumps(service.map_stops(lat, lon, r), separators=(",", ":"), ensure_ascii=False), True
                 elif u.path == "/v1/towns":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):

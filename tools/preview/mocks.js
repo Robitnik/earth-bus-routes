@@ -170,7 +170,34 @@ const towns = [
   { id: 11, name: "Hlavňov", kind: "village", lat: 50.5198, lon: 16.2905 }, { id: 12, name: "Suchý Důl", kind: "village", lat: 50.5463, lon: 16.2561 },
   { id: 13, name: "Velké Poříčí", kind: "village", lat: 50.4397, lon: 16.1884 }, { id: 14, name: "Dobruška", kind: "town", lat: 50.2917, lon: 16.1598 },
 ]
+// stations and stops of the map (what /v1/mapstops gives round Police nad Metují)
+const mstop = (id, name, lat, lon, kind, lines) => ({ id, name, lat, lon, kind, lines })
+const mapStops = [
+  mstop(1, "Trutnov, autobusové nádraží", 50.5646, 15.9084, "station", ["101", "102", "211", "212"]),
+  mstop(2, "Náchod, autobusová stanice", 50.4171, 16.1608, "station", ["219", "300", "301", "302", "305"]),
+  mstop(3, "Broumov, železniční stanice", 50.5815, 16.3389, "station", ["305", "364", "371", "375"]),
+  mstop(4, "Hronov, žel.st.", 50.4797, 16.1823, "station", ["305", "340", "351", "375"]),
+  mstop(5, "Police n.Met.,aut.st.", 50.5351, 16.2328, "stop", ["305", "360", "361", "363", "375"]),
+  mstop(6, "Nové Město n.Met.,Na Rychtě", 50.3449, 16.1513, "stop", ["267", "305", "307", "308"]),
+  mstop(7, "Jaroměř,aut.st.", 50.3561, 15.9211, "stop", ["211", "305", "330", "620"]),
+  ...Array.from({ length: 60 }, (_, i) => mstop(10 + i, "Stop " + i, 50.33 + ((i * 37) % 100) / 400, 15.9 + ((i * 53) % 100) / 220, "stop", i % 5 ? ["305"] : [])),
+]
+const policeStops = [
+  mstop(1, "Police n.Met.,aut.st.", 50.5351, 16.2328, "stop", ["305", "360", "361", "363", "375"]),
+  mstop(2, "Police n.Met.,škola", 50.5364, 16.2369, "stop", ["360", "361", "363", "375"]),
+  mstop(3, "Police n.Met.,Ostašská", 50.5297, 16.2294, "stop", ["305", "363", "375"]),
+  mstop(4, "Police n.Met.,Nádražní", 50.5262, 16.2437, "stop", ["305", "361", "375"]),
+  mstop(5, "Police n.Met.,nákupní centrum", 50.5396, 16.2333, "stop", ["361"]),
+  mstop(6, "Bukovice", 50.5468, 16.2242, "stop", ["305", "363", "375"]),
+  mstop(7, "Velké Petrovice,hlavní silnice", 50.5199, 16.2125, "stop", ["305", "361", "375"]),
+  mstop(8, "Hlavňov,most", 50.5468, 16.2618, "stop", ["363"]),
+]
 Object.assign(MENU_STATES, {
-  map: { ...common2, screen: "nearby", stations, tab: "map", map: { towns } },
+  map: { ...common2, screen: "nearby", stations, tab: "map", map: { towns, stops: mapStops,
+    sel: { id: 5, name: "Police n.Met.,aut.st.", kind: "stop", dist: 12400, lat: 50.5351, lon: 16.2328,
+      lines: ["305", "360", "361", "363", "375"].map(r => ({ ref: r, colour: lines.find(l => l.ref === r)?.colour || "#d8e04a" })) } } },
+  maptown: { ...common2, screen: "nearby", stations, tab: "map", map: { towns, stops: mapStops, focus: { id: 7, name: "Police nad Metují", lat: 50.5351, lon: 16.2328, radius: 3500 },
+    focusStops: policeStops, sel: { id: 2, name: "Police n.Met.,škola", kind: "stop", dist: 12500, lat: 50.5364, lon: 16.2369,
+      lines: ["360", "361", "363", "375"].map(r => ({ ref: r, colour: "#d8e04a" })) } } },
   buildcities: { ...common2, screen: "build", stations, build: { ...build, showCities: true, cities: towns, cands: [] } },
 })

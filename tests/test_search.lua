@@ -287,6 +287,54 @@ function T.the_map_lists_the_towns_and_a_chip_opens_the_stations()
   cleanup()
 end
 
+-- The map shows the stations and stops (from the service's own data); a town's chip brings the map closer; a stop's chip
+-- offers the way there (GPS), a teleport, its lines.
+function T.the_map_shows_stops_and_a_stop_takes_you_there()
+  local m, model, env = setup({ features = { path = true, along = true, search = true, stations = true, ['local'] = true,
+    lines = true, towns = true, progress = true, mapstops = true } })
+  local ds = package.loaded['earthBusRoutes/datasvc']
+  local world = package.loaded['earthBusRoutes/world']
+  local asked, gps, tele = {}, nil, nil
+  ds.mapStops = function(lat, lon, r, cb)
+    asked[#asked + 1] = r
+    if r < 10000 then
+      cb({ stops = { { id = 1, name = 'Náchod, Pražská', lat = 50.418, lon = 16.16, kind = 'stop', lines = { '305' } } } })
+    else
+      cb({ stops = { { id = 1, name = 'Náchod, autobusová stanice', lat = 50.4157, lon = 16.1626, kind = 'station', lines = { '305', '309' } },
+                     { id = 2, name = 'Hronov, žel.st.', lat = 50.47, lon = 16.18, kind = 'stop', lines = {} } } })
+    end
+  end
+  world.gpsRoute = function(pts) gps = pts return true end
+  world.teleport = function(lat, lon, name) tele = { lat, lon, name } return true end
+  m.uiOpen()
+  m.uiMapOpen()
+  local mp = model().map
+  assert(mp.stops and #mp.stops == 2 and mp.stops[1].kind == 'station' and asked[1] == m.MAP_STOPS_M)
+  m.uiMapPick(1)
+  local sel = model().map.sel
+  assert(sel and sel.name == 'Náchod, autobusová stanice' and sel.dist < 50 and #sel.lines == 2 and sel.lines[1].colour)
+  m.uiMapGo('gps')
+  assert(gps and gps[1].name == 'Náchod, autobusová stanice', 'the GPS leads to the stop')
+  -- a town: closer, its own stops
+  m.uiMapFocus(3)
+  mp = model().map
+  assert(mp.focus and mp.focus.name == 'Náchod' and asked[2] == m.TOWN_STOPS_M and #mp.focusStops == 1 and mp.sel == nil)
+  m.uiMapPick(1)
+  assert(model().map.sel.name == 'Náchod, Pražská', 'the close-up list is the one picked from')
+  m.uiMapGo('teleport')
+  assert(tele and tele[3] == 'Náchod, Pražská')
+  -- a teleport that fails says so and stays
+  world.teleport = function() return false, 'no world' end
+  m.uiMapGo('teleport')
+  assert(model().map.actErr and model().map.actErr:find('no world'))
+  -- its lines: the station screen of that place
+  m.uiMapGo('lines')
+  assert(model().screen == 'lines' and model().station, 'the lines of the stop are shown')
+  m.uiMapUnfocus()
+  assert(model().map.focus == nil and model().map.sel == nil)
+  cleanup()
+end
+
 function T.towns_on_the_builder_map_and_a_chip_adds_the_main_station()
   local m, model, env = setup()
   m.uiOpen()

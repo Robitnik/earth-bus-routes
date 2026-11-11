@@ -124,12 +124,37 @@
 
             <!-- the map of towns -->
             <template v-if="tab === 'map'">
-              <p class="sub">{{ t("map.hint") }}</p>
+              <div v-if="s && s.map && s.map.focus" class="map-head">
+                <button class="btn ghost" @click="call('uiMapUnfocus')">‹ {{ t("map.all") }}</button>
+                <b class="map-town">{{ s.map.focus.name }}</b>
+                <button class="btn ghost" @click="townList">{{ t("map.asList") }}</button>
+              </div>
+              <p v-else class="sub">{{ t("map.hint") }}</p>
               <div v-if="s && s.map && s.map.busy" class="loading small"><span class="spin"></span><div><b>{{ t("map.loading") }}</b><div class="muted">{{ t("map.loadingHint") }}</div></div></div>
               <div v-else-if="s && s.map && s.map.err" class="notice bad"><p>{{ errText(s.map.err) }}</p><button class="btn" @click="openMap">{{ t("retry") }}</button></div>
               <div v-else-if="s && s.map && s.map.towns && !s.map.towns.length" class="empty"><b>{{ t("map.none") }}</b></div>
               <div v-if="s && s.map && s.map.towns && s.map.towns.length" class="map-big">
-                <MiniMap :places="s.map.towns" :you="s.pos" :points="[]" :cands="[]" :show-names="false" :label="t('map.tab')" @place="pickTown" />
+                <MiniMap :places="s.map.towns" :you="s.pos" :points="[]" :cands="[]" :show-names="false" :label="t('map.tab')"
+                         :map-stops="(s.map.focus ? s.map.focusStops : s.map.stops) || []" :focus="s.map.focus || null"
+                         :selected="s.map.sel ? s.map.sel.id : null"
+                         @place="id => call('uiMapFocus', id)" @stop="id => call('uiMapPick', id)" />
+              </div>
+              <div v-if="s && s.map && s.map.sel" class="map-sel">
+                <div class="map-sel-body">
+                  <div class="stop-name">{{ s.map.sel.name }}</div>
+                  <div class="stop-meta">
+                    <span class="tag">{{ t(s.map.sel.kind === "station" ? "map.station" : "map.stop") }}</span>
+                    <span v-if="s.map.sel.dist != null" class="dist">{{ dist(s.map.sel.dist) }}</span>
+                    <span v-for="c in s.map.sel.lines" :key="c.ref" class="plate" :style="{ background: c.colour, color: ink(c.colour) }">{{ c.ref }}</span>
+                    <span v-if="!s.map.sel.lines.length" class="muted">{{ t("map.noLines") }}</span>
+                  </div>
+                  <p v-if="s.map.actErr" class="act-err">{{ s.map.actErr === "gps" ? t("map.gpsFail") : t("map.teleportFail") }}</p>
+                </div>
+                <div class="map-sel-actions">
+                  <button class="btn go" @click="call('uiMapGo', 'gps')">{{ t("map.gps") }}</button>
+                  <button class="btn" @click="call('uiMapGo', 'teleport')">{{ t("map.teleport") }}</button>
+                  <button class="btn ghost" @click="mapLines">{{ t("map.linesHere") }}</button>
+                </div>
               </div>
             </template>
 
@@ -486,7 +511,8 @@ function remove(m) {
   sureTimer = setTimeout(() => { sure.value = null }, 3000)
 }
 function openMap() { tab.value = "map"; call("uiMapOpen") }
-function pickTown(id) { tab.value = "near"; call("uiMapPlace", id) }
+function townList() { const f = s.value && s.value.map && s.value.map.focus; if (f) { tab.value = "near"; call("uiMapPlace", f.id) } }
+function mapLines() { tab.value = "near"; call("uiMapGo", "lines") }
 function placeKind(pl) {
   const k = "find.kind." + pl.kind
   const v = t(k)
@@ -682,6 +708,11 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   input { flex: 1; min-width: 0; padding: 10px 14px; border: 0; border-radius: 10px; background: #0f1a20; color: var(--ink); font: inherit; font-size: 16px; box-shadow: inset 0 0 0 1px var(--hair);
     &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); } } }
 .map-big { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
+.map-head { display: flex; align-items: center; gap: 12px; .map-town { flex: 1; font-size: 18px; } .btn { padding: 6px 12px; } }
+.map-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2);
+  .map-sel-body { flex: 1; min-width: 220px; } .stop-name { font-size: 18px; } .stop-meta { flex-wrap: wrap; }
+  .map-sel-actions { display: flex; flex-wrap: wrap; gap: 8px; } .btn.go { font-size: 15px; padding: 10px 16px; }
+  .act-err { margin: 6px 0 0; color: var(--late); } }
 .places { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .place-chip { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 6px 14px; border: 0; border-radius: 99px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 800; font-size: 16px; line-height: 1.15; cursor: pointer;
   small { font-weight: 400; font-size: 11px; color: var(--muted); }

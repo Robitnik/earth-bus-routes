@@ -25,6 +25,13 @@
       <text v-if="hover === c.id" :x="c.x > W - 190 ? c.x - 10 : c.x + 10" :y="c.y - 8" class="tip" :text-anchor="c.x > W - 190 ? 'end' : 'start'">{{ short(c.name) }}</text>
     </g>
 
+    <!-- the stops of the map: a dot each; the busier ones (every one in a town's close-up) get a chip -->
+    <g v-for="d in stopPts" :key="'d' + d.id" class="mstop" :class="{ sel: selected === d.id }"
+       @click="emit('stop', d.id)" @mouseenter="hoverStop = d.id" @mouseleave="hoverStop = null">
+      <circle :cx="d.x" :cy="d.y" r="7" class="hit" />
+      <circle :cx="d.x" :cy="d.y" :r="d.kind === 'station' ? 4.2 : 2.8" class="dot" :class="d.kind" />
+    </g>
+
     <!-- you -->
     <g v-if="youDot" class="you"><circle :cx="youDot.x" :cy="youDot.y" r="15" class="halo" /><circle :cx="youDot.x" :cy="youDot.y" r="5" class="core" /></g>
 
@@ -33,6 +40,14 @@
       <rect :x="pl.x - pl.w / 2" :y="pl.y - pl.h / 2" :width="pl.w" :height="pl.h" :rx="pl.h / 2" class="chip" />
       <text :x="pl.x" :y="pl.y + pl.fs * 0.35" class="pl-name" :style="{ fontSize: pl.fs + 'px' }">{{ pl.name }}</text>
     </g>
+
+    <g v-for="c in stopChips" :key="'s' + c.id" class="schip" :class="[c.kind, { sel: selected === c.id }]" @click="emit('stop', c.id)">
+      <line :x1="c.x" :y1="c.y" :x2="c.ex" :y2="c.ey" class="stem" />
+      <rect :x="c.cx - c.w / 2" :y="c.cy - c.h / 2" :width="c.w" :height="c.h" :rx="c.kind === 'station' ? 3 : c.h / 2" class="chip" />
+      <text :x="c.cx" :y="c.cy + c.fs * 0.35" class="lbl" :style="{ fontSize: c.fs + 'px' }">{{ c.label }}</text>
+    </g>
+    <text v-if="hoverDot" :x="hoverDot.x > W - 190 ? hoverDot.x - 10 : hoverDot.x + 10" :y="hoverDot.y - 8" class="tip"
+          :text-anchor="hoverDot.x > W - 190 ? 'end' : 'start'">{{ short(hoverDot.name) }}</text>
 
     <!-- stations already chosen -->
     <g v-for="(p, i) in pointDots" :key="'p' + i" class="chosen">
@@ -44,7 +59,7 @@
 </template>
 
 <script setup>
-import { computed } from "vue"
+import { computed, ref } from "vue"
 
 const props = defineProps({
   points: { type: Array, default: () => [] },     // chosen stations: { lat, lon, name }
@@ -56,8 +71,12 @@ const props = defineProps({
   label: { type: String, default: "map" },
   places: { type: Array, default: () => [] },     // towns: { id, name, lat, lon, kind }
   you: { type: Object, default: null },           // where the player is: { lat, lon }
+  mapStops: { type: Array, default: () => [] },   // stations and stops of the map: { id, name, lat, lon, kind, lines }
+  focus: { type: Object, default: null },         // a town's close-up: { lat, lon, radius (m), name }
+  selected: { type: [Number, String], default: null },
 })
-const emit = defineEmits(["pick", "hover", "place"])
+const emit = defineEmits(["pick", "hover", "place", "stop"])
+const hoverStop = ref(null)
 
 const W = 460
 const H = 380
@@ -66,6 +85,12 @@ const PAD = 34
 const NEAR_M = 6000
 // what the map is fitted to: the route; while there is no road yet, the stations within a few km as well
 const all = computed(() => {
+  const f = props.focus
+  if (f) {
+    // a town's close-up: the square round it
+    const dLat = f.radius / 110574, dLon = f.radius / (111320 * Math.cos(f.lat * Math.PI / 180))
+    return [[f.lat - dLat, f.lon - dLon], [f.lat + dLat, f.lon + dLon]]
+  }
   const out = []
   for (const p of props.points) out.push([p.lat, p.lon])
   if (props.line) for (const p of props.line) out.push(p)
@@ -119,6 +144,7 @@ const youDot = computed(() => (props.you ? project(props.you.lat, props.you.lon)
 const FS = { city: 17, town: 14, village: 11.5 }
 const placeChips = computed(() => {
   const out = []
+  if (props.focus) return out                     // a close-up shows the town's stops, not the towns
   // the stations already chosen stand for their towns: their numbered markers and names, not a second label
   const boxes = pointDots.value.map(d => ({ x: d.x + 60, y: d.y, w: 150, h: 26 }))
   for (const p of props.places) {
@@ -130,6 +156,53 @@ const placeChips = computed(() => {
     if (boxes.some(b => Math.abs(b.x - x) < (b.w + w) / 2 + 2 && Math.abs(b.y - y) < (b.h + h) / 2 + 2)) continue
     boxes.push({ x, y, w, h })
     out.push({ id: p.id, name: p.name, kind: p.kind, x, y, w, h, fs })
+  }
+  return out
+})
+
+// the stops in the frame
+const stopPts = computed(() => props.mapStops
+  .map(s => ({ ...project(s.lat, s.lon), id: s.id, name: s.name, kind: s.kind, n: (s.lines || []).length }))
+  .filter(p => p.x > 4 && p.x < W - 4 && p.y > 4 && p.y < H - 4))
+const hoverDot = computed(() => (hoverStop.value == null ? null : stopPts.value.find(p => p.id === hoverStop.value) || null))
+// in a close-up the town's name is left out of its stops' ("Police n.Met.,škola" -> "škola")
+function chipLabel(name) {
+  name = String(name || "")
+  if (props.focus) {
+    const i = name.indexOf(",")
+    if (i > 0 && i < name.length - 2) name = name.slice(i + 1).trim()
+  }
+  return name.length > 22 ? name.slice(0, 21) + "…" : name
+}
+// chips by the dots: the chosen stop first, then bus stations, then the stops with most lines. A chip goes above its dot, else
+// below, else further off (a stem joins them); one with no free place is left out (its dot stays, its name shows on hover)
+const SPOTS = [[0, -1, 6], [0, 1, 6], [0, -1, 22], [0, 1, 22], [1, 0, 8], [-1, 0, 8], [0, -1, 40], [0, 1, 40]]
+const stopChips = computed(() => {
+  const boxes = placeChips.value.map(b => ({ x: b.x, y: b.y, w: b.w, h: b.h }))
+  const rank = p => (p.id === props.selected ? 0 : p.kind === "station" ? 1 : 2)
+  const cands = stopPts.value
+    .filter(p => props.focus || p.kind === "station" || p.n >= 4 || p.id === props.selected)
+    .sort((a, b) => rank(a) - rank(b) || b.n - a.n)
+  const out = []
+  const max = props.focus ? 40 : 24
+  const free = (cx, cy, w, h) => cx - w / 2 > 1 && cx + w / 2 < W - 1 && cy - h / 2 > 1 && cy + h / 2 < H - 1 &&
+    !boxes.some(b => Math.abs(b.x - cx) < (b.w + w) / 2 + 2 && Math.abs(b.y - cy) < (b.h + h) / 2 + 2)
+  for (const p of cands) {
+    if (out.length >= max) break
+    const label = chipLabel(p.name)
+    const fs = p.kind === "station" ? 12 : 11
+    const w = label.length * fs * 0.58 + 14
+    const h = fs + 8
+    for (const [dx, dy, gap] of SPOTS) {
+      const cx = p.x + dx * (w / 2 + gap)
+      const cy = p.y + dy * (h / 2 + gap)
+      if (!free(cx, cy, w, h)) continue
+      boxes.push({ x: cx, y: cy, w, h })
+      // the stem ends at the chip's edge nearest the dot
+      const ex = dx ? cx - dx * w / 2 : cx, ey = dy ? cy - dy * h / 2 : cy
+      out.push({ ...p, label, cx, cy, w, h, fs, ex, ey })
+      break
+    }
   }
   return out
 })
@@ -161,6 +234,17 @@ function short(n) {
   &.city .chip { fill: #2b4a5c; stroke: var(--line); } &.city .pl-name { font-weight: 800; }
   &.village .chip { fill: #1c2d36; } &.village .pl-name { fill: var(--muted); font-weight: 600; }
   &:hover .chip { fill: var(--line); } &:hover .pl-name { fill: var(--ink-on-line); } }
+.mstop { cursor: pointer;
+  .hit { fill: transparent; }
+  .dot { fill: var(--ink); stroke: #0b1519; stroke-width: 1.2; &.station { fill: var(--led); } }
+  &:hover .dot, &.sel .dot { fill: var(--line); } }
+.schip { cursor: pointer;
+  .stem { stroke: rgba(255, 255, 255, 0.35); stroke-width: 1; }
+  .chip { fill: #16252d; fill-opacity: 0.95; stroke: rgba(255, 255, 255, 0.4); stroke-width: 1; }
+  &.station .chip { fill: #1f3340; stroke: var(--led); }
+  .lbl { fill: var(--ink); text-anchor: middle; font-weight: 700; pointer-events: none; }
+  &:hover .chip, &.sel .chip { fill: var(--line); stroke: var(--line); }
+  &:hover .lbl, &.sel .lbl { fill: var(--ink-on-line); } }
 .you { .halo { fill: rgba(255, 255, 255, 0.3); stroke: #fff; stroke-width: 1.5; } .core { fill: #fff; stroke: #0b1519; stroke-width: 2; } }
 .chosen {
   .ring { fill: var(--line); stroke: #0b1519; stroke-width: 2.5; }

@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.8.0'
+M.VERSION = '0.9.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -392,6 +392,8 @@ end
 
 -- ---- the map of towns: the chips of the towns round you; a chip opens the town's stations on the first screen
 
+local loadMapStops, openStationAt          -- defined below (the map's stops; the station screen of a place)
+
 local function townsOf(data, limit)
   local out = {}
   for _, p in ipairs(data and data.towns or {}) do
@@ -404,11 +406,16 @@ end
 function M.uiMapOpen()
   local lat, lon = findPos()
   if not lat then return end
-  if S.map and S.map.towns and S.map.lat and geo.dist(lat, lon, S.map.lat, S.map.lon) < 15000 then publish() return end
+  if S.map and S.map.towns and S.map.lat and geo.dist(lat, lon, S.map.lat, S.map.lon) < 15000 then
+    if not S.map.stops or S.map.stopsPartial then loadMapStops(S.map, S.map.lat, S.map.lon, M.MAP_STOPS_M, 'stops') end
+    publish()
+    return
+  end
   if datasvc.has('towns') == false then S.map = { err = 'service_old' } publish() return end
   S.map = { busy = true, lat = lat, lon = lon }
   local map = S.map
   publish()
+  loadMapStops(map, lat, lon, M.MAP_STOPS_M, 'stops')
   datasvc.towns(lat, lon, function(data, info)
     if S.map ~= map then return end
     map.busy = false
@@ -418,6 +425,86 @@ function M.uiMapOpen()
   end)
 end
 
+M.MAP_STOPS_M = 25000       -- the stations and stops on the map of the region
+M.TOWN_STOPS_M = 3500       -- a town's close-up
+
+local function mapStopsOf(data)
+  local out = {}
+  for _, s in ipairs(data and data.stops or {}) do
+    if #out >= 450 then break end
+    if s.lat and s.lon and s.name then
+      local lines = {}
+      for i, r in ipairs(s.lines or {}) do if i <= 16 then lines[i] = r end end
+      out[#out + 1] = { id = #out + 1, name = s.name, lat = s.lat, lon = s.lon, kind = s.kind, lines = lines }
+    end
+  end
+  return out
+end
+
+function loadMapStops(map, lat, lon, r, field)           -- (declared with townsOf)
+  if datasvc.has('mapstops') ~= true then return end
+  datasvc.mapStops(lat, lon, r, function(data)
+    if S.map ~= map then return end
+    map[field] = mapStopsOf(data)
+    map[field .. 'Partial'] = not (data and data.timetables)      -- (asked again later: the timetables may still be coming)
+    publish()
+  end)
+end
+
+-- A town's chip: the map comes closer, with every stop of the town
+function M.uiMapFocus(id)
+  local map = S.map
+  local town = map and map.towns and map.towns[tonumber(id)]
+  if not town then return end
+  map.focus = { id = town.id, name = town.name, lat = town.lat, lon = town.lon, radius = M.TOWN_STOPS_M }
+  map.focusStops, map.sel, map.actErr = nil, nil, nil
+  publish()
+  loadMapStops(map, town.lat, town.lon, M.TOWN_STOPS_M, 'focusStops')
+end
+
+function M.uiMapUnfocus()
+  local map = S.map
+  if not map then return end
+  map.focus, map.focusStops, map.sel, map.actErr = nil, nil, nil, nil
+  publish()
+end
+
+-- A stop's chip or dot: it is chosen (the panel under the map offers the way there, a teleport, its lines)
+function M.uiMapPick(id)
+  local map = S.map
+  if not map then return end
+  local list = map.focus and map.focusStops or map.stops
+  local st = list and list[tonumber(id)]
+  if not st then return end
+  local pose = world.pose()
+  local lines = {}
+  for i, r in ipairs(st.lines or {}) do lines[i] = { ref = r, colour = osm.colorFor(r) } end
+  map.sel = { id = st.id, name = st.name, lat = st.lat, lon = st.lon, kind = st.kind, lines = lines,
+    dist = pose and math.floor(geo.dist(pose.lat, pose.lon, st.lat, st.lon) + 0.5) or nil }
+  map.actErr = nil
+  publish()
+end
+
+-- What to do with the chosen stop: 'gps' (the GPS leads there), 'teleport', 'lines' (its station screen)
+function M.uiMapGo(action)
+  local map = S.map
+  local st = map and map.sel
+  if not st then return end
+  if action == 'gps' then
+    if not world.gpsRoute({ { lat = st.lat, lon = st.lon, name = st.name } }) then map.actErr = 'gps' publish() return end
+    world.toast('GPS: ' .. tostring(st.name), 5)
+    goPlay()
+  elseif action == 'teleport' then
+    local ok, err = world.teleport(st.lat, st.lon, st.name)
+    if not ok then map.actErr = 'teleport: ' .. tostring(err) publish() return end
+    S.cell = nil                                      -- the stops round you are elsewhere now
+    world.toast('Taking you to ' .. tostring(st.name) .. '…', 5)
+    goPlay()
+  elseif action == 'lines' then
+    openStationAt({ lat = st.lat, lon = st.lon, name = st.name })
+  end
+end
+
 function M.uiMapPlace(id)
   local place = S.map and S.map.towns and S.map.towns[tonumber(id)]
   if not place then return end
@@ -425,11 +512,8 @@ function M.uiMapPlace(id)
   openTown(S.find, place)
 end
 
--- A station of the results: its lines, as if it were the one nearest to you
-function M.uiFindStation(i)
-  local F = S.find
-  local item = F and F.kind == 'stations' and F.items[tonumber(i)]
-  if not item then return end
+-- The station screen of a place ({lat, lon, name}): its lines, as if it were the one nearest to you
+function openStationAt(item)          -- (the local declared before the map's functions)
   S.loading, S.err = 'nearby', nil
   publish()
   datasvc.nearby(item.lat, item.lon, function(data, info)
@@ -445,6 +529,13 @@ function M.uiFindStation(i)
     for k, st in ipairs(model) do if st.name == item.name then pick = k break end end
     M.uiSelectStation(pick)
   end, 'urgent')
+end
+
+-- A station of the results
+function M.uiFindStation(i)
+  local F = S.find
+  local item = F and F.kind == 'stations' and F.items[tonumber(i)]
+  if item then openStationAt(item) end
 end
 
 -- A line of the results: its card, to start from its first stop

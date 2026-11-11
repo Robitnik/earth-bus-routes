@@ -459,6 +459,21 @@ class Timetables(unittest.TestCase):
         out = svc.local_search("alpha", 50.0, 16.0)
         self.assertEqual([e["id"] for e in out["elements"]], [9])
 
+    def test_map_stops_with_their_lines_and_the_bus_station_of_the_map(self):
+        svc = self.service(lambda q: "{}", cache="cache_map")
+        out = svc.map_stops(50.0, 16.0, 3000)
+        self.assertTrue(out["timetables"])
+        self.assertEqual([(x["name"], x["kind"], x["lines"]) for x in out["stops"]][:1], [("Alpha, aut.st.", "stop", ["361"])])
+        self.assertEqual(len(out["stops"]), 3)
+        # a bus station the service has seen, 60 m from the timetable's stop: one place, the station's name, the lines
+        svc.index.add({"elements": [{"type": "node", "id": 5, "lat": 50.0005, "lon": 16.0,
+                                     "tags": {"name": "Alpha, autobusové stanoviště", "amenity": "bus_station"}}]})
+        out = svc.map_stops(50.0, 16.0, 3000)
+        first = out["stops"][0]
+        self.assertEqual((first["name"], first["kind"], first["lines"]), ("Alpha, autobusové stanoviště", "station", ["361"]))
+        self.assertEqual(len(out["stops"]), 3)
+        self.assertEqual(svc.map_stops(55.0, 20.0, 3000)["stops"], [])
+
     def test_a_missing_feed_is_nothing(self):
         g = d.Gtfs(None)
         self.assertFalse(g.ready())
