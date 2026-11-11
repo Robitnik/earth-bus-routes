@@ -474,6 +474,17 @@ class Timetables(unittest.TestCase):
         self.assertEqual(len(out["stops"]), 3)
         self.assertEqual(svc.map_stops(55.0, 20.0, 3000)["stops"], [])
 
+    def test_nearby_while_the_timetables_are_coming_is_partial(self):
+        svc = self.service(lambda q: json.dumps({"elements": []}), cache="cache_coming")
+        svc.places.base = {"1": ("X", ("x",), 50.0, 16.0, "town", 20000, "XX", ())}
+        svc.places.dir = self.dir                                  # (enabled)
+        empty = d.Gtfs(self.dir / "none", feeds={"XX": {"url": "x"}})
+        empty.want = lambda countries: None                       # (no real download in a test)
+        svc.gtfs = empty
+        self.assertNotIn("partial", json.loads(svc.nearby(50.3, 16.3)[0]))
+        empty._building.add("XX")
+        self.assertTrue(json.loads(svc.nearby(50.3, 16.3)[0])["partial"])
+
     def test_a_missing_feed_is_nothing(self):
         g = d.Gtfs(None)
         self.assertFalse(g.ready())

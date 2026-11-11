@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.9.0 (not released yet)
+## 0.9.1
+
+- **A slow OpenStreetMap request no longer holds up the menu.** The mod asked the data service one thing at a time, so the map of towns (answered from the disk in milliseconds) waited behind a route that Overpass took three minutes to refuse. Up to three requests now run at once (the service still asks the public servers one at a time); a background prefetch gives way to what you wait for.
+- The stops round you asked while the national timetables were still downloading are no longer kept for the session: once they are ready the lines come from them (361, 375 at Police).
+- Data service 0.9.1.
+
+## 0.9.0
 
 - **Stations and stops on the map.** The Map tab shows every stop round you as a dot; bus stations and the busiest stops get a chip with their name. A town's chip brings the map closer, with a chip for each of its stops ("‹ Whole map" goes back, "Its stations as a list" is the old list). Pick a stop or a station: its lines are shown, with **Route there (GPS)**, **Teleport** and **Lines here** (its From here / To here / Through tabs).
 - The stops come from the data service's own data (the timetables and every stop it has seen): 20 ms for 25 km, nothing asked of the public servers.

@@ -1,6 +1,7 @@
 -- Client of the Earth Bus Routes data service (companion/bus_routes_data.py), the program that asks OpenStreetMap for us.
--- The game's Lua sandbox only allows connections to this computer, so every request goes to 127.0.0.1. One request runs at
--- a time, nothing waits: M.update(dt) is called every frame.
+-- The game's Lua sandbox only allows connections to this computer, so every request goes to 127.0.0.1. Up to M.LANES requests
+-- run at once (the service asks the public servers one at a time itself, and answers what it has on disk meanwhile: a slow
+-- Overpass request must not hold up the map of towns or the stops round you); nothing waits: M.update(dt) is called every frame.
 local http = require('earthBusRoutes/http')
 local M = {}
 
@@ -9,8 +10,9 @@ M.PORT = 47630
 M.RETRY_S = 6                -- after the service did not answer, ask again this much later
 M.TOTAL_S = 240              -- the service tries several public servers, each can take 45 s
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
+M.LANES = 3                  -- requests running at once
 
-local queue, active = {}, nil
+local queue, actives = {}, {}
 local fastQueue, fastActive = {}, nil      -- the second lane: answers the service has at once (its index), never behind a slow request
 local wait = 0
 local memo = {}              -- path -> decoded data, for this game session
@@ -42,17 +44,23 @@ function M.get(path, cb, opts)
       return
     end
   end
-  if active and active.job.path == path then active.job.cbs[#active.job.cbs + 1] = cb return end
+  for _, a in ipairs(actives) do
+    if a.job.path == path then a.job.cbs[#a.job.cbs + 1] = cb return end
+  end
   local job = { path = path, cbs = { cb }, tries = 0, low = opts.low or false, total = opts.total }
   if opts.urgent then
     table.insert(queue, 1, job)
-    -- a prefetch nobody waits for gives way
-    if active and active.job.low and #active.job.cbs <= 1 then
-      http.cancel(active.req)
-      local old = active.job
-      active = nil
-      old.tries = 0
-      queue[#queue + 1] = old
+    -- every lane busy: a prefetch nobody waits for gives way
+    if #actives >= M.LANES then
+      for i, a in ipairs(actives) do
+        if a.job.low and #a.job.cbs <= 1 then
+          http.cancel(a.req)
+          table.remove(actives, i)
+          a.job.tries = 0
+          queue[#queue + 1] = a.job
+          break
+        end
+      end
     end
   else
     queue[#queue + 1] = job
@@ -96,7 +104,7 @@ local function startNext()
   job.tries = job.tries + 1
   local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = 'GET', path = job.path, connectTimeout = 3, totalTimeout = job.total or M.TOTAL_S })
   if not ok then req = { state = 'error', err = tostring(req) } end
-  active = { job = job, req = req }
+  actives[#actives + 1] = { job = job, req = req }
 end
 
 local function failed(job, err, down)
@@ -152,7 +160,7 @@ local function pollProgress(dt)
   pollTimer = pollTimer + dt
   if pollTimer < 1 then return end
   pollTimer = 0
-  if active == nil then
+  if #actives == 0 then
     -- nothing of ours is waiting; the service may still be downloading the timetables (a minute, once): look every 3 s
     -- while the menu is open
     idleTimer = idleTimer + 1
@@ -174,16 +182,9 @@ local function pollProgress(dt)
   end, { fast = true, total = 3 })
 end
 
-function M.update(dt)
-  updateFast(dt)
-  pollProgress(dt)
-  if wait > 0 then wait = wait - dt return end
-  if not active then startNext() if not active then return end end
-  local req = active.req
-  http.step(req, dt)
+local function settle(a)
+  local req, job = a.req, a.job
   if req.state == 'done' then
-    local job = active.job
-    active = nil
     local text = http.body(req.parser)
     local ok, data = pcall(jsonDecode, text)
     if not ok or type(data) ~= 'table' then return failed(job, 'bad answer from the data service', false) end
@@ -197,21 +198,37 @@ function M.update(dt)
     -- (an answer marked partial has the timetables only, the map's part is still coming: not kept for the session)
     if job.path:find('/v1/info', 1, true) == nil and not (type(payload) == 'table' and payload.partial) then memo[job.path] = { data = payload } end
     finish(job, payload, { cached = data.cached == true })
-  elseif req.state == 'error' then
-    local job = active.job
-    active = nil
+  else
     local err = tostring(req.err)
     -- refused / unreachable: the service is not running; anything else is a broken answer or a timeout
     failed(job, err, err:find('connect', 1, true) ~= nil)
   end
 end
 
-function M.busy() return active ~= nil or #queue > 0 end
+function M.update(dt)
+  updateFast(dt)
+  pollProgress(dt)
+  local i = 1
+  while i <= #actives do
+    local a = actives[i]
+    http.step(a.req, dt)
+    if a.req.state == 'done' or a.req.state == 'error' then
+      table.remove(actives, i)
+      settle(a)
+    else
+      i = i + 1
+    end
+  end
+  if wait > 0 then wait = wait - dt return end
+  while #actives < M.LANES and #queue > 0 do startNext() end
+end
+
+function M.busy() return #actives > 0 or #queue > 0 end
 
 function M.reset()
-  if active and active.req then http.cancel(active.req) end
+  for _, a in ipairs(actives) do if a.req then http.cancel(a.req) end end
   if fastActive and fastActive.req then http.cancel(fastActive.req) end
-  queue, active, wait, fastQueue, fastActive = {}, nil, 0, {}, nil
+  queue, actives, wait, fastQueue, fastActive = {}, {}, 0, {}, nil
   M.state.progress = nil
 end
 
