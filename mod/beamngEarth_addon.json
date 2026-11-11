@@ -100,6 +100,39 @@
       "help": "A shift may begin with an empty service run from the nearest bus depot (or bus station) to the first stop."
     },
     {
+      "key": "events",
+      "label": "Dispatcher events",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Random things on a trip: a school group at a stop, a wheelchair user, a crowd after a match, a stop out of service, a stop request, a forgotten bag. At most one every 10 minutes."
+    },
+    {
+      "key": "transfers",
+      "label": "Transfers",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "The dispatcher asks you to wait at a hub for the passengers of another line that arrives a few minutes after you."
+    },
+    {
+      "key": "tickets",
+      "label": "Tickets from the driver",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "On suburban and intercity lines a quarter of the passengers buy a ticket from you: a moment longer at the doors, at most 12 seconds per stop."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",

@@ -24,6 +24,10 @@ bus stops and bus routes the mod wants, keeps the answers on disk and hands them
                                         midnight), then the trips that follow it for `mins` minutes (chained at the termini)
   GET /v1/depot?lat=..&lon=..           the bus depot within 10 km of a point, else the nearest bus station: {"depot": {..} | null}
   GET /v1/status                        what it did lately (for the Add-ons page's log)
+  GET /v1/connections?sid=..|lat=..&lon=..&t=..&day=..&win=8[&ref=..]
+                                        the lines arriving at a stop (and the stops within 150 m of it) within +-win minutes of
+                                        t (seconds from midnight) on weekday day (1 Monday .. 7 Sunday), for transfers; the
+                                        line `ref` itself is left out. From the timetables on this computer only.
 
 Every answer is {"ok": true, "cached": bool, "data": <Overpass JSON>} or {"ok": false, "error": "..."}.
 Run it from BeamNG.Earth's Add-ons page (a "companion"), or by hand: python bus_routes_data.py [--port N] [--cache DIR]
@@ -1550,6 +1554,68 @@ def merge_elements(first, more):
     return list(first) + [e for e in more if (e.get("type"), e.get("id")) not in seen]
 
 
+# ---- connections (plan 006 stage C) -----------------------------------------------------------------------------------------
+
+CONN_NEAR_M = 150            # stops this near the asked one are one hub
+CONN_MAX = 40                # arrivals returned at most
+FEATURES = FEATURES + ["connections"]
+
+
+def gtfs_connections(gtfs, t, day, win_min=8, sid=None, lat=None, lon=None, ref=None, radius=CONN_NEAR_M):
+    """The lines arriving at a hub within +-win_min minutes of `t` (seconds from midnight) on weekday `day`: the hub is the stop
+    `sid` (or the point lat, lon) with the stops within `radius` metres. Only buses that go on from the previous stop (a way's
+    first stop has no arrivals). `ref` (the line of the bus asking) is left out. Returns {"stops": n, "lines": distinct line
+    numbers calling at the hub (ref included), "arrivals": [{ref, to, from, head, at (s from midnight), stop, pid}] by time,
+    "source": "gtfs"}; empty arrivals when no timetables are here."""
+    win = max(60, min(30, win_min) * 60)
+    out = {"stops": 0, "lines": 0, "arrivals": [], "source": "gtfs"}
+    skip = fold(ref).strip() if ref else None
+    refs, found = set(), []
+    with gtfs._lock:
+        for db in gtfs.dbs.values():
+            if sid is not None:
+                row = db.execute("SELECT lat, lon FROM stops WHERE sid=?", (sid,)).fetchone()
+                if row is None:
+                    continue
+                clat, clon = row
+            elif lat is not None and lon is not None:
+                clat, clon = lat, lon
+            else:
+                continue
+            near = gtfs._stops_near(db, clat, clon, radius)
+            if not near:
+                continue
+            out["stops"] += len(near)
+            by_sid = {r[0]: r for r in near}
+            meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
+            names, starts = {}, {}
+            sids = list(by_sid)
+            for i in range(0, len(sids), 400):
+                chunk = sids[i:i + 400]
+                q = ("SELECT sp.sid, sp.pos, p.pid, p.ref, p.head, p.stops, p.offs FROM sp JOIN patterns p USING(pid) "
+                     f"WHERE sp.sid IN ({','.join('?' * len(chunk))})")
+                for sd, pos, pid, pref, head, stops, offs in db.execute(q, chunk).fetchall():
+                    refs.add(fold(pref))
+                    if pos == 0 or (skip and fold(pref).strip() == skip):
+                        continue
+                    if pid not in starts:
+                        starts[pid] = Gtfs._starts(db, pid, meta)
+                    off = int(offs.split(",")[pos])
+                    sl = stops.split(",")
+                    for shift, d in ((0, day), (-86400, (day - 2) % 7 + 1)):      # last night's trips run on into today
+                        for st in starts[pid].get(str(d), []):
+                            at = st + off + shift
+                            if abs(at - t) <= win:
+                                found.append((at, pid, pref, head, sl[0], sl[-1], by_sid[sd][1], db))
+        for at, pid, pref, head, first, last, stop_name, db in found:
+            out["arrivals"].append({"ref": pref, "to": gtfs._name_of(db, last, names), "from": gtfs._name_of(db, first, names),
+                                    "head": head, "at": at, "stop": stop_name, "pid": pid})
+    out["arrivals"].sort(key=lambda a: (a["at"], a["ref"]))
+    out["arrivals"] = out["arrivals"][:CONN_MAX]
+    out["lines"] = len(refs)
+    return out
+
+
 def default_cache_dir():
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
     return pathlib.Path(base) / "earth-bus-routes" / "cache"
@@ -2160,6 +2226,18 @@ def make_handler(service, port):
                         "ok": True, "version": VERSION, "uptime": time.time() - service.started,
                         "served": service.served, "log": log_lines[-20:], "cache": str(service.cache.dir),
                         "index": {"stops": len(service.index.stops), "lines": len(service.index.lines)}}))
+                if u.path == "/v1/connections":
+                    day = int(q["day"][0])
+                    if not 1 <= day <= 7:
+                        return self.fail(400, "day out of range")
+                    sid = q["sid"][0] if q.get("sid") else None
+                    lat = float(q["lat"][0]) if q.get("lat") else None
+                    lon = float(q["lon"][0]) if q.get("lon") else None
+                    if sid is None and (lat is None or lon is None or not (-85 <= lat <= 85 and -180 <= lon <= 180)):
+                        return self.fail(400, "sid or lat / lon needed")
+                    ans = gtfs_connections(service.gtfs, float(q["t"][0]), day, int(q.get("win", ["8"])[0]), sid, lat, lon,
+                                           clean_ref(q["ref"][0]) if q.get("ref") else None)
+                    return self.send_json(200, b'{"ok":true,"cached":true,"data":' + json.dumps(ans, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"}")
                 if u.path == "/v1/nearby":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):

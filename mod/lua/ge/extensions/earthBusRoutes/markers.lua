@@ -13,7 +13,8 @@ M.SOON_COUNT = 2         -- the stops after the next one, drawn lighter
 M.DONE_FADE_S = 2.5      -- a stop just served stays green this long, fading
 
 -- the colours of a bay (r, g, b in 0..1), as the game's bus mode: coming, in it, done
-M.COLOURS = { approach = { 1, 0.08, 0.05 }, inside = { 1, 0.5, 0 }, done = { 0.1, 0.9, 0.2 }, soon = { 1, 0.8, 0.1 } }
+M.COLOURS = { approach = { 1, 0.08, 0.05 }, inside = { 1, 0.5, 0 }, done = { 0.1, 0.9, 0.2 }, soon = { 1, 0.8, 0.1 },
+  closed = { 0.55, 0.55, 0.58 } }       -- a stop out of service (a dispatcher event): grey
 
 local function offsetLatLon(lat, lon, east, north)
   return lat + north / 111195, lon + east / (111195 * math.cos(math.rad(lat)))
@@ -64,6 +65,7 @@ function M.plan(t, done, now)
         if k == 0 then
           state = (t.inZone or t.phase == 'atStop' or t.phase == 'start') and 'inside' or 'approach'
         end
+        if t.extra and t.extra[i] and t.extra[i].closed then state = 'closed' end
         out[#out + 1] = { kind = k == 0 and 'next' or 'soon', state = state, alpha = 1, index = i, name = s.name, zone = z,
           ref = r.ref, to = r.to, waiting = k == 0 and t.waiting or nil, ahead = ahead }
       end

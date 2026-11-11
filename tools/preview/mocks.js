@@ -26,6 +26,9 @@ export const HUD_STATES = {
   waiting: { ...clone(base), phase: "atStop", atStop: { alightLeft: 0, boardLeft: 0, doorsHint: true }, next: { ...base.next, delta: -300 }, requested: false, waitingNext: 0,
     cabin: { led: { stop: base.next.name, line: "305", dest: "Hradec Králové", onRequest: false, requested: false, bellSeq: 0, last: false, here: true, waitSec: 312 },
     comfort: { standing: 0, seats: 25, cup: 0, spill: false, falls: 0, fallSeq: 0 } } },
+  radio: { ...clone(base), dispatch: { key: "school", params: { stop: "Náchod, ZŠ Plhov", n: 11 }, kind: "event", seq: 1 } },
+  transfer: { ...clone(base), dispatch: { key: "connection", params: { stop: "Náchod, aut. nádraží", ref: "360", time: "14:31", mins: 3 }, kind: "transfer", seq: 2 } },
+  hold: { ...clone(base), phase: "atStop", atStop: { alightLeft: 0, boardLeft: 0, doorsHint: false }, hold: { ref: "360", left: 95 } },
 }
 
 const lines = [

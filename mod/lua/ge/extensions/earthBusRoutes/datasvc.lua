@@ -102,6 +102,13 @@ function M.shift(pid, start, day, mins, cb)
   M.get(('/v1/shift?pid=%d&start=%d&day=%d&mins=%d'):format(math.floor(pid), math.floor(start), math.floor(day), math.floor(mins)), cb, { urgent = true, total = 30 })
 end
 function M.depot(lat, lon, cb) M.get(('/v1/depot?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
+-- the lines arriving at the stop at (lat, lon) within a few minutes of `t` (s from midnight) on weekday `day`, `ref` left out
+-- (transfers: from the service's timetables, answered at once)
+function M.connections(lat, lon, t, day, ref, cb)
+  local path = ('/v1/connections?lat=%.5f&lon=%.5f&t=%d&day=%d&win=8'):format(lat, lon, t, day)
+  if ref and ref ~= '' then path = path .. '&ref=' .. http.urlencode(tostring(ref)) end
+  M.get(path, cb, { fast = true, total = 10 })
+end
 
 local function startNext()
   local job = table.remove(queue, 1)

@@ -84,6 +84,13 @@
         <span v-if="d.shift.lateStart > 60" class="late">{{ tr("hud.lateStart", { min: Math.ceil(d.shift.lateStart / 60) }) }}</span>
         <span class="muted end">{{ tr("hud.shiftEnds", { time: hm(d.shift.endsIn) }) }}</span>
       </div>
+      <!-- the dispatcher on the radio: a short message that goes by itself, else what the bus is waiting for -->
+      <transition name="note">
+        <div v-if="radio" class="radio" :class="radio.kind" :key="radio.key" role="status">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="10" rx="1.5" /><path d="M7 5V1.5M11 8h-4M11 11h-4" /></svg>
+          <span>{{ radio.text }}</span>
+        </div>
+      </transition>
 
       <!-- the line diagram: the next stop opened up at the top, the stops after it on the line's colour -->
       <section class="line" :key="d.index">
@@ -102,7 +109,7 @@
                   <span v-else class="flow">
                     <span v-if="d.atStop && d.atStop.alightLeft > 0">{{ tr("hud.gettingOff", { n: d.atStop.alightLeft }) }}</span>
                     <span v-if="d.atStop && d.atStop.boardLeft > 0">{{ tr("hud.boarding", { n: d.atStop.boardLeft }) }}</span>
-                    <span v-if="d.atStop && d.atStop.alightLeft <= 0 && d.atStop.boardLeft <= 0">{{ tr("hud.closeDoors") }}</span>
+                    <span v-if="d.atStop && d.atStop.alightLeft <= 0 && d.atStop.boardLeft <= 0 && !d.hold">{{ tr("hud.closeDoors") }}</span>
                   </span>
                 </template>
                 <template v-else>
@@ -191,6 +198,15 @@ const TEXT = {
     "note.Passenger fell": "Passenger fell",
     "hud.led.next": "Next stop", "hud.led.now": "Stop", "hud.led.last": "Terminus", "hud.led.onRequest": "On request", "hud.led.leavesIn": "Departs in {t}",
     "hud.standing": "{n} standing", "hud.cupTip": "The coffee sways with the ride: brake gently, people are standing",
+    "msg.school": "School group at {stop}: about {n} people", "msg.crowd": "Crowd after the event at {stop}: expect a full bus",
+    "msg.wheelchair": "Wheelchair user waiting at {stop}: keep the doors open for {s} s", "msg.wheelchairDone": "Wheelchair passenger on board",
+    "msg.closed": "{stop} is out of service: drive past", "msg.request": "Stop requested at {stop}",
+    "msg.bag": "A passenger left a bag: hand it in at the dispatch office (stop at the station)", "msg.bagDone": "Bag handed in. Thank you", "msg.bagLeft": "The bag stays on the bus",
+    "msg.connection": "At {stop} wait for line {ref}: due {time}, {mins} min after you", "msg.connectionApprox": "At {stop} wait for line {ref}: about {time} (estimated)",
+    "msg.connectionWait": "Waiting for line {ref} until {time}", "msg.connectionBoard": "{n} passengers from line {ref} are boarding", "msg.connectionMissed": "You left before line {ref} arrived",
+    "hud.holding": "Waiting for line {ref}: {time}", "hud.selling": "Selling tickets…",
+    "note.Connection made": "Connection made", "note.Missed connection": "Missed connection", "note.Wheelchair passenger helped": "Wheelchair passenger helped",
+    "note.Wheelchair passenger left behind": "Wheelchair passenger left behind", "note.Bag handed in": "Bag handed in", "note.Group served": "Group served",
   },
   uk: {
     "hud.idle.plate": "Автобус", "hud.idle.text": "Рейсу немає. Ctrl+Shift+B: обрати маршрут.",
@@ -209,6 +225,15 @@ const TEXT = {
     "note.Passenger fell": "Пасажир упав",
     "hud.led.next": "Наступна зупинка", "hud.led.now": "Зупинка", "hud.led.last": "Кінцева", "hud.led.onRequest": "На вимогу", "hud.led.leavesIn": "Відправлення через {t}",
     "hud.standing": "стоять {n}", "hud.cupTip": "Кава хитається від їзди: гальмуйте плавно, люди стоять",
+    "msg.school": "Шкільна група на «{stop}»: близько {n} людей", "msg.crowd": "Натовп після події на «{stop}»: чекайте повний автобус",
+    "msg.wheelchair": "На «{stop}» чекає пасажир на візку: тримайте двері відчиненими {s} с", "msg.wheelchairDone": "Пасажир на візку в салоні",
+    "msg.closed": "«{stop}» не обслуговується: проїжджайте повз", "msg.request": "Зупинку «{stop}» замовили",
+    "msg.bag": "Пасажир забув сумку: віддайте в диспетчерську (зупиніться біля автостанції)", "msg.bagDone": "Сумку віддано. Дякуємо", "msg.bagLeft": "Сумка лишається в автобусі",
+    "msg.connection": "На «{stop}» почекайте лінію {ref}: прибуде о {time}, через {mins} хв після вас", "msg.connectionApprox": "На «{stop}» почекайте лінію {ref}: десь о {time} (орієнтовно)",
+    "msg.connectionWait": "Чекаємо лінію {ref} до {time}", "msg.connectionBoard": "З лінії {ref} заходить {n} пасажирів", "msg.connectionMissed": "Ви поїхали раніше, ніж приїхала лінія {ref}",
+    "hud.holding": "Чекаємо лінію {ref}: {time}", "hud.selling": "Продаж квитків…",
+    "note.Connection made": "Пересадку дочекалися", "note.Missed connection": "Пропущена пересадка", "note.Wheelchair passenger helped": "Пасажиру на візку допомогли",
+    "note.Wheelchair passenger left behind": "Пасажира на візку залишили", "note.Bag handed in": "Сумку віддано", "note.Group served": "Групу обслужено",
   },
 }
 function tr(key, p) {
@@ -216,6 +241,18 @@ function tr(key, p) {
   if (p) for (const k in p) s = s.replace("{" + k + "}", p[k])
   return s
 }
+// the radio band: the dispatcher's message, else the connection the bus waits for, else the ticket selling
+const radio = computed(() => {
+  const v = d.value
+  if (!v || v.idle || v.armed || v.finished) return null
+  if (v.dispatch) return { key: "m" + v.dispatch.seq, kind: v.dispatch.kind, text: tr("msg." + v.dispatch.key, v.dispatch.params) }
+  if (v.hold) {
+    const s = Math.ceil(v.hold.left)
+    return { key: "hold", kind: "transfer", text: tr("hud.holding", { ref: v.hold.ref, time: Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") }) }
+  }
+  if (v.selling) return { key: "sell", kind: "info", text: tr("hud.selling") }
+  return null
+})
 const noteText = t => (TEXT[lang] && TEXT[lang]["note." + t]) || t
 
 // ---- the numbers
@@ -647,6 +684,23 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 600;
   b { margin-left: 10px; }
+}
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #1d3442;
+  color: #bfe3f7;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  svg { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  &.event { background: #3a3220; color: #ffd98a; }
+  &.good { background: #1f3a2a; color: #9be3b2; }
+  &.bad { background: #3a2320; color: #ffb199; }
 }
 .note-enter-active { transition: opacity 0.2s, transform 0.2s; }
 .note-enter-from { opacity: 0; transform: translateY(6px); }

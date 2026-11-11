@@ -65,6 +65,23 @@ function M.sample(s, dt, speed, aLong, aLat, doorOpen, overLimit)
   if overLimit then s.speedingSec = s.speedingSec + dt end
 end
 
+-- Dispatcher events, transfers (plan 006 stage C): a note and a nudge to the service / comfort part (fractions of 1, can be
+-- negative). The note's points are what the nudge is worth in the 1000-point score.
+function M.adjust(s, text, parts)
+  s.adj = s.adj or { service = 0, comfort = 0 }
+  s.adj.service = s.adj.service + (parts.service or 0)
+  s.adj.comfort = s.adj.comfort + (parts.comfort or 0)
+  note(s, text, math.floor((parts.service or 0) * M.WEIGHTS.service + (parts.comfort or 0) * M.WEIGHTS.comfort + 0.5))
+end
+
+-- A ticket sold by the driver (suburban and intercity lines): its price goes into the revenue
+function M.ticket(s, price)
+  s.tickets = (s.tickets or 0) + 1
+  s.revenue = s.revenue + (price or 0)
+end
+
+function M.count(s, key) s.counts = s.counts or {} s.counts[key] = (s.counts[key] or 0) + 1 end
+
 function M.collision(s) s.collisions = s.collisions + 1 note(s, 'Collision', -40) end
 
 -- A standing passenger fell when the bus braked hard (cabin.lua): the comfort of the ride loses FALL_POINTS
@@ -92,6 +109,7 @@ function M.result(s)
   local service = clamp01(s.served / planned) * (1 - clamp01(s.leftWaiting / math.max(1, s.passengers + s.leftWaiting)) * 0.3)
   local comfort = 1 - clamp01(s.harshSec / math.max(60, 0.08 * s.drivenSec))
   comfort = clamp01(comfort - (s.falls or 0) * M.FALL_POINTS / M.WEIGHTS.comfort)
+  if s.adj then service, comfort = clamp01(service + s.adj.service), clamp01(comfort + s.adj.comfort) end
   local safety = clamp01(1 - 0.2 * s.doorEvents - 0.15 * s.collisions - 0.01 * s.speedingSec)
   local parts = { punctuality = punctuality, service = service, comfort = comfort, safety = safety }
   local points = 0
@@ -102,7 +120,8 @@ function M.result(s)
   for _, g in ipairs(M.GRADES) do if points >= g[1] then grade = g[2] break end end
   local stars = points >= 900 and 5 or points >= 750 and 4 or points >= 600 and 3 or points >= 450 and 2 or 1
   return { parts = parts, points = points, grade = grade, stars = stars, passengers = s.passengers,
-    revenue = s.revenue, served = s.served, planned = planned, missed = s.missed, notes = s.notes }
+    revenue = s.revenue, served = s.served, planned = planned, missed = s.missed, notes = s.notes,
+    tickets = s.tickets or 0, counts = s.counts or {} }
 end
 
 return M
