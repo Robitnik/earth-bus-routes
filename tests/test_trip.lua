@@ -319,9 +319,34 @@ function T.markers_follow_the_trip_and_show_only_what_is_near()
   assert(#markers.plan(t) == 1, 'the last stop: nothing after it')
   t.idx, t.along = 4, r.stops[4].along - 5000
   assert(#markers.plan(t) == 0, 'too far to mark')
-  local text = markers.label({ kind = 'next', ref = '305', to = 'Hradec', name = 'Šimkova', waiting = 3 })
-  assert(text:find('305') and text:find('Šimkova') and text:find('3 waiting'))
-  assert(markers.label({ kind = 'soon', name = 'X' }) == 'X')
+  local lines = markers.labelLines({ kind = 'next', ref = '305', to = 'Hradec', name = 'Šimkova', waiting = 3 })
+  assert(lines[1] == 'Šimkova' and lines[2] == '3 waiting' and lines[3]:find('305'), 'the name first, one line each')
+  for _, l in ipairs(lines) do assert(not l:find('\n'), 'no line breaks: the drawer shows them as boxes') end
+  assert(#markers.labelLines({ kind = 'soon', name = 'X' }) == 0)
+  assert(markers.labelLines({ kind = 'done', name = 'Y' })[1] == 'Y')
+end
+
+function T.a_bay_turns_orange_in_it_and_green_when_done()
+  local markers = require('earthBusRoutes/markers')
+  local r = route()
+  local t = newTrip(r)
+  t.idx, t.along, t.phase, t.inZone = 3, r.stops[3].along - 100, 'approach', false
+  assert(markers.plan(t)[1].state == 'approach')
+  t.inZone = true
+  assert(markers.plan(t)[1].state == 'inside')
+  t.inZone, t.phase = false, 'atStop'
+  assert(markers.plan(t)[1].state == 'inside', 'standing at the stop')
+  -- served: it stays green and fades, the next one is red
+  t.idx, t.phase, t.along = 4, 'approach', r.stops[4].along - 300
+  local items = markers.plan(t, { index = 3, at = 100 }, 101)
+  assert(items[1].kind == 'done' and items[1].state == 'done' and items[1].alpha > 0.5 and items[1].alpha < 1)
+  assert(items[2].kind == 'next' and items[2].state == 'approach')
+  assert(markers.plan(t, { index = 3, at = 100 }, 100 + markers.DONE_FADE_S + 0.1)[1].kind ~= 'done', 'gone after the fade')
+  -- the arrow points the way of travel and lies inside the bay
+  local z = markers.zone(r, r.stops[3].along)
+  local a = markers.arrow(z)
+  local back = { (z.corners[1][1] + z.corners[4][1]) / 2, (z.corners[1][2] + z.corners[4][2]) / 2 }
+  assert(geo.dist(a[1][1], a[1][2], back[1], back[2]) > geo.dist(a[2][1], a[2][2], back[1], back[2]), 'the tip is ahead')
 end
 
 return T

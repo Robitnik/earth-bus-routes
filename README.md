@@ -14,7 +14,7 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 - **Map, towns, stations and stops**: a map tab with a chip for every town round you and the stations and stops as chips and
   dots; a town brings the map closer with all its stops; a stop gives you the GPS route there, a teleport or its lines. The
   route builder can add a town's main station with one click.
-- **Stop markers** in the world at the next stops, and a progress bar for everything slow.
+- **Stop markers** in the world as in the game's bus mode: the corner markers of the next stop's bay (red while you come, orange in the bay, green when done), an arrow of the way to stand, the name and who waits; a progress bar for everything slow.
 - **Search**: type a station name or a line number (363, N1); results appear as you type from the data service's own index, and the public servers fill in the rest.
 - **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
 - **Lines and directions**: every line with its operator, network, length, ride time, stops and how often it runs through the day.

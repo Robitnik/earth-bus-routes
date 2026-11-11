@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.9.1'
+M.VERSION = '0.9.2'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -1410,6 +1410,8 @@ local function saveStats(t, res)
 end
 
 local function endClockAndGps()
+  world.clearMarkers()
+  S.doneStop = nil
   world.clockEnd()
   world.gpsClear()
 end
@@ -1510,6 +1512,7 @@ local function handleEvents(t)
     elseif e.name == 'departed' then
       world.busDisplay(t.veh, t.route, stopsAhead(t))
       gpsAhead(t)
+      S.doneStop = { index = e.data.index, at = S.markerClock or 0 }     -- its bay turns green and fades
     elseif e.name == 'missed' then
       world.toast('Missed stop: ' .. tostring(e.data.stop.name), 4)
       gpsAhead(t)
@@ -1561,17 +1564,18 @@ end
 
 -- The markers of the next stops (every frame: the debug drawer shows what is drawn in the frame)
 function M.onPreRender()
-  if not S.earth or S.opts.markers == 'off' then return end
+  if not S.earth then return end
+  if S.opts.markers == 'off' then world.drawMarkers({}) return end
   local items
   if S.trip and not S.trip.finished then
-    items = markers.plan(S.trip)
+    items = markers.plan(S.trip, S.doneStop, S.markerClock or 0)
   elseif S.armed then
     local route = S.routes[S.armed.routeId]
     if route and S.armed.stop.along then
       items = markers.planStart(route, { along = S.armed.stop.along, name = S.armed.stop.name, index = 1 })
     end
   end
-  if not items or #items == 0 then return end
+  if not items or #items == 0 then world.drawMarkers({}) return end
   local veh = world.vehicle()
   local z
   if veh and veh.getPosition then
@@ -1583,6 +1587,7 @@ end
 
 function M.onUpdate(dtReal, dtSim)
   if not S.earth then return end
+  S.markerClock = (S.markerClock or 0) + (dtReal or 0)
   datasvc.update(dtReal or 0)
   if S.starting then startingFrame(dtReal or 0) end
   if S.trip then tripFrame(dtSim or 0) end

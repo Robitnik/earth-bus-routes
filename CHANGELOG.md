@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2
+
+- **Stop markers as in the game's own bus mode.** The next stop's bay on the road gets the game's four corner markers (the shape its bus mode uses): red while you come, orange while the bus is in the bay, green when the stop is done, then they fade. Over them: a light fill of the same colour, an arrow of the way to stand, and one line with the stop's name and how many wait (no more boxes for line breaks; the line and its end are on the HUD). The stops after it are only outlined; the tall pole and the ball are gone. The fill was not drawn before (the drawer the game has is drawTriSolid).
+- No data service update needed.
+
 ## 0.9.1
 
 - **A slow OpenStreetMap request no longer holds up the menu.** The mod asked the data service one thing at a time, so the map of towns (answered from the disk in milliseconds) waited behind a route that Overpass took three minutes to refuse. Up to three requests now run at once (the service still asks the public servers one at a time); a background prefetch gives way to what you wait for.

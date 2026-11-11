@@ -64,9 +64,15 @@ function M.gpsClear()
 end
 
 -- ---- markers in the world ----------------------------------------------------------------------------------------------
--- A yellow zone on the road at the next stops, a pole and a text over it. Needs BeamNG.Earth 1.6 (toGame: lat/lon to the
--- game's coordinates) and the game's debug drawer; without them, or when the first draw fails, no markers (the GPS line stays).
-local markersOff = false
+-- As in the game's own bus mode: the four corner markers of the stop's bay (the game's shape art/shapes/interface/
+-- position_marker.dae, placed as its "Parking Markers" node does), red while you come, orange while the bus is in the bay,
+-- green when the stop is done, then fading. Over them, with the debug drawer: a light fill of the same colour, the arrow of
+-- the way to stand, the stop's name and how many wait. Needs BeamNG.Earth 1.6 (toGame) and the debug drawer; the corner
+-- markers also need createObject (else the bay is drawn without them). A failure turns that part off, never the trip.
+local markersOff, cornersOff = false, false
+local CORNER_SHAPE = 'art/shapes/interface/position_marker.dae'
+local slots = {}             -- 'next' | 'done' -> { objs = {4 TSStatic}, shown = bool }
+local LABEL_M = 350          -- the name is written over a bay this near (along the road)
 
 function M.markersAvailable()
   local a = api()
@@ -91,42 +97,151 @@ local function toGround(lat, lon, refZ)
   return x, y, gz or 0
 end
 
--- items from markers.lua; refZ: the height of the player's vehicle (the ground is looked for from above it)
-function M.drawMarkers(items, refZ)
-  if not M.markersAvailable() or #items == 0 then return end
-  local ok, err = pcall(function()
-    local dd = debugDrawer
-    for _, it in ipairs(items) do
-      local pts = {}
-      for k, c in ipairs(it.zone.corners) do
-        local x, y, z = toGround(c[1], c[2], refZ)
-        if not x then return end
-        pts[k] = vec3(x, y, z + 0.08)
-      end
-      local near = it.kind == 'next'
-      local fill = near and ColorI(255, 200, 0, 120) or ColorI(255, 200, 0, 45)
-      local edge = near and ColorF(1, 0.8, 0, 1) or ColorF(1, 0.8, 0, 0.5)
-      if dd.drawTriangle then
-        dd:drawTriangle(pts[1], pts[2], pts[3], fill)
-        dd:drawTriangle(pts[1], pts[3], pts[4], fill)
-      end
-      for k = 1, 4 do dd:drawLine(pts[k], pts[k % 4 + 1], edge) end
-      -- the pole and the text over the middle of the zone
-      local mid = (pts[1] + pts[2] + pts[3] + pts[4]) * 0.25
-      local top = vec3(mid.x, mid.y, mid.z + (near and 7 or 4))
-      dd:drawLine(mid, top, edge)
-      dd:drawSphere(top, near and 0.4 or 0.25, edge)
-      local text = require('earthBusRoutes/markers').label(it)
-      if dd.drawTextAdvanced then
-        dd:drawTextAdvanced(top + vec3(0, 0, 0.8), text, ColorF(1, 1, 1, 1), true, false, ColorI(0, 0, 0, near and 170 or 110))
-      elseif dd.drawText then
-        dd:drawText(top + vec3(0, 0, 0.8), String(text), ColorF(1, 1, 1, 1))
-      end
-    end
+local function cornerObject(name)
+  local m = createObject('TSStatic')
+  m:setField('shapeName', 0, CORNER_SHAPE)
+  m:setPosition(vec3(0, 0, 0))
+  m.scale = vec3(1, 1, 1)
+  m:setField('rotation', 0, '1 0 0 0')
+  m.useInstanceRenderData = true
+  m:setField('instanceColor', 0, '1 1 1 0')
+  m:setField('collisionType', 0, 'None')            -- (the bus drives over them)
+  m:setField('decalType', 0, 'None')
+  m:setField('canSave', 0, '0')
+  m:setField('meshCulling', 0, '0')
+  m:setField('forceDetail', 0, '-1')
+  m.canSave = false
+  m:registerObject(name)
+  local st = rawget(_G, 'scenetree')
+  if st and st.MissionGroup then st.MissionGroup:addObject(m) end
+  return m
+end
+
+local function slot(name)
+  if cornersOff or rawget(_G, 'createObject') == nil then return nil end
+  local sl = slots[name]
+  if sl then return sl end
+  local ok, objs = pcall(function()
+    local t = {}
+    for k = 1, 4 do t[k] = cornerObject(('earthBusRoutes_bay_%s_%d_%d'):format(name, k, os.time())) end
+    return t
   end)
   if not ok then
-    markersOff = true
-    log('W', TAG, 'world: markers off: ' .. tostring(err))
+    cornersOff = true
+    log('W', TAG, 'world: corner markers off: ' .. tostring(objs))
+    return nil
+  end
+  slots[name] = { objs = objs, shown = false }
+  return slots[name]
+end
+
+local function colourText(c, a) return ('%.3f %.3f %.3f %.3f'):format(c[1], c[2], c[3], a) end
+
+-- the corners of the bay (game x, y, z: back-left, front-left, front-right, back-right) -> the four markers, as the game's
+-- Parking Markers node sets them (statically, on the ground)
+local qOff
+local function placeCorners(sl, pts, colour, alpha)
+  qOff = qOff or (quatFromEuler(0, 0, math.pi / 2) * quatFromEuler(0, math.pi / 2, math.pi / 2))
+  local fwd = (pts[2] + pts[3]) * 0.5 - (pts[1] + pts[4]) * 0.5
+  fwd = vec3(fwd.x, fwd.y, 0)
+  local len = math.sqrt(fwd.x * fwd.x + fwd.y * fwd.y)
+  if len < 0.01 then return end
+  fwd = fwd * (1 / len)
+  local up = vec3(0, 0, 1)
+  local base = qOff * quatFromDir(up, fwd)
+  -- the node's corners: 1 top left (front-left), 2 top right, 3 bottom right, 4 bottom left; each turned 90 degrees more
+  local order = { { pts[2], 90 }, { pts[3], 180 }, { pts[4], 270 }, { pts[1], 0 } }
+  local text = colourText(colour, alpha)
+  for k, obj in ipairs(sl.objs) do
+    local pos, deg = order[k][1], order[k][2]
+    local r = quatFromEuler(0, 0, math.rad(deg)) * base
+    obj:setPosRot(pos.x, pos.y, pos.z + 0.05, r.x, r.y, r.z, r.w)
+    obj:setField('instanceColor', 0, text)
+  end
+  sl.shown = true
+end
+
+local function hideSlot(sl)
+  if not (sl and sl.shown) then return end
+  for _, obj in ipairs(sl.objs) do pcall(function() obj:setField('instanceColor', 0, '1 1 1 0') end) end
+  sl.shown = false
+end
+
+local function tri(dd, a, b, c, col)
+  if dd.drawTriSolid then
+    dd:drawTriSolid(a, b, c, col)
+    dd:drawTriSolid(c, b, a, col)                    -- both faces: seen from either side
+  elseif dd.drawTriangle then
+    dd:drawTriangle(a, b, c, col)
+  end
+end
+
+-- items from markers.lua; refZ: the height of the player's vehicle (the ground is looked for from above it)
+function M.drawMarkers(items, refZ)
+  local used = {}
+  if M.markersAvailable() and #items > 0 then
+    local mk = require('earthBusRoutes/markers')
+    local ok, err = pcall(function()
+      local dd = debugDrawer
+      for _, it in ipairs(items) do
+        local pts = {}
+        for k, c in ipairs(it.zone.corners) do
+          local x, y, z = toGround(c[1], c[2], refZ)
+          if not x then return end
+          pts[k] = vec3(x, y, z + 0.06)
+        end
+        local colour = mk.COLOURS[it.state or 'approach'] or mk.COLOURS.approach
+        local a = it.alpha or 1
+        local function ci(alpha) return ColorI(math.floor(colour[1] * 255), math.floor(colour[2] * 255), math.floor(colour[3] * 255), math.floor(alpha * a)) end
+        if it.kind == 'soon' then
+          local edge = ColorF(colour[1], colour[2], colour[3], 0.45)
+          for k = 1, 4 do dd:drawLine(pts[k], pts[k % 4 + 1], edge) end
+        else
+          -- the bay: a light fill, its edge, the arrow of the way to stand
+          tri(dd, pts[1], pts[2], pts[3], ci(48))
+          tri(dd, pts[1], pts[3], pts[4], ci(48))
+          local edge = ColorF(colour[1], colour[2], colour[3], 0.9 * a)
+          for k = 1, 4 do dd:drawLine(pts[k], pts[k % 4 + 1], edge) end
+          local ar = {}
+          for k, c in ipairs(mk.arrow(it.zone)) do
+            local x, y, z = toGround(c[1], c[2], refZ)
+            if not x then return end
+            ar[k] = vec3(x, y, z + 0.08)
+          end
+          tri(dd, ar[1], ar[2], ar[3], ci(110))
+          -- the corner markers of the game
+          local sl = slot(it.kind)
+          if sl then
+            local okc, e2 = pcall(placeCorners, sl, pts, colour, a)
+            if okc then used[it.kind] = true
+            else cornersOff = true log('W', TAG, 'world: corner markers off: ' .. tostring(e2)) end
+          end
+          -- the name and who waits, over the middle of the bay
+          local text = mk.label(it)
+          if text ~= '' and (it.ahead or 0) <= LABEL_M and dd.drawTextAdvanced then
+            local mid = (pts[1] + pts[2] + pts[3] + pts[4]) * 0.25
+            local S = rawget(_G, 'String')
+            dd:drawTextAdvanced(vec3(mid.x, mid.y, mid.z + 2.6), S and S(text) or text, ColorF(1, 1, 1, a), true, false,
+              ColorI(0, 0, 0, math.floor(150 * a)))
+          end
+        end
+      end
+    end)
+    if not ok then
+      markersOff = true
+      log('W', TAG, 'world: markers off: ' .. tostring(err))
+    end
+  end
+  for name, sl in pairs(slots) do
+    if not used[name] then hideSlot(sl) end
+  end
+end
+
+-- The corner markers removed from the world (a trip ended, the mod unloads)
+function M.clearMarkers()
+  for name, sl in pairs(slots) do
+    for _, obj in ipairs(sl.objs) do pcall(function() obj:delete() end) end
+    slots[name] = nil
   end
 end
 

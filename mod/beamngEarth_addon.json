@@ -42,7 +42,7 @@
         "off"
       ],
       "default": "on",
-      "help": "A yellow zone on the road at the next stops, with the line and the stop over it."
+      "help": "The stop's bay on the road as in the game's bus mode: corner markers red while you come, orange in the bay, green when done; its name and who waits over it."
     },
     {
       "key": "units",
