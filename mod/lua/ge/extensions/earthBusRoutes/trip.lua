@@ -4,6 +4,8 @@
 local geo = require('earthBusRoutes/geomath')
 local demand = require('earthBusRoutes/demand')
 local scoring = require('earthBusRoutes/scoring')
+local rules = require('earthBusRoutes/rules')
+local speedlimit = require('earthBusRoutes/speedlimit')
 local M = {}
 
 M.ZONE_M = 35            -- the bus is "at" a stop this near its platform ...
@@ -40,6 +42,7 @@ function M.new(plan)
   t.score = scoring.new({ difficulty = t.opts.difficulty, bus = not plan.vehicle or plan.vehicle.bus ~= false,
     planned = #route.stops - t.startIndex + 1 })
   t.phase = 'start'                                     -- begins standing at the chosen first stop
+  t.rules = rules.new({ on = t.opts.rules ~= false, left = speedlimit.leftHand(route.limitInfo and route.limitInfo.cc) })
   return t
 end
 
@@ -204,7 +207,11 @@ function M.update(t, dt, s)
   local doorsOpen = s.doorsOpen
   t.standing = (speed < M.STOP_SPEED) and (t.standing + dt) or 0
   if doorsOpen == nil then doorsOpen = (t.phase == 'atStop' or t.phase == 'start') and t.standing >= M.NO_DOORS_DWELL_S end
-  scoring.sample(t.score, dt, speed, s.aLong, s.aLat, doorsOpen, s.overLimit)
+  local over = s.overLimit
+  if over == nil then over = rules.speeding(t.rules, t.route, t.along, t.off, speed) end
+  t.doorsMoving = doorsOpen == true and speed > 2
+  rules.signals(t.rules, t.elapsed, s.signalL, s.signalR)
+  scoring.sample(t.score, dt, speed, s.aLong, s.aLat, doorsOpen, over)
 
   t.dist = geo.dist(s.lat, s.lon, stop.lat, stop.lon)
   t.alongTimer = t.alongTimer - dt
@@ -245,6 +252,7 @@ function M.update(t, dt, s)
         if t.endTimer >= M.END_DWELL_S then finish(t) end
       end
     elseif speed > M.GO_SPEED then
+      if rules.noSignal(t.rules, t.elapsed) then scoring.noSignal(t.score) end
       depart(t)
     end
   end
@@ -283,7 +291,16 @@ function M.hud(t)
     notes = M.recentNotes(t), noteSeq = t.score.noteSeq or 0,
     atStop = t.phase == 'atStop' and { alightLeft = t.alightLeft, boardLeft = t.boardLeft, doorsHint = not t.doorOpenedHere } or nil,
     finished = t.finished,
+    rules = M.rulesHud(t),
   }
+end
+
+-- What the HUD shows of the rules: the limit sign, the doors hint, the indicator hint; nil when the rules are off
+function M.rulesHud(t)
+  local r = t.rules
+  if not r or not r.on then return nil end
+  return { limit = r.limit, over = r.over, doorsMoving = t.doorsMoving or false,
+    signal = r.seen and { side = rules.side(r), on = rules.signalOn(r) } or nil }
 end
 
 function M.liveScore(t)

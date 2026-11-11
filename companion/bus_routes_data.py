@@ -69,7 +69,7 @@ PHOTON_COOLDOWN_S = 60          # after a failure the geocoder is left alone thi
 _photon_down_until = 0.0
 PLACE_KINDS = {"city": 5, "town": 4, "municipality": 3, "village": 3, "borough": 2, "suburb": 2, "hamlet": 2, "quarter": 1,
                "neighbourhood": 1, "locality": 1}
-FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer", "gtfs", "mapstops"]
+FEATURES = ["path", "along", "search", "stations", "local", "lines", "places", "progress", "towns", "gazetteer", "gtfs", "mapstops", "limits"]
 STATIONS_M = 25000
 STATIONS_CELL_DEG = 0.05
 OSRM = ["https://router.project-osrm.org", "https://routing.openstreetmap.de/routed-car"]
@@ -955,6 +955,19 @@ class Gazetteer:
                 break
         return out
 
+    def in_box(self, box):
+        """The places (rows of parse_geonames) inside (lat0, lon0, lat1, lon1)."""
+        with self._lock:
+            grid, places = self._grid, self.places
+        out = []
+        for gy in range(int(box[0] // 0.5), int(box[2] // 0.5) + 1):
+            for gx in range(int(box[1] // 0.5), int(box[3] // 0.5) + 1):
+                for gid in grid.get((gy, gx), ()):
+                    p = places[gid]
+                    if box[0] <= p[2] <= box[2] and box[1] <= p[3] <= box[3]:
+                        out.append(p)
+        return out
+
     def towns(self, lat, lon, radius=TOWNS_M):
         """The places within `radius`, the biggest first (as slim_towns)."""
         with self._lock:
@@ -969,6 +982,57 @@ class Gazetteer:
                         out.append(self._row(p, d))
         out.sort(key=lambda t: (-TOWN_RANK[t["kind"]], -t["population"], t["name"]))
         return out
+
+
+# ---- speed limits: the towns round a road (the mod works out "built-up" from them) -------------------------------------------
+
+TOWN_RADII = ((100000, 3000), (30000, 2400), (10000, 2000), (3000, 1600), (500, 1200))     # population -> built-up radius, m
+TOWN_RADIUS_MIN_M = 1000
+TOWN_RADIUS_MAX_M = 3000
+LIMIT_STEP_M = 400                 # the road is looked at this often (a longer road: a longer step, at most LIMIT_SAMPLES points)
+LIMIT_SAMPLES = 1500
+
+
+def town_radius(population):
+    """How far from its centre a town's built-up area is taken to reach: 1 km for a hamlet, 3 km for a big city."""
+    for pop, radius in TOWN_RADII:
+        if population >= pop:
+            return radius
+    return TOWN_RADIUS_MIN_M
+
+
+def road_samples(road, step=LIMIT_STEP_M, cap=LIMIT_SAMPLES):
+    """Points along a road [(lat, lon) ...] at most `step` metres apart (more apart on a very long road, `cap` points at most)."""
+    legs = [hav(a, b) for a, b in zip(road, road[1:])]
+    step = max(step, sum(legs) / cap) if legs else step
+    out = list(road[:1])
+    for a, b, d in zip(road, road[1:], legs):
+        n = int(d // step)
+        for k in range(1, n + 1):
+            f = k * step / d
+            out.append((a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f))
+        out.append(b)
+    return out
+
+
+def road_limits(places, road):
+    """What the mod needs to know the speed limit where the map does not say: {"cc": "CZ", "towns": [[lat, lon, radius_m]]}
+    for the towns whose built-up area (town_radius) the road touches; the country is the nearest town's. None for no data."""
+    if not places or len(road) < 2:
+        return None
+    samples = road_samples(road)
+    lats, lons = [p[0] for p in samples], [p[1] for p in samples]
+    margin = 0.06                                         # degrees: a bit over the biggest radius
+    box = (min(lats) - margin, min(lons) - margin, max(lats) + margin, max(lons) + margin)
+    towns, nearest = [], None
+    for p in places(box):
+        best = min(_dist_m(p[2], p[3], la, lo) for la, lo in samples)
+        if nearest is None or best < nearest[0]:
+            nearest = (best, p[6])
+        if best <= town_radius(p[5]):
+            towns.append([round(p[2], 5), round(p[3], 5), town_radius(p[5])])
+    cc = nearest[1] if nearest and nearest[0] <= 10000 and nearest[1] else None
+    return {"cc": cc, "towns": towns}
 
 
 # ---- timetables from this computer: GTFS (every line of a country with its real timetable, downloaded once) ----------------
@@ -1812,6 +1876,36 @@ class Service:
         data["elements"] = gt + [e for e in data.get("elements", []) if e.get("type") != "relation"]
         return json.dumps(data, separators=(",", ":"), ensure_ascii=False), cached
 
+    def route_limits(self, road):
+        """road_limits() from the towns of this computer (the files are fetched the first time, as the map of towns does);
+        None when there are no towns or nothing is known about the place."""
+        pl = self.places
+        if not (pl.enabled and road):
+            return None
+        try:
+            if not pl.ready(*road[0]) and not (pl.ensure(*road[0]) and pl.ready(*road[0])):
+                return None
+            return road_limits(pl.in_box, road)
+        except (OSError, ValueError, KeyError) as e:
+            say(f"limits: {type(e).__name__} {str(e)[:80]}")
+            return None
+
+    def with_limits(self, text):
+        """A route answer of Overpass with the towns round its road (rel.limits) added: the answer's way tags carry the
+        maxspeed already. The text unchanged when there is nothing to add."""
+        try:
+            data = json.loads(text)
+            rel = next(e for e in data["elements"] if e.get("type") == "relation")
+            road = [(g["lat"], g["lon"]) for m in rel.get("members", []) if m.get("type") == "way"
+                    for g in m.get("geometry") or []]
+            lim = self.route_limits(road)
+            if lim is None:
+                return text
+            rel["limits"] = lim
+            return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+        except (ValueError, KeyError, TypeError, StopIteration):
+            return text
+
     def gtfs_route(self, rid):
         """The text of a route answer for a line of the timetables: a relation with one way (the road through its stops, asked
         of the routing servers in windows of 24 stops) and its stops with their times from the start, as the mod reads
@@ -1841,6 +1935,9 @@ class Service:
                "tags": {"type": "route", "route": "bus", "ref": pat["ref"], "name": f"{pat['ref']}: {first} - {last}", "from": first,
                         "to": last, "operator": pat["agency"], "public_transport:version": "2", "bus_routes:source": "gtfs"},
                "gtfs": {"offs": [x["off"] for x in stops], "starts": pat["starts"]}}
+        lim = self.route_limits(road)
+        if lim is not None:
+            rel["limits"] = lim
         seen, nodes = set(), []
         for x in stops:
             if x["rowid"] not in seen:
@@ -1993,6 +2090,7 @@ def make_handler(service, port):
                         # the servers refuse the longer query (a syntax they do not know): the plain route, kept under its own key
                         say(f"route {rid}: the query with the near bus stops was refused; the plain one instead")
                         text, cached = service.get(f"route_{rid}", route_query_basic(rid))
+                    text = service.with_limits(text)
                 elif u.path == "/v1/path":
                     pts = parse_pts(q["pts"][0])
                     check_legs(pts)

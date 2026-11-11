@@ -5,6 +5,8 @@ M.WEIGHTS = { punctuality = 350, service = 250, comfort = 200, safety = 200 }
 -- strictness: scales every tolerance (relaxed forgives more)
 M.STRICT = { relaxed = 1.4, normal = 1.0, strict = 0.7 }
 M.LIMITS = { longitudinal = 2.5, lateral = 3.0 }   -- m/s^2 above which the ride is rough
+M.SPEEDING_NOTE_S = 3                         -- speeding this long gets a note
+M.NO_SIGNAL_POINTS = 15                       -- points lost for pulling out without the indicator
 M.GRADES = { { 900, 'S' }, { 800, 'A' }, { 650, 'B' }, { 500, 'C' }, { 0, 'D' } }
 
 function M.new(opts)
@@ -62,7 +64,20 @@ function M.sample(s, dt, speed, aLong, aLat, doorOpen, overLimit)
   else
     s._doorWas = false
   end
-  if overLimit then s.speedingSec = s.speedingSec + dt end
+  if overLimit then
+    s.speedingSec = s.speedingSec + dt
+    s._overRun = (s._overRun or 0) + dt
+    -- one note per stretch of speeding, once it has lasted a few seconds (the points go through the safety part)
+    if s._overRun >= M.SPEEDING_NOTE_S and not s._overNoted then s._overNoted = true note(s, 'Speeding', 0) end
+  else
+    s._overRun, s._overNoted = 0, false
+  end
+end
+
+-- Pulled out of a stop without the indicator (trip.lua decides): the safety part loses M.NO_SIGNAL_POINTS of its weight
+function M.noSignal(s)
+  s.signalMisses = (s.signalMisses or 0) + 1
+  note(s, 'No signal', -M.NO_SIGNAL_POINTS)
 end
 
 function M.collision(s) s.collisions = s.collisions + 1 note(s, 'Collision', -40) end
@@ -87,7 +102,7 @@ function M.result(s)
   local planned = math.max(s.planned, s.served + s.missed, 1)
   local service = clamp01(s.served / planned) * (1 - clamp01(s.leftWaiting / math.max(1, s.passengers + s.leftWaiting)) * 0.3)
   local comfort = 1 - clamp01(s.harshSec / math.max(60, 0.08 * s.drivenSec))
-  local safety = clamp01(1 - 0.2 * s.doorEvents - 0.15 * s.collisions - 0.01 * s.speedingSec)
+  local safety = clamp01(1 - 0.2 * s.doorEvents - 0.15 * s.collisions - 0.01 * s.speedingSec - (s.signalMisses or 0) * M.NO_SIGNAL_POINTS / M.WEIGHTS.safety)
   local parts = { punctuality = punctuality, service = service, comfort = comfort, safety = safety }
   local points = 0
   for k, w in pairs(M.WEIGHTS) do points = points + w * parts[k] end

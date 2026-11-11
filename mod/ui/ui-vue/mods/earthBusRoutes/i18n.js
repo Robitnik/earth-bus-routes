@@ -100,7 +100,7 @@ const DICT = {
     "credit": "Map data © OpenStreetMap contributors · towns © GeoNames (CC BY) · timetables © CIS JŘ via JrUtil",
     "lang": "Language", "units.m": "m", "units.km": "km",
     "day.1": "Monday", "day.2": "Tuesday", "day.3": "Wednesday", "day.4": "Thursday", "day.5": "Friday", "day.6": "Saturday", "day.7": "Sunday",
-    "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision",
+    "note.Left early": "Left early", "note.Stop skipped": "Stop skipped", "note.Moving with doors open": "Moving with doors open", "note.Collision": "Collision", "note.No signal": "No indicator", "note.Speeding": "Speeding",
   },
   uk: {
     "title": "Автобусні маршрути",
@@ -199,7 +199,7 @@ const DICT = {
     "credit": "Дані карти © OpenStreetMap contributors · міста © GeoNames (CC BY) · розклади © CIS JŘ через JrUtil",
     "lang": "Мова", "units.m": "м", "units.km": "км",
     "day.1": "Понеділок", "day.2": "Вівторок", "day.3": "Середа", "day.4": "Четвер", "day.5": "П'ятниця", "day.6": "Субота", "day.7": "Неділя",
-    "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення",
+    "note.Left early": "Поїхали раніше часу", "note.Stop skipped": "Зупинку пропущено", "note.Moving with doors open": "Рух з відчиненими дверима", "note.Collision": "Зіткнення", "note.No signal": "Без поворотника", "note.Speeding": "Перевищення швидкості",
   },
 }
 

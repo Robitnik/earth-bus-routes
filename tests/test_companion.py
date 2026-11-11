@@ -1017,5 +1017,55 @@ class Http(unittest.TestCase):
         self.assertIn("served", j)
 
 
+class SpeedLimits(unittest.TestCase):
+    """The towns round a road, for the built-up / outside speed limit of the mod."""
+
+    def gaz(self, tmp):
+        def fetch(url, dest):
+            name = url.rsplit("/", 1)[1][:-4]
+            geonames_zip(tmp, name, {"cities15000": BASE, "CZ": CZ, "PL": PL}[name])
+        return d.Gazetteer(tmp, fetch=fetch)
+
+    def test_radius_grows_with_the_town(self):
+        self.assertEqual([d.town_radius(p) for p in (0, 499, 500, 3000, 10000, 30000, 100000, 1165581)],
+                         [1000, 1000, 1200, 1600, 2000, 2400, 3000, 3000])
+
+    def test_road_samples_are_close_enough(self):
+        road = [(50.0, 16.0), (50.0, 16.05)]                    # 3.6 km
+        pts = d.road_samples(road, step=400)
+        self.assertEqual(pts[0], road[0])
+        self.assertEqual(pts[-1], road[-1])
+        self.assertTrue(all(d.hav(a, b) <= 401 for a, b in zip(pts, pts[1:])))
+        self.assertLessEqual(len(d.road_samples([(50.0, 10.0), (50.0, 20.0)], cap=100)), 105)   # a very long road: a longer step
+
+    def test_towns_the_road_touches_and_the_country(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            g = self.gaz(tmp)
+            self.assertTrue(g.ensure(50.53, 16.23))
+            road = [(50.5369, 16.2335), (50.5100, 16.2500), (50.4993, 16.2769), (50.4167, 16.1629)]     # Police, Machov, Nachod
+            lim = d.road_limits(g.in_box, road)
+            self.assertEqual(lim["cc"], "CZ")
+            names = {(t[0], t[1]): t[2] for t in lim["towns"]}
+            self.assertEqual(names[(50.5369, 16.2335)], 1600)         # Police nad Metují, 4316 people
+            self.assertEqual(names[(50.4993, 16.2769)], 1200)         # Machov, 1109
+            self.assertEqual(names[(50.4167, 16.1629)], 2000)         # Náchod, 20000
+            self.assertNotIn((50.088, 14.4208), names)                 # Prague is 140 km away
+            self.assertIsNone(d.road_limits(g.in_box, [(50.5, 16.2)]))  # no road, no answer
+            self.assertIsNone(d.road_limits(None, road))
+
+    def test_a_route_answer_gets_its_limits_and_nothing_else_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = d.Service(d.Cache(tmp + "/cache"), upstream=lambda q: "{}", places=self.gaz(tmp))
+            out = json.loads(svc.with_limits(ROUTE))
+            rel = out["elements"][0]
+            self.assertEqual(rel["limits"]["cc"], "CZ")
+            self.assertTrue(rel["limits"]["towns"])
+            del rel["limits"]
+            self.assertEqual(out, json.loads(ROUTE))
+            off = d.Service(d.Cache(tmp + "/cache2"), upstream=lambda q: "{}", places=d.Gazetteer(None))
+            self.assertEqual(off.with_limits(ROUTE), ROUTE)           # no town files: the answer as it was
+            self.assertEqual(off.with_limits("not json"), "not json")
+
+
 if __name__ == "__main__":
     unittest.main()

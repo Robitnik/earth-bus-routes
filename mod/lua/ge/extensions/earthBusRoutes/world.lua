@@ -287,6 +287,35 @@ function M.doorsOpen(veh)
   return v == true
 end
 
+-- The indicators: electrics.values.signal_L / signal_R (the lamp, flashing) and signal_left_input / signal_right_input (the
+-- lever). Which of them the citybus and the mods built on it report is NOT verified in the game: every name is asked for, and
+-- a vehicle that reports none leaves the indicator rule off (rules.lua).
+M.SIGNAL_KEYS = { L = { 'signal_L', 'signal_left_input' }, R = { 'signal_R', 'signal_right_input' } }
+
+function M.watchSignals(veh)
+  local b = rawget(_G, 'core_vehicleBridge')
+  if not (veh and b and b.registerValueChangeNotification) then return end
+  for _, keys in pairs(M.SIGNAL_KEYS) do
+    for _, k in ipairs(keys) do try(b.registerValueChangeNotification, veh, k) end
+  end
+end
+
+-- true / false for 'L' or 'R', nil when the vehicle never reported the value
+function M.signal(veh, side)
+  local b = rawget(_G, 'core_vehicleBridge')
+  if not (veh and b and b.getCachedVehicleData) then return nil end
+  local lit
+  for _, k in ipairs(M.SIGNAL_KEYS[side] or {}) do
+    local ok, v = pcall(b.getCachedVehicleData, veh:getID(), k)       -- (silent: it runs every frame)
+    if ok and v ~= nil then
+      local on = (type(v) == 'number' and v > 0.5) or v == true
+      if on then return true end
+      lit = false
+    end
+  end
+  return lit
+end
+
 local acc = { prev = nil, aLong = 0, aLat = 0, id = nil }
 function M.resetAccel() acc.prev = nil acc.aLong, acc.aLat = 0, 0 end
 

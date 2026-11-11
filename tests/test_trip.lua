@@ -349,4 +349,168 @@ function T.a_bay_turns_orange_in_it_and_green_when_done()
   assert(geo.dist(a[1][1], a[1][2], back[1], back[2]) > geo.dist(a[2][1], a[2][2], back[1], back[2]), 'the tip is ahead')
 end
 
+-- ---- the rules: speed limit, indicator, doors hint -------------------------------------------------------------------------
+
+local speedlimit = require('earthBusRoutes/speedlimit')
+
+-- the route with a town the size of the whole route round it: everything is built up (50) ...
+local function builtUp(r, cc)
+  local p = r.path[1]
+  r.limitInfo = speedlimit.info({}, { cc = cc or 'CZ', towns = { { p.lat, p.lon, 100000 } } })
+  return r
+end
+
+-- ... and the bus drives `secs` at `kmh` along the road from the first stop
+local function drive(t, r, kmh, secs, signals)
+  local s = sim(t, r)
+  for i = 1, math.floor(secs * 10) do
+    local lat, lon = geo.pointAt(r.path, r.cum, s.along)
+    s.along = s.along + kmh / 3.6 * 0.1
+    local sg = signals and signals(i * 0.1) or {}
+    trip.update(t, 0.1, { lat = lat, lon = lon, speed = kmh / 3.6, aLong = 0.3, aLat = 0.3, doorsOpen = false, signalL = sg.L, signalR = sg.R })
+  end
+  return s
+end
+
+local function noteCount(t, text)
+  local n = 0
+  for _, x in ipairs(t.score.notes) do if x.text == text then n = n + 1 end end
+  return n
+end
+
+function T.speeding_counts_only_above_the_tolerance()
+  local r = builtUp(route())
+  local t = newTrip(r)
+  drive(t, r, 59, 10)                                         -- 50 + 10: still allowed
+  assert(t.score.speedingSec == 0, t.score.speedingSec)
+  assert(t.limit == nil and trip.hud(t).rules.limit == 50)
+  drive(t, r, 63, 10)
+  assert(t.score.speedingSec > 8 and t.score.speedingSec <= 10.1, t.score.speedingSec)
+  assert(noteCount(t, 'Speeding') == 1, 'one note for one stretch of speeding')
+  assert(trip.hud(t).rules.over == true)
+  local before = trip.result(t).parts.safety
+  assert(before < 1 and before > 0.8)
+end
+
+function T.speeding_is_noted_again_after_a_pause()
+  local r = builtUp(route())
+  local t = newTrip(r)
+  drive(t, r, 70, 6)
+  drive(t, r, 40, 3)
+  drive(t, r, 70, 6)
+  assert(noteCount(t, 'Speeding') == 2, noteCount(t, 'Speeding'))
+end
+
+function T.no_limit_known_no_speeding()
+  local r = route()                                           -- no limit info at all
+  local t = newTrip(r)
+  drive(t, r, 120, 5)
+  assert(t.score.speedingSec == 0 and trip.hud(t).rules.limit == nil)
+end
+
+function T.the_rules_can_be_switched_off()
+  local r = builtUp(route())
+  local t = trip.new({ route = r, startIndex = 1, day = 2, clock = 8 * 3600, opts = { density = 'high', rules = false } })
+  drive(t, r, 90, 5, function() return { L = false, R = false } end)
+  assert(t.score.speedingSec == 0 and noteCount(t, 'No signal') == 0 and trip.hud(t).rules == nil)
+end
+
+function T.the_samples_own_overlimit_still_counts()
+  local r = route()
+  local t = newTrip(r)
+  local lat, lon = geo.pointAt(r.path, r.cum, 0)
+  for _ = 1, 20 do trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, overLimit = true }) end
+  assert(t.score.speedingSec > 1.9)
+end
+
+local function SIG(on, from, to) return function(sec) return { L = (sec >= from and sec < to) and on or false, R = false } end end
+
+function T.pulling_out_without_the_indicator_is_noted()
+  local r = route()
+  local t = newTrip(r)
+  drive(t, r, 20, 5, function() return { L = false, R = false } end)
+  assert(t.departedStops == 1)
+  assert(noteCount(t, 'No signal') == 1)
+  assert(trip.result(t).parts.safety < 1 and trip.result(t).parts.safety > 0.9)
+end
+
+function T.the_indicator_lit_a_second_before_moving_is_fine()
+  local r = route()
+  local t = newTrip(r)
+  -- standing (speed 0) 3 s with the left indicator on, then off: it was on 1 s or more within 5 s before moving
+  local s = sim(t, r)
+  for i = 1, 30 do s:frame(0, false) end
+  local lat, lon = geo.pointAt(r.path, r.cum, s.along)
+  for i = 1, 30 do trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, signalL = true, signalR = false }) end
+  for i = 1, 20 do trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, signalL = false, signalR = false }) end   -- 2 s later
+  for i = 1, 10 do s:frame(5, false) end
+  assert(t.departedStops == 1 and noteCount(t, 'No signal') == 0)
+end
+
+function T.a_short_blink_or_one_too_long_ago_is_not_enough()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  local lat, lon = geo.pointAt(r.path, r.cum, s.along)
+  for i = 1, 5 do trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, signalL = true, signalR = false }) end     -- 0.5 s only
+  for i = 1, 30 do trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, signalL = false, signalR = false }) end
+  for i = 1, 10 do s:frame(5, false) end
+  assert(noteCount(t, 'No signal') == 1)
+  -- a long signal, but off for 8 s before the bus moves (second stop)
+  local t2 = newTrip(r)
+  local s2 = sim(t2, r)
+  for i = 1, 20 do trip.update(t2, 0.1, { lat = lat, lon = lon, speed = 0, signalL = true, signalR = false }) end
+  for i = 1, 80 do trip.update(t2, 0.1, { lat = lat, lon = lon, speed = 0, signalL = false, signalR = false }) end
+  for i = 1, 10 do s2:frame(5, false) end
+  assert(noteCount(t2, 'No signal') == 1)
+end
+
+function T.a_flashing_indicator_counts()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  local lat, lon = geo.pointAt(r.path, r.cum, s.along)
+  for i = 1, 40 do                                           -- lamp on 0.4 s, off 0.4 s
+    trip.update(t, 0.1, { lat = lat, lon = lon, speed = 0, signalL = (math.floor((i - 1) / 4) % 2 == 0), signalR = false })
+  end
+  for i = 1, 10 do s:frame(5, false) end
+  assert(t.departedStops == 1, 'departed ' .. t.departedStops .. ' ' .. t.phase)
+  assert(noteCount(t, 'No signal') == 0, 'notes ' .. noteCount(t, 'No signal'))
+end
+
+function T.without_indicator_values_the_rule_is_off()
+  local r = route()
+  local t = newTrip(r)
+  drive(t, r, 20, 5)                                         -- signalL / signalR stay nil: the game never reported them
+  assert(t.departedStops == 1 and noteCount(t, 'No signal') == 0)
+  assert(trip.hud(t).rules.signal == nil)
+end
+
+function T.left_hand_traffic_wants_the_right_indicator()
+  local r = builtUp(route(), 'GB')
+  local t = newTrip(r)
+  drive(t, r, 20, 6, function(sec) return { L = sec < 5, R = false } end)       -- the wrong side
+  assert(t.departedStops == 1, 'departed ' .. t.departedStops)
+  assert(noteCount(t, 'No signal') == 1, 'notes ' .. noteCount(t, 'No signal'))
+  local t2 = newTrip(r)
+  local right = function() return { L = false, R = true } end
+  drive(t2, r, 0, 2, right)                                  -- standing with the right indicator on, then off
+  drive(t2, r, 20, 4, right)
+  assert(t2.departedStops == 1 and noteCount(t2, 'No signal') == 0)
+  assert(trip.hud(t2).rules.signal.side == 'R' and trip.hud(t2).rules.signal.on == true)
+end
+
+function T.the_hud_warns_of_open_doors_on_the_move()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  for _ = 1, 10 do s:frame(0, true) end
+  assert(trip.hud(t).rules.doorsMoving == false)
+  for _ = 1, 3 do s:frame(5, true) end
+  assert(trip.hud(t).rules.doorsMoving == true)
+  assert(t.score.doorEvents >= 1)                            -- the score already counts it
+  s:frame(5, false)
+  assert(trip.hud(t).rules.doorsMoving == false)
+end
+
 return T

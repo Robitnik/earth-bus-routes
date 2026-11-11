@@ -45,6 +45,17 @@
       "help": "The stop's bay on the road as in the game's bus mode: corner markers red while you come, orange in the bay, green when done; its name and who waits over it."
     },
     {
+      "key": "rules",
+      "label": "Driving rules",
+      "type": "choice",
+      "choices": [
+        "on",
+        "off"
+      ],
+      "default": "on",
+      "help": "Points for the indicator when you pull out of a stop and for keeping to the speed limit (+10 km/h allowed), and the limit sign on the HUD."
+    },
+    {
       "key": "units",
       "label": "Units",
       "type": "choice",
