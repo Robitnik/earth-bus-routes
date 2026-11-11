@@ -40,6 +40,11 @@
       </form>
       <p class="muted small">{{ b.lineName ? t("build.lineStops", { q: b.lineName }) : b.candKind === "lines" ? t("build.linesFor", { q: b.query }) : b.candKind === "search" ? t("build.resultsFor", { q: b.query }) : t("build.ringHint") }}</p>
 
+      <div v-if="b.places && b.places.length" class="places" role="group" :aria-label="t('build.places')">
+        <button v-for="pl in b.places" :key="pl.id" class="place-chip" :disabled="!!b.busy.search" @click="call('uiBuildPlace', pl.id)">
+          ＋ {{ pl.name }}<small>{{ placeKind(pl) }}</small>
+        </button>
+      </div>
       <div v-if="b.err" class="notice bad"><p>{{ errText(b.err) }}</p></div>
       <div v-if="b.busy.cands || b.busy.search" class="loading small">
         <span class="spin"></span><div><b>{{ b.busy.search ? t("build.searching") : t("build.loadingCands") }}</b><div class="muted">{{ t("build.loadingHint") }}</div></div>
@@ -72,7 +77,13 @@
 
     <!-- the map and the next step -->
     <div class="side">
-      <div class="map"><MiniMap :points="b.points" :line="b.line" :cands="b.cands" :hover="hover" :label="t('build.map')" @pick="pick" @hover="hover = $event" /></div>
+      <div class="map">
+        <MiniMap :points="b.points" :line="b.line" :cands="b.showCities ? [] : b.cands" :hover="hover" :places="b.cities || []" :label="t('build.map')"
+                 @pick="pick" @hover="hover = $event" @place="id => call('uiBuildCity', id)" />
+        <button class="btn cities-btn" :class="{ on: b.showCities }" :disabled="!!b.busy.cities" @click="call('uiBuildCities', !b.showCities)">
+          {{ b.busy.cities ? t("build.citiesLoading") : (b.showCities ? t("build.citiesOff") : t("build.cities")) }}
+        </button>
+      </div>
       <div class="card actions">
         <div class="seg" role="group" :aria-label="t('build.stopsMode')">
           <button :class="{ on: b.mode === 'all' }" @click="call('uiBuildMode', 'all')">{{ t("build.modeAll") }}<small>{{ t("build.modeAllHint") }}</small></button>
@@ -118,6 +129,12 @@ function typed() {
 function clearSearch() { clearTimeout(timer); q.value = ""; call("uiBuildClearSearch") }
 onBeforeUnmount(() => { clearTimeout(timer); typing(false) })
 
+function placeKind(pl) {
+  const k = "find.kind." + pl.kind
+  const v = t(k)
+  return v === k ? t("build.mainStation") : t("build.mainStationOf", { kind: v })
+}
+
 function errText(e) {
   const key = "build.err." + e
   const s = t(key)
@@ -146,8 +163,8 @@ function errText(e) {
 .warn { margin: 0; color: var(--late); font-size: 13px; line-height: 1.4; }
 
 // where next
-.search { display: flex; gap: 8px; margin-top: 2px;
-  input { flex: 1; min-width: 0; padding: 10px 12px; border: 0; border-radius: 8px; background: #0f1a20; color: var(--ink); font: inherit; box-shadow: inset 0 0 0 1px var(--hair);
+.search { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px;
+  input { flex: 1; min-width: 180px; padding: 10px 12px; border: 0; border-radius: 8px; background: #0f1a20; color: var(--ink); font: inherit; box-shadow: inset 0 0 0 1px var(--hair);
     &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); outline-offset: 0; } } }
 .cands { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 6px; }
 .cand-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: var(--panel-3); color: var(--ink); font: inherit; text-align: left; cursor: pointer;
@@ -164,6 +181,11 @@ function errText(e) {
 .spin { flex: none; width: 22px; height: 22px; border: 3px solid var(--hair); border-top-color: var(--line); border-radius: 50%; animation: spin 0.9s linear infinite;
   &.small { display: inline-block; width: 12px; height: 12px; border-width: 2px; margin-right: 6px; vertical-align: -1px; } }
 @keyframes spin { to { transform: rotate(360deg); } }
+.places { display: flex; flex-wrap: wrap; gap: 6px; }
+.place-chip { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 5px 12px; border: 0; border-radius: 99px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 800; font-size: 15px; line-height: 1.15; cursor: pointer;
+  small { font-weight: 400; font-size: 11px; color: var(--muted); }
+  &:hover:not(:disabled) { background: var(--line); color: var(--ink-on-line); small { color: inherit; } }
+  &:disabled { opacity: 0.5; cursor: default; } &:focus-visible { outline: 2px solid var(--line); } }
 .empty { padding: 14px 2px; line-height: 1.5; }
 .line-hit { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 10px; background: var(--panel-3);
   .plate { flex: none; min-width: 44px; padding: 2px 10px; display: grid; place-items: center; border-radius: 6px; font-weight: 800; font-size: 18px; }
@@ -174,7 +196,8 @@ function errText(e) {
 
 // map + actions
 .side { display: flex; flex-direction: column; gap: 12px; }
-.map { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; }
+.map { position: relative; flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; }
+.cities-btn.cities-btn.btn { position: absolute; right: 10px; top: 10px; padding: 6px 12px; font-size: 13px; background: rgba(18, 31, 38, 0.92); box-shadow: inset 0 0 0 1px var(--hair); &.on { background: var(--line); color: var(--ink-on-line); } }
 .actions { flex: none; }
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
   button { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border: 0; border-radius: 8px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 700; text-align: left; cursor: pointer;

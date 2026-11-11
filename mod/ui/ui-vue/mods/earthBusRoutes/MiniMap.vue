@@ -25,6 +25,15 @@
       <text v-if="hover === c.id" :x="c.x > W - 190 ? c.x - 10 : c.x + 10" :y="c.y - 8" class="tip" :text-anchor="c.x > W - 190 ? 'end' : 'start'">{{ short(c.name) }}</text>
     </g>
 
+    <!-- you -->
+    <g v-if="youDot" class="you"><circle :cx="youDot.x" :cy="youDot.y" r="15" class="halo" /><circle :cx="youDot.x" :cy="youDot.y" r="5" class="core" /></g>
+
+    <!-- towns: chips, the bigger first; one that would cover another is left out -->
+    <g v-for="pl in placeChips" :key="'t' + pl.id" class="place" :class="pl.kind" @click="emit('place', pl.id)">
+      <rect :x="pl.x - pl.w / 2" :y="pl.y - pl.h / 2" :width="pl.w" :height="pl.h" :rx="pl.h / 2" class="chip" />
+      <text :x="pl.x" :y="pl.y + pl.fs * 0.35" class="pl-name" :style="{ fontSize: pl.fs + 'px' }">{{ pl.name }}</text>
+    </g>
+
     <!-- stations already chosen -->
     <g v-for="(p, i) in pointDots" :key="'p' + i" class="chosen">
       <circle :cx="p.x" :cy="p.y" r="11" class="ring" />
@@ -45,8 +54,10 @@ const props = defineProps({
   hover: { type: [Number, String], default: null },
   showNames: { type: Boolean, default: true },
   label: { type: String, default: "map" },
+  places: { type: Array, default: () => [] },     // towns: { id, name, lat, lon, kind }
+  you: { type: Object, default: null },           // where the player is: { lat, lon }
 })
-const emit = defineEmits(["pick", "hover"])
+const emit = defineEmits(["pick", "hover", "place"])
 
 const W = 460
 const H = 380
@@ -58,7 +69,11 @@ const all = computed(() => {
   const out = []
   for (const p of props.points) out.push([p.lat, p.lon])
   if (props.line) for (const p of props.line) out.push(p)
-  if (!props.line || props.line.length < 2) {
+  if (props.you) out.push([props.you.lat, props.you.lon])
+  if (props.places.length) {
+    // a map of towns: all of them (the biggest 40) in the frame
+    for (const p of props.places.slice(0, 40)) out.push([p.lat, p.lon])
+  } else if (!props.line || props.line.length < 2) {
     for (const c of props.cands) if (c.dist == null || c.dist <= NEAR_M) out.push([c.lat, c.lon])
   }
   return out
@@ -100,6 +115,25 @@ const candDots = computed(() => props.cands
   .filter(c => c.x > 8 && c.x < W - 8 && c.y > 8 && c.y < H - 8))
 const stopDots = computed(() => props.stops.map(s => ({ ...project(s.lat, s.lon), chosen: s.chosen, on: s.on })))
 
+const youDot = computed(() => (props.you ? project(props.you.lat, props.you.lon) : null))
+const FS = { city: 17, town: 14, village: 11.5 }
+const placeChips = computed(() => {
+  const out = []
+  // the stations already chosen stand for their towns: their numbered markers and names, not a second label
+  const boxes = pointDots.value.map(d => ({ x: d.x + 60, y: d.y, w: 150, h: 26 }))
+  for (const p of props.places) {
+    const { x, y } = project(p.lat, p.lon)
+    const fs = FS[p.kind] || 12
+    const w = String(p.name).length * fs * 0.6 + 16
+    const h = fs + 9
+    if (x < w / 2 || x > W - w / 2 || y < h / 2 || y > H - h / 2) continue
+    if (boxes.some(b => Math.abs(b.x - x) < (b.w + w) / 2 + 2 && Math.abs(b.y - y) < (b.h + h) / 2 + 2)) continue
+    boxes.push({ x, y, w, h })
+    out.push({ id: p.id, name: p.name, kind: p.kind, x, y, w, h, fs })
+  }
+  return out
+})
+
 function short(n) {
   n = String(n || "")
   return n.length > 26 ? n.slice(0, 25) + "…" : n
@@ -121,6 +155,13 @@ function short(n) {
   &:focus-visible .dot { stroke-width: 3; }
 }
 .tip { fill: var(--ink); font-size: 13px; font-weight: 700; paint-order: stroke; stroke: #0b1519; stroke-width: 4px; pointer-events: none; }
+.place { cursor: pointer;
+  .chip { fill: #223743; fill-opacity: 0.93; stroke: rgba(255, 255, 255, 0.18); stroke-width: 1; transition: fill 0.12s; }
+  .pl-name { fill: var(--ink); text-anchor: middle; font-weight: 700; pointer-events: none; }
+  &.city .chip { fill: #2b4a5c; stroke: var(--line); } &.city .pl-name { font-weight: 800; }
+  &.village .chip { fill: #1c2d36; } &.village .pl-name { fill: var(--muted); font-weight: 600; }
+  &:hover .chip { fill: var(--line); } &:hover .pl-name { fill: var(--ink-on-line); } }
+.you { .halo { fill: rgba(255, 255, 255, 0.3); stroke: #fff; stroke-width: 1.5; } .core { fill: #fff; stroke: #0b1519; stroke-width: 2; } }
 .chosen {
   .ring { fill: var(--line); stroke: #0b1519; stroke-width: 2.5; }
   .num { fill: var(--ink-on-line); font-size: 12px; font-weight: 800; text-anchor: middle; }

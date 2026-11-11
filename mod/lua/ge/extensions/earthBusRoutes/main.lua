@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.5.0'
+M.VERSION = '0.6.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -143,6 +143,8 @@ local function buildModel()
   if S.result then model.result = S.result end
   model.stats = S.stats
   model.find = M.findModel()
+  model.progress = datasvc.state.progress
+  model.map = S.map
   model.saved = M.savedModel()
   model.features = datasvc.state.features
   if S.build then model.build = M.buildModelOf() end
@@ -154,6 +156,7 @@ local function publish()
   guihooks.trigger('EarthBusRoutesState', buildModel())
 end
 M.publish = publish
+datasvc.onProgress = function() publish() end          -- what the service is busy with changes: the menu shows it
 
 -- ---- data ----------------------------------------------------------------------------------------------------------
 
@@ -220,6 +223,71 @@ local function findReverse(route)
   end
 end
 
+-- ---- places (cities, towns) --------------------------------------------------------------------------------------------------
+
+M.PLACE_STATIONS_M = 6000     -- the stations of a town are those this near its centre
+
+local function placesOf(data)
+  local out = {}
+  for i, p in ipairs(data and data.places or {}) do
+    if i > 6 then break end
+    if p.lat and p.lon and p.name then out[#out + 1] = { id = #out + 1, name = p.name, lat = p.lat, lon = p.lon, kind = p.kind, state = p.state } end
+  end
+  return out
+end
+
+-- The stations and stops around a point (the stops nearby and the bus stations within 25 km, as the builder's list has them);
+-- cb(stations) or cb(nil, why)
+local function stationsAround(lat, lon, cb)
+  local pending, stops, failed, got = 2, {}, nil, false
+  local function fin()
+    pending = pending - 1
+    if pending > 0 then return end
+    if not got then cb(nil, failed or 'unknown error') return end
+    cb(builder.fromStops(stops))
+  end
+  local function take(data, info)
+    if data then
+      got = true
+      local ok, a = pcall(osm.parseAround, data)
+      if ok then for _, st in ipairs(a.stops) do stops[#stops + 1] = st end end
+    elseif not failed then
+      failed = info and info.down and 'service_down' or (info and info.error) or 'unknown error'
+    end
+    fin()
+  end
+  datasvc.nearby(lat, lon, take, 'urgent')
+  if datasvc.has('stations') == false then fin() else datasvc.stations(lat, lon, take) end
+end
+
+-- The stations of a town, bus stations first, then by distance from its centre
+local function townStations(stations, lat, lon)
+  local near = {}
+  for _, st in ipairs(stations) do
+    if geo.dist(lat, lon, st.lat, st.lon) <= M.PLACE_STATIONS_M then near[#near + 1] = st end
+  end
+  local hits = builder.nameHits(near, lat, lon)
+  table.sort(hits, function(a, b)
+    if a.station ~= b.station then return a.station end
+    return a.dist < b.dist
+  end)
+  for k, h in ipairs(hits) do h.id = k end
+  return hits
+end
+
+-- The town's main station: the nearest bus station, else the nearest stop
+local function mainStation(stations, lat, lon)
+  local hits = townStations(stations, lat, lon)
+  local best
+  for _, h in ipairs(hits) do
+    if h.station then best = h break end
+  end
+  if not best then
+    for _, h in ipairs(hits) do if not best or h.dist < best.dist then best = h end end
+  end
+  return best
+end
+
 -- ---- search: stations by name, lines by number -------------------------------------------------------------------------------
 
 local function trim(q) return (tostring(q or ''):gsub('^%s+', ''):gsub('%s+$', '')) end
@@ -259,7 +327,7 @@ function M.findModel()
     if F.kind == 'lines' then items[i] = it
     else items[i] = { id = it.id, name = it.name, dist = it.dist, dir = it.dir, station = it.station, platforms = it.platforms, lat = it.lat, lon = it.lon } end
   end
-  return { q = F.q, kind = F.kind, items = items, busy = F.busy or false, err = F.err }
+  return { q = F.q, kind = F.kind, items = items, busy = F.busy or false, err = F.err, places = F.places or {}, placeName = F.placeName }
 end
 
 -- The search box of the first screen
@@ -280,8 +348,9 @@ function M.uiFind(q, onlyFast)
       local ok, a = pcall(osm.parseAround, data)
       if ok then
         F.kind = kind
-        if kind == 'lines' then F.items = menu.linesModel(nil, a.routes)
-        else F.items = builder.nameHits(builder.fromStops(a.stops), lat, lon) end
+        F.placeName = nil
+        if kind == 'lines' then F.items, F.places = menu.linesModel(nil, a.routes), {}
+        else F.items, F.places = builder.nameHits(builder.fromStops(a.stops), lat, lon), placesOf(data) end
       end
     elseif err and #(F.items or {}) == 0 then
       F.err = err
@@ -294,6 +363,60 @@ end
 function M.uiFindClear()
   S.find = nil
   publish()
+end
+
+local function openTown(F, place)
+  F.busy, F.err, F.placeName = true, nil, place.name
+  publish()
+  stationsAround(place.lat, place.lon, function(stations, err)
+    if S.find ~= F then return end
+    F.busy = false
+    if not stations then F.err = err publish() return end
+    F.kind, F.items = 'stations', townStations(stations, place.lat, place.lon)
+    publish()
+  end)
+end
+
+-- A town of the results: its stations, bus stations first
+function M.uiFindPlace(i)
+  local F = S.find
+  local place = F and F.places and F.places[tonumber(i)]
+  if place then openTown(F, place) end
+end
+
+-- ---- the map of towns: the chips of the towns round you; a chip opens the town's stations on the first screen
+
+local function townsOf(data, limit)
+  local out = {}
+  for _, p in ipairs(data and data.towns or {}) do
+    if #out >= (limit or 90) then break end
+    if p.lat and p.lon and p.name then out[#out + 1] = { id = #out + 1, name = p.name, lat = p.lat, lon = p.lon, kind = p.kind, population = p.population } end
+  end
+  return out
+end
+
+function M.uiMapOpen()
+  local lat, lon = findPos()
+  if not lat then return end
+  if S.map and S.map.towns and S.map.lat and geo.dist(lat, lon, S.map.lat, S.map.lon) < 15000 then publish() return end
+  if datasvc.has('towns') == false then S.map = { err = 'service_old' } publish() return end
+  S.map = { busy = true, lat = lat, lon = lon }
+  local map = S.map
+  publish()
+  datasvc.towns(lat, lon, function(data, info)
+    if S.map ~= map then return end
+    map.busy = false
+    if data then map.towns = townsOf(data)
+    else map.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error' end
+    publish()
+  end)
+end
+
+function M.uiMapPlace(id)
+  local place = S.map and S.map.towns and S.map.towns[tonumber(id)]
+  if not place then return end
+  S.find = { q = place.name, kind = 'stations', items = {}, places = {}, token = 0 }
+  openTown(S.find, place)
 end
 
 -- A station of the results: its lines, as if it were the one nearest to you
@@ -507,10 +630,66 @@ function M.uiBuildAdd(id)
   if not c then return end
   local ok, why = builder.add(B.b, c)
   if not ok then B.err = (why == 'full') and 'build_full' or nil publish() return end
-  B.query, B.candKind, B.searchCands, B.justSaved, B.lineName = nil, 'ring', nil, false, nil
+  B.query, B.candKind, B.searchCands, B.justSaved, B.lineName, B.places = nil, 'ring', nil, false, nil, nil
   loadCandidates()
   requestPath()
   publish()
+end
+
+-- The towns round the last station, as chips on the builder's map
+function M.uiBuildCities(on)
+  local B = S.build
+  if not B then return end
+  B.showCities = (on == true or on == 'true')
+  if not B.showCities then publish() return end
+  local last = B.b.points[#B.b.points]
+  if B.cities and B.citiesAt and geo.dist(last.lat, last.lon, B.citiesAt.lat, B.citiesAt.lon) < 15000 then publish() return end
+  if datasvc.has('towns') == false then B.err = 'service_old' B.showCities = false publish() return end
+  busy('cities', true)
+  publish()
+  datasvc.towns(last.lat, last.lon, function(data, info)
+    if S.build ~= B then return end
+    busy('cities', false)
+    if data then B.cities, B.citiesAt = townsOf(data), { lat = last.lat, lon = last.lon }
+    else B.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error' B.showCities = false end
+    publish()
+  end)
+end
+
+-- A town's chip on the builder's map: its main station is the next one
+function M.uiBuildCity(id)
+  local B = S.build
+  local place = B and B.cities and B.cities[tonumber(id)]
+  if place then M.addTown(B, place) end
+end
+
+-- A town picked in the search: its main station is the next one
+function M.uiBuildPlace(i)
+  local B = S.build
+  local place = B and B.places and B.places[tonumber(i)]
+  if place then M.addTown(B, place) end
+end
+
+function M.addTown(B, place)
+  if not B then return end
+  busy('search', true)
+  B.err = nil
+  publish()
+  stationsAround(place.lat, place.lon, function(stations, err)
+    if S.build ~= B then return end
+    busy('search', false)
+    if not stations then B.err = err publish() return end
+    local main = mainStation(stations, place.lat, place.lon)
+    if not main then B.err = 'build_nostation' publish() return end
+    local ok, why = builder.add(B.b, { name = main.name, lat = main.lat, lon = main.lon, station = main.station })
+    if not ok then B.err = (why == 'full') and 'build_full' or nil publish() return end
+    B.query, B.candKind, B.searchCands, B.justSaved, B.lineName, B.places = nil, 'ring', nil, false, nil, nil
+    B.cities = nil          -- (the chips are for the station we are at now)
+    loadCandidates()
+    requestPath()
+    if B.showCities then M.uiBuildCities(true) end
+    publish()
+  end)
 end
 
 function M.uiBuildUndo()
@@ -548,7 +727,7 @@ function M.uiBuildSearch(q, onlyFast)
           local ok2, l = pcall(function() return builder.candidates(builder.fromStops(a.stops), B.b, { byName = true }) end)
           if ok2 then list = l end
         end
-        B.searchCands, B.candKind = list, 'search'
+        B.searchCands, B.candKind, B.places = list, 'search', placesOf(data)
       end
     elseif err and not got then
       B.err = err
@@ -823,6 +1002,8 @@ function M.buildModelOf()
     points = pts, legs = builder.legInfo(b), km = math.floor(km / 100 + 0.5) / 10, minutes = math.floor(min + 0.5),
     mode = b.mode, straight = b.straight or false, line = line, cands = cands, candKind = B.candKind, query = B.query,
     lineHits = (B.candKind == 'lines') and B.lineHits or nil,
+    places = (B.candKind == 'search' and not B.lineName) and B.places or nil,
+    cities = B.showCities and B.cities or nil, showCities = B.showCities or false,
     lineName = (B.candKind == 'search') and B.lineName or nil,
     busy = B.busy, err = B.err, pathErr = B.pathErr, alongErr = b.alongErr, stops = stops,
     ref = b.ref, colour = osm.colorFor((b.ref ~= '' and b.ref) or 'My', b.colour), customColour = b.colour, name = b.name,
@@ -1332,6 +1513,7 @@ end
 function M.onExtensionLoaded()
   refreshEarth()
   readOptions()
+  datasvc.ping(function() end)            -- which features the service has (instant searches, progress)
 end
 
 -- BeamNG.Earth's world loads after the level: check again then (the API may not have been there at mount time).

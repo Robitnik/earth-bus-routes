@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0 (after the first playtest)
+
+- **Stops are zones along the road, not points.** A stop counts when the bus is level with it on the road (35 m along it), even when the platform is across a wide street; a stop the bus drives past is passed, so the stop number always moves on (a missed first stop no longer holds the trip back). The place along the road is tracked so a road driven out and back (or a loop crossing itself) is not confused.
+- **A trip that begins away from its first stop waits for the bus there** like for any other stop.
+- **No teleport and no turning of the bus when you got there yourself** (within 250 m of the start stop, or when you drove to it with the GPS). The bus is only turned after our own teleport.
+- **The platform on the right of the way of travel.** The data service now also fetches the bus stops near the road (the other direction's platforms); the stop of a line is the one on your side, and the generated opposite direction uses the platform across the road.
+- **Circular lines start where the map says**: 363 at Police nad Metují starts and ends at the bus station, not the school.
+- **Stop markers in the world**: a yellow zone on the road at the next stop (the two after it lighter), a pole and a text over it ("305 → Hradec Králové / stop / 3 waiting"), drawn with BeamNG.Earth's coordinates. Option "Stop markers in the world". If the game or Earth cannot draw them, they turn themselves off and the GPS stays.
+- **A timetable that follows the road**: each leg has its own speed (town streets slow, open road 60 km/h), plus time for slowing down for stops. 305 Náchod to Hradec Králové runs about 69 minutes, not 101, so a fast driver is no longer an hour and a half early.
+- **Search is fast and finds towns**: the data service asks a geocoder (Photon) for towns and stops by name (under a second), keeps the answers and keeps the old slow way as a fallback. Results show the towns as chips: a town opens its stations; in the route builder a town adds its main station.
+- **Map of towns**: a "Map" tab with a chip for every town and village round you; a chip opens the town's stations. In the route builder "Towns on the map" shows chips too; one click adds the town's main station and the road is found.
+- **Progress**: a bar under the title says what the data service is doing ("OpenStreetMap server 2 of 4: route · 18 s · 1 more waiting"), updated every second.
+- Data service 0.6.0 (update it on the Add-ons page too): `/v1/search` via the geocoder, `/v1/towns`, `/v1/progress`, route answers with the near bus stops, quiet fallbacks.
+
 ## Data service 0.4.1
 
 - A client that hangs up while the answer is sent (the game cancelling a request) no longer prints a traceback: BeamNG.Earth's Add-ons page showed it as "stopped with an error".

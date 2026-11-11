@@ -36,6 +36,7 @@
         </div>
       </header>
 
+      <ProgressBar />
       <div v-if="s && s.armed" class="armed-bar" role="status">
         <span class="mini-plate">{{ s.armed.ref }}</span>
         <span class="armed-text">{{ t("armed.text", { stop: s.armed.stopName, dist: dist(s.armed.dist) }) }}</span>
@@ -65,6 +66,7 @@
             <div class="head">
               <div class="tabs" role="tablist">
                 <button role="tab" :aria-selected="tab === 'near'" :class="{ on: tab === 'near' }" @click="tab = 'near'">{{ t("near.title") }}</button>
+                <button role="tab" :aria-selected="tab === 'map'" :class="{ on: tab === 'map' }" @click="openMap">{{ t("map.tab") }}</button>
                 <button role="tab" :aria-selected="tab === 'mine'" :class="{ on: tab === 'mine' }" @click="tab = 'mine'">{{ t("mine.title") }}<span v-if="saved.length" class="badge">{{ saved.length }}</span></button>
               </div>
               <div class="head-actions">
@@ -82,8 +84,14 @@
             </form>
             <template v-if="tab === 'near' && s && s.find">
               <div class="find-head">
-                <b>{{ t(s.find.kind === "lines" ? "find.linesFor" : "find.stationsFor", { q: s.find.q }) }}</b>
+                <b>{{ s.find.placeName ? t("find.inPlace", { place: s.find.placeName }) : t(s.find.kind === "lines" ? "find.linesFor" : "find.stationsFor", { q: s.find.q }) }}</b>
                 <button class="btn ghost slim" @click="clearFind">{{ t("find.clear") }}</button>
+              </div>
+              <div v-if="s.find.kind === 'stations' && s.find.places && s.find.places.length" class="places" role="group" :aria-label="t('find.places')">
+                <span class="muted small">{{ t("find.places") }}</span>
+                <button v-for="pl in s.find.places" :key="pl.id" class="place-chip" :disabled="!!s.find.busy" @click="call('uiFindPlace', pl.id)">
+                  {{ pl.name }}<small>{{ placeKind(pl) }}</small>
+                </button>
               </div>
               <div v-if="s.find.busy" class="loading small"><span class="spin"></span><div><b>{{ t("find.searching") }}</b><div class="muted">{{ t("find.searchingHint") }}</div></div></div>
               <div v-if="s.find.err" class="notice bad"><p>{{ findErr(s.find.err) }}</p></div>
@@ -111,6 +119,17 @@
                     </div>
                   </div>
                 </button>
+              </div>
+            </template>
+
+            <!-- the map of towns -->
+            <template v-if="tab === 'map'">
+              <p class="sub">{{ t("map.hint") }}</p>
+              <div v-if="s && s.map && s.map.busy" class="loading small"><span class="spin"></span><div><b>{{ t("map.loading") }}</b><div class="muted">{{ t("map.loadingHint") }}</div></div></div>
+              <div v-else-if="s && s.map && s.map.err" class="notice bad"><p>{{ errText(s.map.err) }}</p><button class="btn" @click="openMap">{{ t("retry") }}</button></div>
+              <div v-else-if="s && s.map && s.map.towns && !s.map.towns.length" class="empty"><b>{{ t("map.none") }}</b></div>
+              <div v-if="s && s.map && s.map.towns && s.map.towns.length" class="map-big">
+                <MiniMap :places="s.map.towns" :you="s.pos" :points="[]" :cands="[]" :show-names="false" :label="t('map.tab')" @place="pickTown" />
               </div>
             </template>
 
@@ -396,6 +415,8 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import ProgressBar from "./ProgressBar.vue"
+import MiniMap from "./MiniMap.vue"
 import BuildPage from "./BuildPage.vue"
 import StopsPage from "./StopsPage.vue"
 import { useEvents } from "@/services/events"
@@ -463,6 +484,13 @@ function remove(m) {
   sure.value = m.id
   clearTimeout(sureTimer)
   sureTimer = setTimeout(() => { sure.value = null }, 3000)
+}
+function openMap() { tab.value = "map"; call("uiMapOpen") }
+function pickTown(id) { tab.value = "near"; call("uiMapPlace", id) }
+function placeKind(pl) {
+  const k = "find.kind." + pl.kind
+  const v = t(k)
+  return v === k ? "" : v
 }
 function errText(e) {
   const key = "build.err." + e
@@ -653,6 +681,12 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .find { display: flex; gap: 8px;
   input { flex: 1; min-width: 0; padding: 10px 14px; border: 0; border-radius: 10px; background: #0f1a20; color: var(--ink); font: inherit; font-size: 16px; box-shadow: inset 0 0 0 1px var(--hair);
     &::placeholder { color: var(--muted); } &:focus { outline: 2px solid var(--line); } } }
+.map-big { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; }
+.places { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.place-chip { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 6px 14px; border: 0; border-radius: 99px; background: var(--panel-3); color: var(--ink); font: inherit; font-weight: 800; font-size: 16px; line-height: 1.15; cursor: pointer;
+  small { font-weight: 400; font-size: 11px; color: var(--muted); }
+  &:hover:not(:disabled) { background: var(--line); color: var(--ink-on-line); small { color: inherit; } }
+  &:disabled { opacity: 0.5; cursor: default; } &:focus-visible { outline: 2px solid var(--line); } }
 .find-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .found { min-height: 0; }
 .stop-card:disabled { opacity: 0.6; cursor: default; }

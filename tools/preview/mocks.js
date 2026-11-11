@@ -149,3 +149,28 @@ Object.assign(MENU_STATES, {
   buildlines: { ...common2, screen: "build", stations, build: { ...build, candKind: "lines", query: "305", cands: [], lineHits: [
     { id: 1, ref: "305", colour: "#2f9e8f", variants: [{ id: 6964117, label: "x", from: "Náchod", to: "Hradec Králové" }] }] } },
 })
+
+// ---- towns and progress
+const prog = { busy: [{ id: 3, what: "overpass", label: "route", state: "running", mirror: 2, of: 4, elapsed: 18.4 }, { id: 4, what: "overpass", label: "stops nearby", state: "waiting", mirror: 0, of: 0, elapsed: 2 }], waiting: 1 }
+Object.assign(MENU_STATES, {
+  findplaces: { ...common2, screen: "nearby", stations, progress: prog, find: { q: "broum", kind: "stations", busy: false, err: null, items: hits,
+    places: [{ id: 1, name: "Broumov", kind: "town", lat: 50.58, lon: 16.33 }, { id: 2, name: "Broumov", kind: "municipality", lat: 49.9, lon: 12.6 }, { id: 3, name: "Broumova Lhota", kind: "hamlet", lat: 50.5, lon: 16.3 }] } },
+  progress: { ...common2, screen: "nearby", loading: "nearby", stations: [], progress: prog },
+  buildplaces: { ...common2, screen: "build", stations, build: { ...build, candKind: "search", query: "broum", cands: hits.map(h => ({ ...h, ahead: true })),
+    places: [{ id: 1, name: "Broumov", kind: "town" }, { id: 2, name: "Broumova Lhota", kind: "hamlet" }] } },
+})
+
+// ---- the map of towns
+const towns = [
+  { id: 1, name: "Hradec Králové", kind: "city", lat: 50.2092, lon: 15.8328 }, { id: 2, name: "Náchod", kind: "town", lat: 50.4157, lon: 16.1626 },
+  { id: 3, name: "Jaroměř", kind: "town", lat: 50.3568, lon: 15.9231 }, { id: 4, name: "Broumov", kind: "town", lat: 50.5855, lon: 16.332 },
+  { id: 5, name: "Nové Město nad Metují", kind: "town", lat: 50.3442, lon: 16.1514 }, { id: 6, name: "Trutnov", kind: "town", lat: 50.5612, lon: 15.9125 },
+  { id: 7, name: "Police nad Metují", kind: "town", lat: 50.5262, lon: 16.2437 }, { id: 8, name: "Hronov", kind: "town", lat: 50.4825, lon: 16.1945 },
+  { id: 9, name: "Česká Skalice", kind: "town", lat: 50.3907, lon: 16.0536 }, { id: 10, name: "Červený Kostelec", kind: "town", lat: 50.4731, lon: 16.0954 },
+  { id: 11, name: "Hlavňov", kind: "village", lat: 50.5198, lon: 16.2905 }, { id: 12, name: "Suchý Důl", kind: "village", lat: 50.5463, lon: 16.2561 },
+  { id: 13, name: "Velké Poříčí", kind: "village", lat: 50.4397, lon: 16.1884 }, { id: 14, name: "Dobruška", kind: "town", lat: 50.2917, lon: 16.1598 },
+]
+Object.assign(MENU_STATES, {
+  map: { ...common2, screen: "nearby", stations, tab: "map", map: { towns } },
+  buildcities: { ...common2, screen: "build", stations, build: { ...build, showCities: true, cities: towns, cands: [] } },
+})

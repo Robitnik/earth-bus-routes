@@ -89,6 +89,142 @@ OSRM = (ROOT / "tests/fixtures/osrm_nachod_broumov.json").read_text(encoding="ut
 PTS = [(50.4157, 16.1626), (50.584, 16.33), (50.5855, 16.332)]
 
 
+PHOTON_PLACE = {"features": [
+    {"geometry": {"coordinates": [16.3322957, 50.5854557]}, "properties": {"name": "Broumov", "osm_key": "place", "osm_value": "town", "osm_id": 1, "state": "KHK", "countrycode": "CZ"}},
+    {"geometry": {"coordinates": [16.329824, 50.5917356]}, "properties": {"name": "Broumov", "osm_key": "place", "osm_value": "cadastral_community", "osm_id": 2}},
+    {"geometry": {"coordinates": [12.6061798, 49.8893981]}, "properties": {"name": "Broumov", "osm_key": "place", "osm_value": "municipality", "osm_id": 3}},
+    {"geometry": {"coordinates": [16.3322957, 50.5854557]}, "properties": {"name": "Broumov", "osm_key": "place", "osm_value": "town", "osm_id": 9}}]}
+PHOTON_STATION = {"features": [{"geometry": {"coordinates": [16.3389806, 50.5815457]}, "properties": {"name": "Broumov, železniční stanice", "osm_key": "amenity", "osm_value": "bus_station", "osm_id": 11}}]}
+PHOTON_STOP = {"features": [{"geometry": {"coordinates": [16.3337271, 50.5801404]}, "properties": {"name": "Broumov, nemocnice", "osm_key": "highway", "osm_value": "bus_stop", "osm_id": 21}},
+                            {"geometry": {"coordinates": [16.3, 50.5]}, "properties": {"name": "A house", "osm_key": "building", "osm_value": "yes", "osm_id": 22}}]}
+GEO = {"elements": [{"type": "node", "id": 21, "lat": 50.58, "lon": 16.33, "tags": {"name": "Broumov, nemocnice", "highway": "bus_stop"}}],
+       "places": [{"name": "Broumov", "lat": 50.58, "lon": 16.33, "kind": "town", "state": "KHK", "country": "CZ"}], "source": "photon"}
+
+
+class Geocoder(unittest.TestCase):
+    def fake(self, fail=()):
+        def getter(url):
+            if "bus_station" in url:
+                if "station" in fail:
+                    raise urllib.error.URLError("down")
+                return PHOTON_STATION
+            if "bus_stop" in url:
+                return PHOTON_STOP
+            return PHOTON_PLACE
+        return getter
+
+    def test_places_and_stops_from_three_small_requests(self):
+        r = d.geo_search("Broumov", 50.4157, 16.1626, getter=self.fake())
+        self.assertEqual(r["source"], "photon")
+        names = [p["name"] + ":" + p["kind"] for p in r["places"]]
+        self.assertEqual(names, ["Broumov:town", "Broumov:municipality"])       # no cadastral community, no duplicate, towns first
+        self.assertEqual([e["tags"]["name"] for e in r["elements"]], ["Broumov, železniční stanice", "Broumov, nemocnice"])
+        self.assertEqual(r["elements"][0]["tags"]["amenity"], "bus_station")
+        self.assertEqual(r["elements"][1]["tags"]["highway"], "bus_stop")        # (the house is not a stop)
+
+    def test_a_failure_after_the_first_request_keeps_what_came(self):
+        r = d.geo_search("Broumov", 50.4157, 16.1626, getter=self.fake(fail=("station",)))
+        self.assertEqual(len(r["elements"]), 0)           # the places came; the stops request failed and the rest was not tried
+        self.assertTrue(r["places"])
+
+    def test_all_failing_is_an_error(self):
+        def getter(url):
+            raise urllib.error.URLError("down")
+        with self.assertRaises(RuntimeError):
+            d.geo_search("Broumov", 50.4157, 16.1626, getter=getter)
+
+    def test_the_geocoder_rests_for_a_minute_after_a_failure(self):
+        calls = []
+
+        def down(url):
+            calls.append(url)
+            raise urllib.error.URLError("down")
+
+        d._photon_down_until = 0.0
+        with self.assertRaises(RuntimeError):
+            d.geo_search("x", 50.0, 16.0, getter=down)
+        self.assertEqual(len(calls), 1)                  # the first request failed: the other two were not tried
+        saved = d.photon_get
+        d.photon_get = lambda url: calls.append("real") or {}
+        try:
+            with self.assertRaises(RuntimeError) as cm:  # (no getter given: the real path rests)
+                d.geo_search("x", 50.0, 16.0)
+            self.assertIn("resting", str(cm.exception))
+            self.assertNotIn("real", calls)
+            r = d.geo_search("x", 50.0, 16.0, clock=lambda: 1e12)           # a minute later: tried again
+            self.assertEqual(r["source"], "photon")
+        finally:
+            d.photon_get = saved
+            d._photon_down_until = 0.0
+
+    def test_photon_url(self):
+        u = d.photon_url("Náchod", 50.4157, 16.1626, "highway:bus_stop", 5)
+        self.assertIn("q=N%C3%A1chod", u)
+        self.assertIn("osm_tag=highway%3Abus_stop", u)
+        self.assertIn("lat=50.4157", u)
+
+    def test_the_answer_is_kept_and_found_offline_afterwards(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            calls = []
+            svc = d.Service(d.Cache(tmp), geocoder=lambda q, lat, lon: calls.append(q) or GEO)
+            t1, c1 = svc.geocode("Broumov", 50.4, 16.1)
+            t2, c2 = svc.geocode("broumov", 50.4, 16.1)
+            self.assertEqual((c1, c2, len(calls)), (False, True, 1))
+            self.assertTrue(svc.index.search("nemocnice", 50.58, 16.33))           # indexed for the instant search
+
+
+class Towns(unittest.TestCase):
+    ANSWER = {"elements": [
+        {"type": "node", "id": 1, "lat": 50.58, "lon": 16.33, "tags": {"name": "Broumov", "place": "town", "population": "7 500"}},
+        {"type": "node", "id": 2, "lat": 50.41, "lon": 16.16, "tags": {"name": "Náchod", "place": "town", "population": "20000"}},
+        {"type": "node", "id": 3, "lat": 50.2, "lon": 15.83, "tags": {"name": "Hradec Králové", "place": "city", "population": "92000"}},
+        {"type": "node", "id": 4, "lat": 50.5, "lon": 16.2, "tags": {"name": "Hlavňov", "place": "village"}},
+        {"type": "node", "id": 5, "lat": 50.5, "lon": 16.2, "tags": {"place": "village"}},
+        {"type": "node", "id": 6, "lat": 50.5, "lon": 16.2, "tags": {"name": "Somewhere", "place": "locality"}}]}
+
+    def test_query_and_key(self):
+        q = d.towns_query(50.4, 16.1)
+        self.assertIn("city|town|village", q)
+        self.assertIn("around:40000,50.4000,16.1000", q)
+        self.assertEqual(d.towns_key(50.41, 16.12), d.towns_key(50.47, 16.07))
+        self.assertNotEqual(d.towns_key(50.41, 16.12), d.towns_key(50.9, 16.12))
+
+    def test_biggest_first_and_only_named_places(self):
+        out = json.loads(d.slim_towns(json.dumps(self.ANSWER)))["towns"]
+        self.assertEqual([t["name"] for t in out], ["Hradec Králové", "Náchod", "Broumov", "Hlavňov"])
+        self.assertEqual(out[2]["population"], 7500)
+        self.assertEqual(out[3]["population"], 0)
+
+
+class Progress(unittest.TestCase):
+    def test_activity_lists_what_is_in_flight(self):
+        a = d.Activity()
+        t = a.begin("overpass", "route")
+        self.assertEqual(a.snapshot()["waiting"], 1)
+        a.update(t, state="running", mirror=2, of=4)
+        s = a.snapshot()
+        self.assertEqual((s["busy"][0]["what"], s["busy"][0]["mirror"], s["busy"][0]["of"], s["waiting"]), ("overpass", 2, 4, 0))
+        self.assertIn("elapsed", s["busy"][0])
+        a.end(t)
+        self.assertEqual(a.snapshot()["busy"], [])
+
+    def test_a_fetch_reports_its_mirror_and_leaves_nothing_behind(self):
+        seen = []
+
+        def sender(url, query):
+            seen.append(d.ACTIVITY.snapshot()["busy"][0].copy())
+            return json.dumps(NEAR)
+
+        d.CURRENT.label = "near3_50.2_15.8"
+        d.fetch_upstream("q", mirrors=["http://a/x", "http://b/x"], sender=sender, sleep=lambda s: None)
+        self.assertEqual((seen[0]["what"], seen[0]["label"], seen[0]["of"], seen[0]["state"]), ("overpass", "stops nearby", 2, "running"))
+        self.assertEqual(d.ACTIVITY.snapshot()["busy"], [])
+
+    def test_label_of(self):
+        self.assertEqual(d.label_of("route2_7185111"), "route")
+        self.assertEqual(d.label_of("stations_50.4_16.1"), "bus stations")
+
+
 class Paths(unittest.TestCase):
     def test_parse_pts(self):
         self.assertEqual(d.parse_pts("50.4157,16.1626;50.5,16.3"), [(50.4157, 16.1626), (50.5, 16.3)])
@@ -404,7 +540,7 @@ class Http(unittest.TestCase):
                 raise RuntimeError("all down")
             return ROUTE if "out body geom" in query else json.dumps(NEAR)
 
-        cls.svc = d.Service(d.Cache(cls.tmp.name), upstream=upstream)
+        cls.svc = d.Service(d.Cache(cls.tmp.name), upstream=upstream, geocoder=lambda q, lat, lon: GEO)
         cls.httpd, _ = d.serve(0, service=cls.svc)
         cls.port = cls.httpd.server_address[1]
         # the Host check names the real port
@@ -433,6 +569,33 @@ class Http(unittest.TestCase):
         self.assertEqual(s, 200)
         self.assertTrue(j["ok"])
         self.assertEqual(len(j["data"]["elements"]), len(NEAR["elements"]))
+
+    def test_route_falls_back_to_the_plain_query_when_the_long_one_is_refused(self):
+        def upstream(query):
+            if "around.w" in query:
+                raise RuntimeError("overpass-api.de: HTTP 400; overpass.kumi.systems: HTTP 400")
+            return ROUTE
+
+        Http.svc.upstream, saved = upstream, Http.svc.upstream
+        try:
+            s, j = self.get("/v1/route?id=555")
+        finally:
+            Http.svc.upstream = saved
+        self.assertEqual((s, j["data"]["elements"][0]["type"]), (200, "relation"))
+
+    def test_a_server_that_is_only_down_does_not_trigger_the_fallback(self):
+        calls = []
+
+        def upstream(query):
+            calls.append(query)
+            raise RuntimeError("overpass-api.de: HTTP 502")
+
+        Http.svc.upstream, saved = upstream, Http.svc.upstream
+        try:
+            s, j = self.get("/v1/route?id=556")
+        finally:
+            Http.svc.upstream = saved
+        self.assertEqual((s, len(calls)), (502, 1))
 
     def test_route(self):
         s, j = self.get("/v1/route?id=6962840")
@@ -476,6 +639,26 @@ class Http(unittest.TestCase):
         # what was fetched is found at once the next time, offline
         s, j = self.get("/v1/lines?ref=363&lat=50.5&lon=16.2&local=1")
         self.assertEqual(j["data"]["elements"][0]["tags"]["to"], "B")
+
+    def test_search_goes_to_the_geocoder_and_returns_places(self):
+        s, j = self.get("/v1/search?q=Broumov&lat=50.4157&lon=16.1626")
+        self.assertEqual((s, j["ok"]), (200, True))
+        self.assertEqual(j["data"]["places"][0]["name"], "Broumov")
+        self.assertEqual(j["data"]["elements"][0]["tags"]["name"], "Broumov, nemocnice")
+
+    def test_towns_endpoint(self):
+        Http.svc.upstream, saved = (lambda q: json.dumps(Towns.ANSWER)), Http.svc.upstream
+        try:
+            s, j = self.get("/v1/towns?lat=50.4&lon=16.1")
+        finally:
+            Http.svc.upstream = saved
+        self.assertEqual((s, j["data"]["towns"][0]["name"]), (200, "Hradec Králové"))
+        self.assertEqual(self.get("/v1/towns?lat=99&lon=16")[0], 400)
+
+    def test_progress_endpoint(self):
+        s, j = self.get("/v1/progress")
+        self.assertEqual((s, j["ok"]), (200, True))
+        self.assertIn("busy", j["data"])
 
     def test_search_endpoint_validates(self):
         self.assertEqual(self.get("/v1/search?q=a&lat=50&lon=16")[0], 400)

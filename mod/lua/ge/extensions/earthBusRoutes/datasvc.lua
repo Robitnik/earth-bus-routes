@@ -14,7 +14,9 @@ local queue, active = {}, nil
 local fastQueue, fastActive = {}, nil      -- the second lane: answers the service has at once (its index), never behind a slow request
 local wait = 0
 local memo = {}              -- path -> decoded data, for this game session
-M.state = { up = nil, error = nil, version = nil, lastDown = nil, features = nil }
+M.state = { up = nil, error = nil, version = nil, lastDown = nil, features = nil, progress = nil }
+M.onProgress = nil           -- called when what the service is busy with changes (the menu shows it)
+local pollTimer = 0
 
 local function finish(job, data, info)
   for _, cb in ipairs(job.cbs) do pcall(cb, data, info) end
@@ -79,8 +81,10 @@ function M.lines(ref, lat, lon, cb, fast)
   local path = ('/v1/lines?ref=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(ref), lat, lon)
   if fast then M.get(path .. '&local=1', cb, { fast = true }) else M.get(path, cb, { urgent = true, total = 120 }) end
 end
+-- the cities, towns and villages round a point (the map of towns)
+function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 function M.route(id, cb) M.get(('/v1/route?id=%d'):format(id), cb) end
-function M.ping(cb) M.get('/v1/info', cb, { fresh = true }) end
+function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
 
 local function startNext()
   local job = table.remove(queue, 1)
@@ -101,6 +105,15 @@ local function failed(job, err, down)
 end
 
 -- the second lane: no retries, no memo (the service's index grows)
+-- what a service answer says about the service (version, features)
+local function learn(data)
+  if data.version then M.state.version = data.version end
+  if type(data.features) == 'table' then
+    M.state.features = {}
+    for _, f in ipairs(data.features) do M.state.features[f] = true end
+  end
+end
+
 local function updateFast(dt)
   if not fastActive then
     local job = table.remove(fastQueue, 1)
@@ -119,6 +132,7 @@ local function updateFast(dt)
       finish(job, nil, { error = (type(data) == 'table' and data.error) or 'bad answer from the data service', down = false })
     else
       M.state.up = true
+      learn(data)
       finish(job, data.data or data, { cached = true, fast = true })
     end
   elseif req.state == 'error' then
@@ -129,8 +143,30 @@ local function updateFast(dt)
   end
 end
 
+-- while a slow request runs: what the service is doing, once a second, for the progress line
+local function pollProgress(dt)
+  pollTimer = pollTimer + dt
+  if pollTimer < 1 then return end
+  pollTimer = 0
+  if active == nil then
+    if M.state.progress ~= nil then
+      M.state.progress = nil
+      if M.onProgress then pcall(M.onProgress) end
+    end
+    return
+  end
+  if M.has('progress') ~= true then return end
+  M.get('/v1/progress', function(data)
+    if not data then return end
+    local before = M.state.progress
+    M.state.progress = (data.busy and #data.busy > 0) and data or nil
+    if M.onProgress and (before ~= nil or M.state.progress ~= nil) then pcall(M.onProgress) end
+  end, { fast = true, total = 3 })
+end
+
 function M.update(dt)
   updateFast(dt)
+  pollProgress(dt)
   if wait > 0 then wait = wait - dt return end
   if not active then startNext() if not active then return end end
   local req = active.req
@@ -146,11 +182,7 @@ function M.update(dt)
       return failed(job, tostring(data.error or ('HTTP ' .. tostring(req.status))), false)
     end
     M.state.up, M.state.error = true, nil
-    if data.version then M.state.version = data.version end
-    if type(data.features) == 'table' then
-      M.state.features = {}
-      for _, f in ipairs(data.features) do M.state.features[f] = true end
-    end
+    learn(data)
     local payload = data.data or data
     if job.path:find('/v1/info', 1, true) == nil then memo[job.path] = { data = payload } end
     finish(job, payload, { cached = data.cached == true })
@@ -169,6 +201,7 @@ function M.reset()
   if active and active.req then http.cancel(active.req) end
   if fastActive and fastActive.req then http.cancel(fastActive.req) end
   queue, active, wait, fastQueue, fastActive = {}, nil, 0, {}, nil
+  M.state.progress = nil
 end
 
 function M.forget() memo = {} end

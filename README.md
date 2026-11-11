@@ -9,6 +9,8 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 ## What you get
 
 - **Stops near you**: the bus stops and stations within 600 m, with the lines that call at each.
+- **Map and towns**: a map tab with a chip for every town round you; a town opens its stations; the route builder can add a town's main station with one click.
+- **Stop markers** in the world at the next stops, and a progress bar for everything slow.
 - **Search**: type a station name or a line number (363, N1); results appear as you type from the data service's own index, and the public servers fill in the rest.
 - **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
 - **Lines and directions**: every line with its operator, network, length, ride time, stops and how often it runs through the day.

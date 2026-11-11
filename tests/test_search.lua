@@ -18,11 +18,11 @@ local function setup(opts)
     end
   end
   env.heads = heads
-  local features = opts.features or { path = true, along = true, search = true, stations = true, ['local'] = true, lines = true }
+  local features = opts.features or { path = true, along = true, search = true, stations = true, ['local'] = true, lines = true, towns = true, progress = true }
   local function answer(kind, q, cb, fast)
     env.calls[#env.calls + 1] = kind .. ':' .. q .. (fast and ':fast' or ':full')
     local data
-    if kind == 'lines' then data = { elements = heads } else data = { elements = nodes } end
+    if kind == 'lines' then data = { elements = heads } else data = { elements = nodes, places = { { name = 'Náchod', lat = 50.4157, lon = 16.1626, kind = 'town', state = 'KHK' }, { name = 'Broumov', lat = 50.5855, lon = 16.332, kind = 'town' } } } end
     if fast then
       if opts.fastEmpty then data = { elements = {} } end
       cb(data, { cached = true, fast = true })
@@ -38,9 +38,26 @@ local function setup(opts)
     has = function(f) if opts.unknownFeatures then return nil end return features[f] == true end,
     update = function() end, reset = function() end, forget = function() end, busy = function() return false end,
     ping = function(cb) cb({}) end,
-    nearby = function(lat, lon, cb) cb(around, {}) end,
+    nearby = function(lat, lon, cb)
+      if lat > 50.5 then
+        -- a town 20 km away: the same stops moved there
+        local moved = { elements = {} }
+        for _, e in ipairs(around.elements) do
+          if e.type == 'node' then
+            local c = {}
+            for k, v in pairs(e) do c[k] = v end
+            c.id, c.lat, c.lon = e.id + 5000000, e.lat + 0.17, e.lon + 0.17
+            moved.elements[#moved.elements + 1] = c
+          end
+        end
+        cb(moved, {})
+        return
+      end
+      cb(around, {})
+    end,
     stations = function(lat, lon, cb) cb({ elements = {} }, {}) end,
     route = function(id, cb) cb(route, {}) end,
+    towns = function(lat, lon, cb) env.calls[#env.calls + 1] = 'towns' cb({ towns = { { name = 'Hradec Králové', lat = 50.21, lon = 15.83, kind = 'city' }, { name = 'Broumov', lat = 50.5855, lon = 16.332, kind = 'town' }, { name = 'Náchod', lat = 50.4157, lon = 16.1626, kind = 'town' } } }, {}) end,
     path = function(p, cb) cb({ points = { { 50.4, 16.1 }, { 50.5, 16.2 } }, legs = { { dist = 14000, dur = 1200 } }, source = 'osrm' }, {}) end,
     along = function(p, cb) cb({ elements = {} }, {}) end,
     search = function(q, lat, lon, cb, fast) answer('stations', q, cb, fast) end,
@@ -204,6 +221,93 @@ function T.builder_name_search_still_works_and_typing_is_instant()
   assert(not model().build.busy.search)
   m.uiBuildSearch('x')
   assert(model().build.candKind == 'ring')
+  cleanup()
+end
+
+function T.the_search_finds_towns_and_a_town_opens_its_stations()
+  local m, model, env = setup()
+  m.uiOpen()
+  m.uiFind('nachod')
+  env.flush()
+  local f = model().find
+  assert(#f.places == 2 and f.places[1].name == 'Náchod' and f.places[1].kind == 'town')
+  m.uiFindPlace(1)
+  f = model().find
+  assert(f.kind == 'stations' and #f.items >= 3 and f.placeName == 'Náchod' and not f.busy)
+  for i = 2, #f.items do
+    if f.items[i].station == f.items[i - 1].station then assert(f.items[i].dist >= f.items[i - 1].dist) else assert(f.items[i - 1].station) end
+  end
+  -- the stations of a town far away are not the ones here
+  m.uiFindPlace(1)
+  cleanup()
+end
+
+function T.a_town_picked_in_the_builder_adds_its_main_station()
+  local m, model, env = setup()
+  m.uiOpen()
+  m.uiBuildStart(1)
+  m.uiBuildSearch('broumov')
+  env.flush()
+  local b = model().build
+  assert(b.places and #b.places == 2 and b.places[2].name == 'Broumov')
+  m.uiBuildPlace(2)
+  b = model().build
+  assert(#b.points == 2, 'the next station is the main station of the town: ' .. #b.points)
+  assert(b.points[2].name:find('Náchod'), 'a stop of the (moved) data: ' .. tostring(b.points[2].name))
+  assert(b.canFinish and b.candKind == 'ring' and not b.places)
+  cleanup()
+end
+
+function T.what_the_service_is_doing_reaches_the_menu()
+  local m, model = setup()
+  m.uiOpen()
+  assert(model().progress == nil)
+  local ds = package.loaded['earthBusRoutes/datasvc']
+  ds.state.progress = { busy = { { what = 'overpass', label = 'route', state = 'running', mirror = 2, of = 4, elapsed = 18.5 } }, waiting = 0 }
+  m.publish()
+  local p = model().progress
+  assert(p and p.busy[1].what == 'overpass' and p.busy[1].mirror == 2 and p.busy[1].of == 4)
+  assert(type(ds.onProgress) == 'function' or ds.onProgress == nil)
+  cleanup()
+end
+
+function T.the_map_lists_the_towns_and_a_chip_opens_the_stations()
+  local m, model, env = setup()
+  m.uiOpen()
+  m.uiMapOpen()
+  local mp = model().map
+  assert(mp and mp.towns and #mp.towns == 3 and mp.towns[1].kind == 'city' and mp.towns[2].id == 2)
+  m.uiMapOpen()
+  local n = 0
+  for _, c in ipairs(env.calls) do if c == 'towns' then n = n + 1 end end
+  assert(n == 1, 'the same area is not asked twice')
+  m.uiMapPlace(3)                                   -- Náchod
+  local f = model().find
+  assert(f and f.kind == 'stations' and f.placeName == 'Náchod' and #f.items >= 3 and not f.busy)
+  cleanup()
+end
+
+function T.towns_on_the_builder_map_and_a_chip_adds_the_main_station()
+  local m, model, env = setup()
+  m.uiOpen()
+  m.uiBuildStart(1)
+  m.uiBuildCities(true)
+  local b = model().build
+  assert(b.showCities and b.cities and #b.cities == 3)
+  m.uiBuildCity(2)                                  -- Broumov (the stub moves the stops there)
+  b = model().build
+  assert(#b.points == 2 and b.canFinish, 'the chip added the main station of the town: ' .. #b.points)
+  assert(b.showCities and b.cities, 'the map stays on towns, now round the new last station')
+  m.uiBuildCities(false)
+  assert(not model().build.showCities and model().build.cities == nil)
+  cleanup()
+end
+
+function T.an_old_service_cannot_show_the_map()
+  local m, model = setup({ features = { path = true, search = true } })
+  m.uiOpen()
+  m.uiMapOpen()
+  assert(model().map.err == 'service_old')
   cleanup()
 end
 
