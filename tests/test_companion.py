@@ -1602,5 +1602,19 @@ class AddonManifest(unittest.TestCase):
                 self.assertTrue(isinstance(lo, int) and isinstance(hi, int) and lo <= hi and lo <= o.get("default", lo) <= hi, o["key"])
 
 
+class Translations(unittest.TestCase):
+    """The menu's and the HUD's texts in every language of the game: all keys, the same {placeholders} (tools/check_i18n.mjs)."""
+
+    def test_every_language_is_complete(self):
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node is not installed")
+        root = pathlib.Path(__file__).resolve().parent.parent
+        r = subprocess.run([node, "--no-warnings", str(root / "tools" / "check_i18n.mjs"), "--allow-missing"], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

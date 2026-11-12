@@ -31,7 +31,7 @@
           <label class="lang" :title="t('lang')">
             <span class="lang-icon" aria-hidden="true">🌐</span>
             <select :value="isAuto() ? 'auto' : lang" :aria-label="t('lang')" @change="pickLang($event.target.value)">
-              <option value="auto">{{ t("lang.auto") }}</option>
+              <option value="auto">{{ t("lang.auto") }} · {{ langName }}</option>
               <option v-for="l in LANGS" :key="l.code" :value="l.code">{{ l.name }}</option>
             </select>
           </label>
@@ -480,6 +480,7 @@ import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, resetLang, isAuto, syncLang, LANGS, t, noteText } from "./i18n.js"
 const pickLang = v => (v === "auto" ? resetLang() : setLang(v))
+const langName = computed(() => (LANGS.find(l => l.code === lang.value) || LANGS[0]).name)
 
 const events = useEvents()
 events.on("EarthBusRoutesState", m => { syncLang(); onState(m) })
@@ -694,7 +695,7 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
 .tools { flex: none; display: flex; align-items: center; gap: 12px; }
 .lang { display: flex; align-items: center; gap: 6px; border: 1px solid var(--hair); border-radius: 8px; padding: 0 4px 0 8px; color: var(--muted);
   .lang-icon { font-size: 14px; }
-  select { border: 0; padding: 6px 4px; background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; max-width: 170px;
+  select { border: 0; padding: 6px 4px; background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer; max-width: 260px;
     option { background: #1b2a32; color: #e8f0f2; } } }
 
 // ---- body
