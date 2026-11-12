@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.3
+
+- **The stop markers on the road are back.** Since 0.9.2 the light fill of the bay was handed to the game's drawer in a form it refuses, so the first frame of every trip failed and all the markers (corners, arrow, name) and the ghost turned themselves off for the session. Fixed; and if one part cannot be drawn now, only that part goes (the fill, the name), not the rest.
+- **The next stops on the minimap.** The game's minimap shows the next stop as a dot in the colour of its bay (red coming, orange in it, grey out of service), with a pointer from the minimap's edge while it is out of view, and the eight after it as small yellow dots; the stop you drive to before a trip too. BeamNG.Earth's own map has no way for an add-on to mark places, so its GPS line stays as it was. "Stop markers in the world" turns both off.
+- No data service update needed (stays 0.10.1).
+
 ## 0.10.2
 
 - **The settings are back.** BeamNG.Earth takes at most 16 options for an add-on (and 300 letters of help each); 0.10.0 had 20, so Earth dropped all of them and none showed in the game. Now 16: "Next trip from here", the LED board and the depot start are always on (the shift's start still has its depot checkbox), and "AI buses on the lines" is one choice: off, or how many (1, 2, 3, 4 or 6). A test checks the list against Earth's own rules.

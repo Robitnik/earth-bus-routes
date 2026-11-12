@@ -69,7 +69,7 @@ end
 -- green when the stop is done, then fading. Over them, with the debug drawer: a light fill of the same colour, the arrow of
 -- the way to stand, the stop's name and how many wait. Needs BeamNG.Earth 1.6 (toGame) and the debug drawer; the corner
 -- markers also need createObject (else the bay is drawn without them). A failure turns that part off, never the trip.
-local markersOff, cornersOff = false, false
+local markersOff, cornersOff, labelOff = false, false, false
 local CORNER_SHAPE = 'art/shapes/interface/position_marker.dae'
 local slots = {}             -- 'next' | 'done' -> { objs = {4 TSStatic}, shown = bool }
 local LABEL_M = 350          -- the name is written over a bay this near (along the road)
@@ -167,12 +167,28 @@ local function hideSlot(sl)
   sl.shown = false
 end
 
+-- A colour as the debug drawer's solid triangles and the minimap take it: one number, r, g, b, a in 0..255 (the game's
+-- color() in lua/common/utils.lua). drawTriSolid refuses a ColorI ("number expected, got userdata"): 0.9.2 to 0.10.2 passed
+-- one, the first frame of a trip threw and every marker of the session went off.
+local function packed(r, g, b, a)
+  local f = rawget(_G, 'color')
+  if type(f) == 'function' then return f(r, g, b, a) end
+  local function c(v) return math.max(0, math.min(255, math.floor(v))) end
+  return c(r) * 16777216 + c(g) * 65536 + c(b) * 256 + c(a or 255)
+end
+M.packed = packed
+
+-- the fill of a bay or of the ghost; if the drawer refuses it, only the fills go (the edges, corners and name stay)
+local fillOff = false
 local function tri(dd, a, b, c, col)
-  if dd.drawTriSolid then
+  if fillOff or not dd.drawTriSolid then return end
+  local ok, err = pcall(function()
     dd:drawTriSolid(a, b, c, col)
     dd:drawTriSolid(c, b, a, col)                    -- both faces: seen from either side
-  elseif dd.drawTriangle then
-    dd:drawTriangle(a, b, c, col)
+  end)
+  if not ok then
+    fillOff = true
+    log('W', TAG, 'world: fills off: ' .. tostring(err))
   end
 end
 
@@ -192,7 +208,7 @@ function M.drawMarkers(items, refZ)
         end
         local colour = mk.COLOURS[it.state or 'approach'] or mk.COLOURS.approach
         local a = it.alpha or 1
-        local function ci(alpha) return ColorI(math.floor(colour[1] * 255), math.floor(colour[2] * 255), math.floor(colour[3] * 255), math.floor(alpha * a)) end
+        local function ci(alpha) return packed(colour[1] * 255, colour[2] * 255, colour[3] * 255, alpha * a) end
         if it.kind == 'soon' then
           local edge = ColorF(colour[1], colour[2], colour[3], 0.45)
           for k = 1, 4 do dd:drawLine(pts[k], pts[k % 4 + 1], edge) end
@@ -218,11 +234,14 @@ function M.drawMarkers(items, refZ)
           end
           -- the name and who waits, over the middle of the bay
           local text = mk.label(it)
-          if text ~= '' and (it.ahead or 0) <= LABEL_M and dd.drawTextAdvanced then
+          if not labelOff and text ~= '' and (it.ahead or 0) <= LABEL_M and dd.drawTextAdvanced then
             local mid = (pts[1] + pts[2] + pts[3] + pts[4]) * 0.25
             local S = rawget(_G, 'String')
-            dd:drawTextAdvanced(vec3(mid.x, mid.y, mid.z + 2.6), S and S(text) or text, ColorF(1, 1, 1, a), true, false,
-              ColorI(0, 0, 0, math.floor(150 * a)))
+            local okt, e3 = pcall(function()
+              dd:drawTextAdvanced(vec3(mid.x, mid.y, mid.z + 2.6), S and S(text) or text, ColorF(1, 1, 1, a), true, false,
+                ColorI(0, 0, 0, math.floor(150 * a)))
+            end)
+            if not okt then labelOff = true log('W', TAG, 'world: stop names off: ' .. tostring(e3)) end
           end
         end
       end
@@ -242,6 +261,41 @@ function M.clearMarkers()
   for name, sl in pairs(slots) do
     for _, obj in ipairs(sl.objs) do pcall(function() obj:delete() end) end
     slots[name] = nil
+  end
+end
+
+-- ---- the stops on the game's minimap -----------------------------------------------------------------------------------
+-- The minimap app hooks onDrawOnMinimap(td) every frame it draws (lua/ge/extensions/ui/apps/minimap/minimap.lua); its utils
+-- draw a dot at a game position (simpleCircle) and, for a place outside the minimap, a pointer on its edge
+-- (simpleCircleWithEdgePointer), as the game's own mission markers do. BeamNG.Earth's own map has no way for an add-on to
+-- mark a place (its GPS shows only the line and the end), so the stops are on the minimap only.
+-- stops: markers.minimap's list { { lat, lon, kind = 'next' | 'soon', colour = {r, g, b} 0..1 } }, the next one first.
+local minimapOff = false
+local WHITE
+function M.drawMinimap(stops)
+  if minimapOff or type(stops) ~= 'table' or #stops == 0 then return end
+  local u, a = rawget(_G, 'ui_apps_minimap_utils'), api()
+  if not (u and u.simpleCircle and a and a.has and a.has('transform') == true and a.toGame) then return end
+  local ok, err = pcall(function()
+    WHITE = WHITE or packed(255, 255, 255, 255)
+    for i = #stops, 1, -1 do                       -- the next stop last: on top of the others
+      local s = stops[i]
+      local x, y, z = xyz(a.toGame(s.lat, s.lon, 0))
+      if x then
+        local c = s.colour or { 1, 0.8, 0.1 }
+        local fill = packed(c[1] * 255, c[2] * 255, c[3] * 255, 255)
+        local pos = vec3(x, y, z or 0)
+        if s.kind == 'next' and u.simpleCircleWithEdgePointer then
+          u.simpleCircleWithEdgePointer(pos, fill, WHITE, 8)
+        else
+          u.simpleCircle(pos, fill, WHITE, s.kind == 'next' and 8 or 5)
+        end
+      end
+    end
+  end)
+  if not ok then
+    minimapOff = true
+    log('W', TAG, 'world: stops on the minimap off: ' .. tostring(err))
   end
 end
 
@@ -282,7 +336,7 @@ function M.drawGhost(spec, refZ)
     local rx, ry = dy * (spec.width or 2.55) / 2, -dx * (spec.width or 2.55) / 2       -- half a width to the right
     local function corner(x, y, z) return vec3(x, y, groundXY(x, y, refZ, z) + GHOST_LIFT) end
     local p = { corner(bx - rx, by - ry, bz), corner(fx - rx, fy - ry, fz), corner(fx + rx, fy + ry, fz), corner(bx + rx, by + ry, bz) }
-    local fill = ColorI(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], GHOST_FILL[4])
+    local fill = packed(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], GHOST_FILL[4])
     tri(dd, p[1], p[2], p[3], fill)
     tri(dd, p[1], p[3], p[4], fill)
     local edge = ColorF(GHOST_EDGE[1], GHOST_EDGE[2], GHOST_EDGE[3], GHOST_EDGE[4])
@@ -294,7 +348,7 @@ function M.drawGhost(spec, refZ)
       return vec3(x, y, groundXY(x, y, refZ, mz) + GHOST_LIFT + 0.02)
     end
     local half = len / 2
-    tri(dd, at(half - 0.6, 0), at(half - 3.2, 0.7), at(half - 3.2, -0.7), ColorI(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], 150))
+    tri(dd, at(half - 0.6, 0), at(half - 3.2, 0.7), at(half - 3.2, -0.7), packed(GHOST_FILL[1], GHOST_FILL[2], GHOST_FILL[3], 150))
   end)
   if not ok then
     ghostOff = true

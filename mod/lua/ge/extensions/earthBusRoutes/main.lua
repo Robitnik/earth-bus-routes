@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.10.2'
+M.VERSION = '0.10.3'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -1765,6 +1765,18 @@ function M.onPreRender()
     if ok and p then z = p.z end
   end
   world.drawMarkers(items, z)
+end
+
+-- The next stops on the game's minimap (its app calls this hook every frame it draws), with the same option as the markers
+function M.onDrawOnMinimap()
+  if not S.earth or S.opts.markers == 'off' then return end
+  local list
+  if S.trip and not S.trip.finished then
+    list = markers.minimap(S.trip)
+  elseif S.armed and S.armed.stop and S.armed.stop.lat then
+    list = { { lat = S.armed.stop.lat, lon = S.armed.stop.lon, kind = 'next', colour = markers.COLOURS.approach } }
+  end
+  if list and #list > 0 then world.drawMinimap(list) end
 end
 
 function M.onUpdate(dtReal, dtSim)

@@ -16,20 +16,54 @@ local function stubs(opts)
   opts = opts or {}
   H.reset()
   _G.vec3 = function(x, y, z) return setmetatable({ x = x, y = y, z = z }, V) end
-  _G.ColorF = function(...) return { ... } end
-  _G.ColorI = function(...) return { ... } end
+  _G.ColorF = function(...) return { kind = 'ColorF', ... } end
+  _G.ColorI = function(...) return { kind = 'ColorI', ... } end
+  _G.color = nil                  -- (packed by hand, as the game's color() does; one test sets it)
   _G.quatFromEuler = function() return setmetatable({ x = 0, y = 0, z = 0, w = 1 }, Q) end
   _G.quatFromDir = function() return setmetatable({ x = 0, y = 0, z = 0, w = 1 }, Q) end
   local calls, objects = {}, {}
   local dd = {}
-  for _, name in ipairs({ 'drawTriSolid', 'drawLine', 'drawTextAdvanced' }) do
+  -- what the game's drawer takes (BeamNG 0.40, its own calls in lua/ge): a triangle's colour is ONE number (color(r, g, b,
+  -- a)), a line's a ColorF, a text's a ColorF and a ColorI behind it. Anything else throws, as the game does.
+  local function want(cond, msg) if not cond then error(msg, 3) end end
+  local function isVec(p) return type(p) == 'table' and type(p.x) == 'number' end
+  local check = {
+    drawTriSolid = function(a, b, c, col)
+      want(isVec(a) and isVec(b) and isVec(c), 'bad argument: a point expected')
+      want(type(col) == 'number', "bad argument #4 to 'drawTriSolid' (number expected, got " .. type(col) .. ')')
+      calls.triColours = calls.triColours or {}
+      calls.triColours[#calls.triColours + 1] = col
+    end,
+    drawLine = function(a, b, col)
+      want(isVec(a) and isVec(b) and type(col) == 'table' and col.kind == 'ColorF', "bad argument to 'drawLine'")
+    end,
+    drawTextAdvanced = function(p, text, col, adv, twod, bg)
+      want(isVec(p) and type(col) == 'table' and col.kind == 'ColorF' and type(bg) == 'table' and bg.kind == 'ColorI',
+        "bad argument to 'drawTextAdvanced'")
+      calls.text = text
+    end,
+  }
+  for name, chk in pairs(check) do
     dd[name] = function(self, ...)
       if opts.failOn == name then error('boom') end
+      chk(...)
       calls[name] = (calls[name] or 0) + 1
-      if name == 'drawTextAdvanced' then calls.text = select(2, ...) end
     end
   end
   _G.debugDrawer = dd
+  -- the game's minimap utils (ui/apps/minimap/utils.lua): a dot at a game position, a dot or an edge pointer
+  if opts.minimap ~= false then
+    local dots = {}
+    calls.dots = dots
+    local function dot(kind) return function(pos, fill, stroke, radius)
+      if opts.failOn == 'minimap' then error('boom') end
+      want(isVec(pos) and type(fill) == 'number' and type(stroke) == 'number', 'bad minimap dot')
+      dots[#dots + 1] = { kind = kind, x = pos.x, y = pos.y, fill = fill, radius = radius }
+    end end
+    _G.ui_apps_minimap_utils = { simpleCircle = dot('circle'), simpleCircleWithEdgePointer = dot('pointer') }
+  else
+    _G.ui_apps_minimap_utils = nil
+  end
   if opts.objects ~= false then
     _G.createObject = function(kind)
       if opts.failObjects then error('no objects') end
@@ -112,17 +146,78 @@ function T.without_earths_coordinates_there_are_no_markers()
   local world, calls, objects = stubs({ transform = false })
   assert(not world.markersAvailable())
   world.drawMarkers({ item() }, 300)
-  assert(next(calls) == nil and #objects == 0)
+  assert(not (calls.drawTriSolid or calls.drawLine or calls.drawTextAdvanced) and #objects == 0)
 end
 
 function T.a_failing_drawer_turns_the_markers_off_without_an_error()
-  local world, calls = stubs({ failOn = 'drawTextAdvanced' })
+  local world, calls = stubs({ failOn = 'drawLine' })
   world.drawMarkers({ item() }, 300)
   assert(not world.markersAvailable(), 'off after the first failure')
-  local n = calls.drawLine
+  local n = calls.drawTriSolid
   world.drawMarkers({ item() }, 300)
-  assert(calls.drawLine == n, 'nothing drawn any more')
+  assert(calls.drawTriSolid == n, 'nothing drawn any more')
   assert(#H.logs >= 1 and H.logs[#H.logs]:find('markers off'))
+end
+
+-- 0.9.2-0.10.2: the fill got a ColorI, the game's drawTriSolid threw on the first frame of every trip and all the markers
+-- of the session went off (beamng.log: "bad argument #4 to 'drawTriSolid' (number expected, got userdata)")
+function T.the_fill_colour_is_one_packed_number_as_the_game_takes_it()
+  local world, calls = stubs()
+  world.drawMarkers({ item() }, 300)
+  assert(world.markersAvailable() and calls.drawTriSolid == 6, 'drawn, not turned off')
+  -- red 255, 20, 12 at alpha 48 for the bay; 110 for the arrow
+  local bay = 255 * 16777216 + 20 * 65536 + 12 * 256 + 48
+  assert(calls.triColours[1] == bay, 'packed r, g, b, a: ' .. tostring(calls.triColours[1]))
+  assert(calls.triColours[5] % 256 == 110, 'the arrow stronger')
+  -- the game's own color() is used when it is there
+  _G.color = function(r, g, b, a) return 7 end
+  world.drawMarkers({ item() }, 300)
+  _G.color = nil
+  assert(calls.triColours[#calls.triColours] == 7)
+  assert(world.packed(300, -5, 128.9, nil) == 255 * 16777216 + 0 + 128 * 256 + 255, 'clamped, floored, alpha 255 by default')
+end
+
+function T.a_failing_fill_or_name_leaves_the_rest_of_the_markers()
+  local world, calls, objects = stubs({ failOn = 'drawTriSolid' })
+  world.drawMarkers({ item() }, 300)
+  assert(world.markersAvailable(), 'only the fills go')
+  assert(#objects == 4 and calls.drawLine == 4 and calls.drawTextAdvanced == 1, 'corners, edges and the name stay')
+  assert(H.logs[#H.logs]:find('fills off'))
+  local w2, c2, o2 = stubs({ failOn = 'drawTextAdvanced' })
+  w2.drawMarkers({ item() }, 300)
+  w2.drawMarkers({ item() }, 300)
+  assert(w2.markersAvailable() and #o2 == 4 and c2.drawTriSolid == 12, 'the bay is drawn on without its name')
+end
+
+-- ---- the minimap ----
+local function mini(over)
+  local s = { lat = 50.001, lon = 16.002, kind = 'next', colour = markers.COLOURS.approach }
+  for k, v in pairs(over or {}) do s[k] = v end
+  return s
+end
+
+function T.the_next_stops_go_on_the_games_minimap()
+  local world, calls = stubs()
+  world.drawMinimap({ mini(), mini({ kind = 'soon', colour = markers.COLOURS.soon, lat = 50.002 }) })
+  local d = calls.dots
+  assert(#d == 2, 'two dots: ' .. #d)
+  assert(d[2].kind == 'pointer' and d[2].radius == 8, 'the next one last (on top), with a pointer from the edge')
+  assert(d[1].kind == 'circle' and d[1].radius == 5, 'the one after it: a small dot')
+  assert(math.abs(d[2].x - 140) < 1e-6 and math.abs(d[2].y - 111) < 1e-6, 'at the game position of the stop (toGame)')
+  assert(d[2].fill == 255 * 16777216 + 20 * 65536 + 12 * 256 + 255, 'red, as the bay: ' .. tostring(d[2].fill))
+end
+
+function T.the_minimap_needs_its_app_and_earths_coordinates_and_a_failure_turns_only_it_off()
+  local world, calls = stubs({ minimap = false })
+  world.drawMinimap({ mini() })                          -- no minimap app: nothing, no error
+  local w2, c2 = stubs({ transform = false })
+  w2.drawMinimap({ mini() })
+  assert(#c2.dots == 0)
+  local w3, c3 = stubs({ failOn = 'minimap' })
+  w3.drawMinimap({ mini() })
+  assert(H.logs[#H.logs]:find('minimap off'))
+  w3.drawMarkers({ item() }, 300)
+  assert(w3.markersAvailable() and c3.drawTriSolid == 6, 'the markers on the road go on')
 end
 
 local function ghostSpec() return { back = { lat = 50.0, lon = 16.0 }, front = { lat = 50.0, lon = 16.00017 }, width = 2.55 } end
@@ -149,7 +244,7 @@ function T.the_ghost_needs_earths_coordinates_and_a_failure_turns_only_it_off()
   local world, calls = stubs({ transform = false })
   assert(not world.ghostAvailable())
   world.drawGhost(ghostSpec(), 300)
-  assert(next(calls) == nil)
+  assert(not (calls.drawTriSolid or calls.drawLine or calls.drawTextAdvanced))
   local w2, c2 = stubs({ failOn = 'drawLine' })
   w2.drawGhost(ghostSpec(), 300)                          -- no error
   assert(not w2.ghostAvailable() and w2.markersAvailable(), 'the stop markers go on')
@@ -159,7 +254,7 @@ function T.the_ghost_needs_earths_coordinates_and_a_failure_turns_only_it_off()
   -- a rectangle of no length (the same point twice) is not drawn
   local w3, c3 = stubs()
   w3.drawGhost({ back = { lat = 50, lon = 16 }, front = { lat = 50, lon = 16 }, width = 2.5 }, 300)
-  assert(next(c3) == nil)
+  assert(not (c3.drawTriSolid or c3.drawLine or c3.drawTextAdvanced))
 end
 
 function T.the_size_of_the_vehicle_is_asked_in_a_safe_way()
