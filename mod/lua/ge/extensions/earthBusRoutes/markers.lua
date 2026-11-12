@@ -74,6 +74,29 @@ function M.plan(t, done, now)
   return out
 end
 
+-- The stops on the game's minimap for a trip in progress: the next one (the colour of its bay: coming, in it, out of
+-- service) and the MINIMAP_COUNT after it (yellow, smaller), wherever they are (the minimap shows the ones round the bus
+-- and points to the next one from its edge). { { lat, lon, kind = 'next' | 'soon', colour, index, name } }, the next first.
+M.MINIMAP_COUNT = 8
+function M.minimap(t)
+  local out = {}
+  local r = t and t.route
+  if not (r and r.stops) then return out end
+  for k = 0, M.MINIMAP_COUNT do
+    local i = (t.idx or 1) + k
+    local s = r.stops[i]
+    if not s then break end
+    if s.lat and s.lon then
+      local state = 'soon'
+      if k == 0 then state = (t.inZone or t.phase == 'atStop' or t.phase == 'start') and 'inside' or 'approach' end
+      if t.extra and t.extra[i] and t.extra[i].closed then state = 'closed' end
+      out[#out + 1] = { lat = s.lat, lon = s.lon, kind = k == 0 and 'next' or 'soon', colour = M.COLOURS[state], index = i,
+        name = s.name }
+    end
+  end
+  return out
+end
+
 -- One stop: the start stop of a trip that waits for the bus
 function M.planStart(route, stop)
   local z = M.zone(route, stop.along or 0)

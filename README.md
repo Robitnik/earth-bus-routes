@@ -14,7 +14,7 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 - **Map, towns, stations and stops**: a map tab with a chip for every town round you and the stations and stops as chips and
   dots; a town brings the map closer with all its stops; a stop gives you the GPS route there, a teleport or its lines. The
   route builder can add a town's main station with one click.
-- **Stop markers** in the world as in the game's bus mode: the corner markers of the next stop's bay (red while you come, orange in the bay, green when done), an arrow of the way to stand, the name and who waits; a progress bar for everything slow.
+- **Stop markers** in the world as in the game's bus mode: the corner markers of the next stop's bay (red while you come, orange in the bay, green when done), an arrow of the way to stand, the name and who waits; the next stops as dots on the game's minimap (the next one points from its edge); a progress bar for everything slow.
 - **Shifts and a career**: a shift is a chain of trips with layovers (the real timetable in Czechia), with transfers to wait for,
   dispatcher events, tickets on regional lines, a ghost of your best trip, rank and credits, a profile, the map of the lines you
   have driven and achievements. Free play stays open.

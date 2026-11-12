@@ -326,6 +326,26 @@ function T.markers_follow_the_trip_and_show_only_what_is_near()
   assert(markers.labelLines({ kind = 'done', name = 'Y' })[1] == 'Y')
 end
 
+function T.the_minimap_shows_the_next_stops_however_far()
+  local markers = require('earthBusRoutes/markers')
+  local r = route()
+  local t = newTrip(r)
+  t.idx, t.along, t.phase = 2, r.stops[2].along - 5000, 'approach'
+  local m = markers.minimap(t)
+  assert(#m >= 1 and #markers.plan(t) == 0, 'too far for the road, not for the minimap')
+  assert(m[1].kind == 'next' and m[1].index == 2 and m[1].colour == markers.COLOURS.approach)
+  assert(m[1].lat == r.stops[2].lat and m[1].lon == r.stops[2].lon, 'where the stop is')
+  for k = 2, #m do assert(m[k].kind == 'soon' and m[k].index == 1 + k and m[k].colour == markers.COLOURS.soon) end
+  assert(#m == math.min(markers.MINIMAP_COUNT + 1, #r.stops - 1), 'the next one and MINIMAP_COUNT after it')
+  t.phase = 'atStop'
+  assert(markers.minimap(t)[1].colour == markers.COLOURS.inside)
+  t.extra = { [2] = { closed = true } }
+  assert(markers.minimap(t)[1].colour == markers.COLOURS.closed, 'out of service: grey')
+  t.idx = #r.stops
+  assert(#markers.minimap(t) == 1, 'the last stop alone')
+  assert(#markers.minimap({}) == 0 and #markers.minimap(nil) == 0)
+end
+
 function T.a_bay_turns_orange_in_it_and_green_when_done()
   local markers = require('earthBusRoutes/markers')
   local r = route()
