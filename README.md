@@ -40,7 +40,7 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
   line like any other: timetable, passengers, HUD, score, the way back. You can also continue an incomplete OpenStreetMap line
   as your own, and after a trip build the next leg from where it ended.
 
-English and Ukrainian; the menu follows the game language and has a switch.
+all 13 languages of the game plus Ukrainian (English, Ukrainian, German, Spanish, French, Japanese, Korean, Polish, Portuguese BR and PT, Russian, Chinese Simplified and Traditional); the menu and the HUD follow the game language, and the menu has a switch.
 
 ## Install
 

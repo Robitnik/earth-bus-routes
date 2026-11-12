@@ -4,6 +4,7 @@
 
 - **The stop markers on the road are back.** Since 0.9.2 the light fill of the bay was handed to the game's drawer in a form it refuses, so the first frame of every trip failed and all the markers (corners, arrow, name) and the ghost turned themselves off for the session. Fixed; and if one part cannot be drawn now, only that part goes (the fill, the name), not the rest.
 - **The next stops on the minimap.** The game's minimap shows the next stop as a dot in the colour of its bay (red coming, orange in it, grey out of service), with a pointer from the minimap's edge while it is out of view, and the eight after it as small yellow dots; the stop you drive to before a trip too. BeamNG.Earth's own map has no way for an add-on to mark places, so its GPS line stays as it was. "Stop markers in the world" turns both off.
+- **All the languages of the game, in the menu and on the HUD.** English, Ukrainian, German, Spanish, French, Japanese, Korean, Polish, Portuguese (Brazil and Portugal), Russian, Simplified and Traditional Chinese. The add-on follows the game's interface language; a drop-down in the menu picks another (or "Auto"). The HUD follows the menu's choice. The texts were translated by a model and have not been read by native speakers: tell what sounds wrong. The Lua toasts and the add-on's option labels stay English.
 - No data service update needed (stays 0.10.1).
 
 ## 0.10.2
