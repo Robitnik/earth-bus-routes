@@ -233,7 +233,8 @@ function M.drawMarkers(items, refZ)
             else cornersOff = true log('W', TAG, 'world: corner markers off: ' .. tostring(e2)) end
           end
           -- the name and who waits, over the middle of the bay
-          local text = mk.label(it)
+          local okTr, texts = pcall(require, 'earthBusRoutes/texts')
+          local text = mk.label(it, okTr and texts.t or nil)
           if not labelOff and text ~= '' and (it.ahead or 0) <= LABEL_M and dd.drawTextAdvanced then
             local mid = (pts[1] + pts[2] + pts[3] + pts[4]) * 0.25
             local S = rawget(_G, 'String')
@@ -288,7 +289,7 @@ function M.drawMinimap(stops)
         if s.kind == 'next' and u.simpleCircleWithEdgePointer then
           u.simpleCircleWithEdgePointer(pos, fill, WHITE, 8)
         else
-          u.simpleCircle(pos, fill, WHITE, s.kind == 'next' and 8 or 5)
+          u.simpleCircle(pos, fill, WHITE, s.kind == 'next' and 8 or (s.kind == 'past' and 4 or 5))
         end
       end
     end

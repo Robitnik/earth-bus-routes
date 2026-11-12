@@ -94,7 +94,20 @@
 
       <!-- the line diagram: the next stop opened up at the top, the stops after it on the line's colour -->
       <section class="line" :key="d.index">
-        <div v-for="(s, i) in shown" :key="s.index" class="stop" :class="{ current: i === 0, far: i > 3, 'is-here': i === 0 && atStop }">
+        <!-- the stop just behind the bus and what became of it: served, missed (people left behind), passed (nobody wanted it) -->
+        <div v-if="d.past && !compact" class="stop past" :class="'o-' + d.past.outcome">
+          <span class="dot">
+            <svg v-if="d.past.outcome === 'served'" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2l2.3 2.3 4.7-5" /></svg>
+            <svg v-else-if="d.past.outcome === 'missed'" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" /></svg>
+          </span>
+          <div class="body">
+            <div class="row">
+              <span class="name">{{ d.past.name }}</span>
+              <span class="pstate">{{ tr("hud.past." + d.past.outcome) }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-for="(s, i) in shown" :key="s.index" class="stop" :class="{ current: i === 0, far: i > 3, 'is-here': i === 0 && atStop, long: i === 0 && longName }">
           <span class="dot"></span>
           <div class="body">
             <div class="row">
@@ -126,8 +139,16 @@
             </template>
           </div>
         </div>
-        <div class="route-progress" :title="tr('hud.progress')"><i :style="{ width: d.progress * 100 + '%' }"></i></div>
       </section>
+
+      <!-- where on the line: the stop's number of all, the way to the end, the bar -->
+      <div v-if="!compact" class="whereon" :title="tr('hud.progress')">
+        <div class="wo-row">
+          <span>{{ tr("hud.stopOf", { i: d.index, n: d.count }) }}</span>
+          <span v-if="d.left != null" class="wo-left">{{ tr("hud.toEnd", { d: distLabel(d.left, d.units) }) }}</span>
+        </div>
+        <div class="route-progress"><i :style="{ width: d.progress * 100 + '%' }"></i></div>
+      </div>
 
       <!-- the ghost of the best trip on this line: seconds behind (+) or ahead (-) at this place -->
       <div v-if="d.ghost" class="ghost" :class="ghostCls" :title="tr('hud.ghostTip', { points: d.ghost.points })">
@@ -308,6 +329,8 @@ const lineInk = computed(() => {
 })
 const shown = computed(() => (d.value ? (compact.value ? d.value.stops.slice(0, 1) : d.value.stops) : []))
 const atStop = computed(() => d.value && (d.value.phase === "atStop" || d.value.phase === "start"))
+// a long name of the next stop gets a smaller font (two lines of it, not one and a half cut off)
+const longName = computed(() => !!(d.value && d.value.stops && d.value.stops[0] && String(d.value.stops[0].name || "").length > 28))
 const pad = n => String(n).padStart(2, "0")
 function timeLabel(sec) {
   const s = Math.floor(((sec % 86400) + 86400) % 86400)
@@ -514,7 +537,7 @@ onMounted(() => {
 }
 .clock { flex: none; font-size: 22px; letter-spacing: 1px; }
 
-// ---- the line diagram
+// ---- the line diagram: as many stops as the window has room for, the last ones fading out
 .line {
   flex: 1;
   min-height: 0;
@@ -522,6 +545,29 @@ onMounted(() => {
   flex-direction: column;
   padding: 2px 4px 0 6px;
   overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 34px), transparent);
+}
+// the stop behind: small, muted, its dot says what became of it
+.stop.past {
+  padding-bottom: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  &::before { background: var(--muted); opacity: 0.45; }
+  .dot { display: grid; place-items: center; left: 2px; top: 3px; width: 14px; height: 14px; border: 2px solid var(--past); background: var(--past); }
+  .dot svg { width: 10px; height: 10px; fill: none; stroke: #0b1114; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .name { text-decoration: none; }
+  .pstate { flex: none; font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--past); }
+  &.o-served { --past: var(--ok); }
+  &.o-missed { --past: #b84dff; .name { color: #cfb0e6; } }
+  &.o-passed { --past: #73ade6; .dot { background: var(--panel); } }
+}
+.whereon {
+  flex: none;
+  padding: 0 4px 0 30px;
+  .wo-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+  .wo-left { color: var(--ink); font-weight: 600; }
+  .route-progress { margin: 4px 0 2px; }
 }
 .stop {
   position: relative;
@@ -563,6 +609,7 @@ onMounted(() => {
     .dot { left: 0; top: 3px; width: 18px; height: 18px; border-width: 4px; background: var(--line); animation: arrive 0.9s ease-out 1; }
     .row { align-items: center; }
     .name { font-size: 23px; font-weight: 700; line-height: 1.2; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    &.long .name { font-size: 18px; }
     &.is-here .name { color: var(--line); }
   }
 }
@@ -612,7 +659,6 @@ onMounted(() => {
   overflow: hidden;
   i { display: block; height: 100%; background: var(--line); border-radius: 2px; transition: width 0.25s linear; }
 }
-.route-progress { margin: 8px 0 6px 24px; }
 @keyframes arrive {
   0% { box-shadow: 0 0 0 0 var(--line); }
   100% { box-shadow: 0 0 0 12px transparent; }

@@ -10,11 +10,16 @@ M.WIDTH_M = 3.6          -- across it: a lane
 M.LANE_OFFSET_M = 2.4    -- from the road's line to the middle of the zone: the lane on the right of the way of travel
 M.SHOW_M = 700           -- a stop is marked from this far along the road
 M.SOON_COUNT = 2         -- the stops after the next one, drawn lighter
-M.DONE_FADE_S = 2.5      -- a stop just served stays green this long, fading
+M.DONE_FADE_S = 5        -- a stop just left behind keeps its colour this long, fading (green served, purple missed, grey passed)
 
 -- the colours of a bay (r, g, b in 0..1), as the game's bus mode: coming, in it, done
 M.COLOURS = { approach = { 1, 0.08, 0.05 }, inside = { 1, 0.5, 0 }, done = { 0.1, 0.9, 0.2 }, soon = { 1, 0.8, 0.1 },
-  closed = { 0.55, 0.55, 0.58 } }       -- a stop out of service (a dispatcher event): grey
+  closed = { 0.55, 0.55, 0.58 },        -- a stop out of service (a dispatcher event): grey
+  missed = { 0.72, 0.3, 1 },            -- driven past while people waited or wanted to get off: purple
+  passed = { 0.45, 0.68, 0.9 } }        -- driven past, nobody wanted it (no fault): pale blue
+-- what a stop left behind became (trip.outcome) -> the state of its marker
+local PAST_STATE = { served = 'done', missed = 'missed', passed = 'passed' }
+M.PAST_STATE = PAST_STATE
 
 local function offsetLatLon(lat, lon, east, north)
   return lat + north / 111195, lon + east / (111195 * math.cos(math.rad(lat)))
@@ -41,14 +46,16 @@ end
 
 -- The markers to draw for a trip in progress (trip.lua state): the next stop (kind 'next', state 'approach' or 'inside') and
 -- the SOON_COUNT after it (kind 'soon'), each within SHOW_M along the road; `done` = { index, at } of the stop just served
--- (kind 'done', fading for DONE_FADE_S after `now`). Items: { kind, state, alpha, index, name, zone, waiting, ref, to, ahead }.
+-- (kind 'done', fading for DONE_FADE_S after `now`; done.state 'done' green, 'missed' purple, 'passed' pale blue).
+-- Items: { kind, state, alpha, index, name, zone, waiting, ref, to, ahead }.
 function M.plan(t, done, now)
   local out = {}
   if done and now and done.at and now - done.at < M.DONE_FADE_S then
     local s = t.route.stops[done.index]
     local z = s and M.zone(t.route, s.along or 0)
     if z then
-      out[#out + 1] = { kind = 'done', state = 'done', alpha = 1 - (now - done.at) / M.DONE_FADE_S, index = done.index,
+      local k = (now - done.at) / M.DONE_FADE_S
+      out[#out + 1] = { kind = 'done', state = done.state or 'done', alpha = 1 - k * k, index = done.index,
         name = s.name, zone = z, ref = t.route.ref, to = t.route.to, ahead = (s.along or 0) - (t.along or 0) }
     end
   end
@@ -94,6 +101,14 @@ function M.minimap(t)
         name = s.name }
     end
   end
+  -- the two stops behind, in the colour of what became of them (drawn under the others)
+  for i = (t.idx or 1) - 1, math.max(1, (t.idx or 1) - 2), -1 do
+    local s = r.stops[i]
+    local o = t.outcome and t.outcome[i]
+    if s and s.lat and s.lon and o then
+      out[#out + 1] = { lat = s.lat, lon = s.lon, kind = 'past', colour = M.COLOURS[PAST_STATE[o] or 'passed'], index = i, name = s.name }
+    end
+  end
   return out
 end
 
@@ -106,21 +121,29 @@ function M.planStart(route, stop)
 end
 
 -- The text over the bay, one string per line (the game's text drawer has no line breaks): the stop's name first, then how
--- many wait (the next stop only), then the line; nothing for the stops after it.
-function M.labelLines(item)
+-- many wait (the next stop only), then the line; nothing for the stops after it. tr(key, vars): the player's language
+-- (texts.t; English without it).
+local EN = { mkWaiting = '{n} waiting', mkMissed = 'missed' }
+local function en(key, vars) return (EN[key] or key):gsub('{(%w+)}', function(k) return vars and vars[k] ~= nil and tostring(vars[k]) or nil end) end
+function M.labelLines(item, tr)
+  tr = tr or en
   if item.kind == 'soon' then return {} end
   local lines = { tostring(item.name or '') }
-  if item.kind == 'done' then return lines end
-  if item.waiting and item.waiting > 0 then lines[#lines + 1] = tostring(item.waiting) .. ' waiting' end
+  if item.kind == 'done' then
+    if item.state == 'missed' then lines[#lines + 1] = (tr('mkMissed')) end
+    return lines
+  end
+  if item.waiting and item.waiting > 0 then lines[#lines + 1] = (tr('mkWaiting', { n = item.waiting })) end
   lines[#lines + 1] = tostring(item.ref or '') .. ' > ' .. tostring(item.to or '')
   return lines
 end
 
 -- the one line drawn over the bay: the name and how many wait (the line and its end are on the HUD)
-function M.label(item)
-  local l = M.labelLines(item)
+function M.label(item, tr)
+  local l = M.labelLines(item, tr)
   if #l == 0 then return '' end
   if item.kind == 'next' and item.waiting and item.waiting > 0 then return l[1] .. '  -  ' .. l[2] end
+  if item.kind == 'done' and item.state == 'missed' then return l[1] .. '  -  ' .. l[2] end
   return l[1]
 end
 

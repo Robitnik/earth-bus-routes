@@ -82,6 +82,11 @@ export default {
     "note.No signal": "Pas de clignotant",
     "note.Speeding": "Excès de vitesse",
     "hud.ach": "Succès débloqué",
+    "hud.past.served": "desservi",
+    "hud.past.missed": "manqué",
+    "hud.past.passed": "passé",
+    "hud.stopOf": "Arrêt {i} sur {n}",
+    "hud.toEnd": "{d} jusqu’au terminus",
   },
   ach: {
     "first_trip": "Première course",

@@ -82,6 +82,11 @@ export default {
     "note.No signal": "未打转向灯",
     "note.Speeding": "超速",
     "hud.ach": "解锁成就",
+    "hud.past.served": "已停靠",
+    "hud.past.missed": "错过",
+    "hud.past.passed": "已驶过",
+    "hud.stopOf": "第 {i} 站，共 {n} 站",
+    "hud.toEnd": "距终点 {d}",
   },
   ach: {
     "first_trip": "首次行程",

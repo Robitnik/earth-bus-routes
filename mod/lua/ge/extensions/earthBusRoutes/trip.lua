@@ -47,6 +47,7 @@ function M.new(plan)
     timer = 0, standing = 0, doorWasOpen = false, doorOpenedHere = false, minDist = math.huge, inZone = false,
     arrivedAt = nil, finished = false, along = (route.stops[plan.startIndex or 1] or {}).along or 0, off = 0, alongTimer = 0, dist = nil, lastDeparture = nil,
     events = {}, departedStops = 0, notes = {},
+    outcome = {},                    -- index -> 'served' | 'missed' | 'passed' (driven by, nobody needed it): the markers' colours
     conn = {}, offered = {}, announced = {}, connCount = 0, connOffers = 0, waived = 0,   -- transfers (connections.lua)
     ticketExtra = 0,                                                                      -- seconds of ticket selling at this stop
   }
@@ -180,6 +181,7 @@ local function depart(t)
   connections.leave(t)
   dispatch.leave(t, i)
   scoring.departed(t.score, early, t.lastBoard, t.lastAlight, math.max(0, t.boardLeft or 0))
+  t.outcome[i] = 'served'
   emit(t, 'departed', { index = i, stop = M.stop(t, i), early = early, boarded = t.lastBoard, alighted = t.lastAlight })
   local here = M.stop(t, i)
   if here then demand.markServed(demand.book, here.lat, here.lon, demand.lineKey(t.route), t.clock, t.lastBoard) end
@@ -267,8 +269,12 @@ function M.update(t, dt, s)
       -- drove through the stop's zone, or past it, without standing
       if needed(t) then
         scoring.missed(t.score, t.waiting)
+        t.outcome[t.idx] = 'missed'
         emit(t, 'missed', { index = t.idx, stop = stop, waiting = t.waiting or 0 })
         t.leftBehind = t.leftBehind + (t.waiting or 0)
+      else
+        t.outcome[t.idx] = 'passed'                 -- nobody wanted it: no fault, the marker turns grey
+        emit(t, 'passed', { index = t.idx, stop = stop })
       end
       t.idx = t.idx + 1
       t.waiting, t.inZone, t.minDist = nil, false, math.huge
@@ -297,7 +303,7 @@ function M.hud(t)
   local stops = t.route.stops
   local nextStop = stops[t.idx]
   local list = {}
-  for i = t.idx, math.min(#stops, t.idx + 6) do
+  for i = t.idx, math.min(#stops, t.idx + 9) do
     local sched = M.scheduledArrival(t, i)
     list[#list + 1] = { name = stops[i].name, sched = sched, current = (i == t.idx), index = i, station = stops[i].station or false }
   end
@@ -320,6 +326,10 @@ function M.hud(t)
     boarded = t.boarded, alighted = t.alighted, lastBoard = t.lastBoard, lastAlight = t.lastAlight,
     leftBehind = t.leftBehind,
     progress = math.max(0, math.min(1, t.along / total)),
+    left = math.max(0, total - t.along),                                         -- metres to the end of the line
+    -- the stop just behind the bus and what became of it: served, missed (people were left), passed (nobody wanted it)
+    past = (t.idx > 1 and stops[t.idx - 1]) and { name = stops[t.idx - 1].name, index = t.idx - 1,
+      outcome = (t.outcome and t.outcome[t.idx - 1]) or 'served' } or nil,
     scheduled = t.entry ~= nil,
     score = M.liveScore(t),
     notes = M.recentNotes(t), noteSeq = t.score.noteSeq or 0,

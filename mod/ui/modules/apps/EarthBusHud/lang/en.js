@@ -82,6 +82,11 @@ export default {
     "note.No signal": "No indicator",
     "note.Speeding": "Speeding",
     "hud.ach": "Achievement unlocked",
+    "hud.past.served": "served",
+    "hud.past.missed": "missed",
+    "hud.past.passed": "passed by",
+    "hud.stopOf": "Stop {i} of {n}",
+    "hud.toEnd": "{d} to the end",
   },
   ach: {
     "first_trip": "First trip",

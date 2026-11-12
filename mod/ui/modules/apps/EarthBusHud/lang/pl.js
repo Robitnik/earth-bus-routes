@@ -82,6 +82,11 @@ export default {
     "note.No signal": "Brak kierunkowskazu",
     "note.Speeding": "Przekroczenie prędkości",
     "hud.ach": "Odblokowano osiągnięcie",
+    "hud.past.served": "obsłużony",
+    "hud.past.missed": "pominięty",
+    "hud.past.passed": "przejechany",
+    "hud.stopOf": "Przystanek {i} z {n}",
+    "hud.toEnd": "{d} do końca",
   },
   ach: {
     "first_trip": "Pierwszy kurs",

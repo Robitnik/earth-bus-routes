@@ -1711,12 +1711,17 @@ local function handleEvents(t)
     elseif e.name == 'departed' then
       world.busDisplay(t.veh, t.route, stopsAhead(t))
       gpsAhead(t)
-      S.doneStop = { index = e.data.index, at = S.markerClock or 0 }     -- its bay turns green and fades
+      S.doneStop = { index = e.data.index, at = S.markerClock or 0, state = 'done' }     -- its bay turns green and fades
       pcall(askConnections, t)
     elseif e.name == 'missed' then
+      S.doneStop = { index = e.data.index, at = S.markerClock or 0, state = 'missed' }   -- purple, fading
       world.toast(texts.t('missedStop', { name = tostring(e.data.stop.name) }), 4)
       gpsAhead(t)
       pcall(askConnections, t)
+    elseif e.name == 'passed' then
+      S.doneStop = { index = e.data.index, at = S.markerClock or 0, state = 'passed' }   -- nobody wanted it: pale blue, fading
+      world.busDisplay(t.veh, t.route, stopsAhead(t))
+      gpsAhead(t)
     elseif e.name == 'bell' then
       world.stopBell()
     elseif e.name == 'finished' then

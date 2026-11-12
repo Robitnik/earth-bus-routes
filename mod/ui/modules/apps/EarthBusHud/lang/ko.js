@@ -82,6 +82,11 @@ export default {
     "note.No signal": "방향지시등 안 켬",
     "note.Speeding": "과속",
     "hud.ach": "업적 달성",
+    "hud.past.served": "정차함",
+    "hud.past.missed": "놓침",
+    "hud.past.passed": "통과",
+    "hud.stopOf": "{n}개 중 {i}번째 정류장",
+    "hud.toEnd": "종점까지 {d}",
   },
   ach: {
     "first_trip": "첫 운행",

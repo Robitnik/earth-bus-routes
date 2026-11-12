@@ -82,6 +82,11 @@ export default {
     "note.No signal": "Без поворотника",
     "note.Speeding": "Перевищення швидкості",
     "hud.ach": "Нове досягнення",
+    "hud.past.served": "обслужено",
+    "hud.past.missed": "пропущено",
+    "hud.past.passed": "проїхали",
+    "hud.stopOf": "Зупинка {i} з {n}",
+    "hud.toEnd": "до кінця {d}",
   },
   ach: {
     "first_trip": "Перший рейс",

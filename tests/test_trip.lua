@@ -112,6 +112,57 @@ function T.empty_stops_can_be_passed_without_penalty()
   assert(missed == 0 or t.score.missed >= 0)
 end
 
+-- A stop left behind keeps a colour of its own: green served, purple missed, pale blue passed (nobody wanted it); the HUD
+-- shows the last one with what became of it, the minimap the two behind
+function T.every_stop_left_behind_has_an_outcome_and_its_marker_changes_colour()
+  local markers = require('earthBusRoutes/markers')
+  local r = route()
+  local t = newTrip(r)
+  local skip = {}
+  for i = 2, #r.stops - 1 do skip[i] = true end
+  runAll(t, r, { skip = skip })
+  assert(t.outcome[1] == 'served', 'the first stop was served: ' .. tostring(t.outcome[1]))
+  local seen = {}
+  for i = 2, #r.stops - 1 do
+    local o = t.outcome[i]
+    assert(o == 'missed' or o == 'passed', i .. ': ' .. tostring(o))
+    seen[o] = true
+  end
+  assert(seen.missed, 'some stop had people waiting')
+  local events = {}
+  for _, e in ipairs(trip.takeEvents(t)) do events[e.name] = (events[e.name] or 0) + 1 end
+  assert((events.missed or 0) + (events.passed or 0) >= #r.stops - 2, 'an event for each stop driven past')
+  -- the marker of the stop left behind: the colour of its outcome, fading
+  local t2 = newTrip(r)
+  t2.idx, t2.along, t2.phase = 4, r.stops[4].along - 300, 'approach'
+  for state, colour in pairs({ done = markers.COLOURS.done, missed = markers.COLOURS.missed, passed = markers.COLOURS.passed }) do
+    local it = markers.plan(t2, { index = 3, at = 100, state = state }, 101)[1]
+    assert(it.kind == 'done' and it.state == state and markers.COLOURS[it.state] == colour, state)
+    assert(it.alpha > 0.9 and it.alpha < 1, 'fading slowly at first: ' .. it.alpha)
+  end
+  assert(markers.plan(t2, { index = 3, at = 100, state = 'missed' }, 100 + markers.DONE_FADE_S + 0.1)[1].kind ~= 'done', 'gone after the fade')
+  assert(markers.COLOURS.missed ~= markers.COLOURS.closed and markers.COLOURS.passed ~= markers.COLOURS.soon)
+  -- the name over a missed bay says so, in the player's language
+  local it = { kind = 'done', state = 'missed', name = 'Krčín' }
+  assert(markers.label(it) == 'Krčín  -  missed')
+  assert(markers.label(it, function(k) return k == 'mkMissed' and 'пропущено' or k end) == 'Krčín  -  пропущено')
+  assert(markers.label({ kind = 'done', state = 'done', name = 'Krčín' }) == 'Krčín')
+  assert(markers.label({ kind = 'next', name = 'A', waiting = 3 }, function(k, v) return 'чекає ' .. v.n end) == 'A  -  чекає 3')
+  -- the minimap: the two behind in the colours of their outcomes, under the next ones
+  t2.outcome = { [2] = 'served', [3] = 'missed' }
+  local m = markers.minimap(t2)
+  local past = {}
+  for _, s in ipairs(m) do if s.kind == 'past' then past[s.index] = s.colour end end
+  assert(past[3] == markers.COLOURS.missed and past[2] == markers.COLOURS.done and past[1] == nil)
+  assert(m[1].kind == 'next', 'the next one first (drawn on top)')
+  -- the HUD: the stop behind and what became of it, more stops ahead, the distance to the end
+  local h = trip.hud(t2)
+  assert(h.past and h.past.index == 3 and h.past.outcome == 'missed' and h.past.name == r.stops[3].name)
+  assert(#h.stops == math.min(10, #r.stops - 3) and h.left > 0)
+  t2.idx = 1
+  assert(trip.hud(t2).past == nil, 'nothing behind at the first stop')
+end
+
 function T.doors_must_open_for_people_to_get_on()
   local r = route()
   local t = newTrip(r)

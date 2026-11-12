@@ -82,6 +82,11 @@ export default {
     "note.No signal": "Kein Blinker",
     "note.Speeding": "Geschwindigkeitsübertretung",
     "hud.ach": "Erfolg freigeschaltet",
+    "hud.past.served": "bedient",
+    "hud.past.missed": "verpasst",
+    "hud.past.passed": "durchgefahren",
+    "hud.stopOf": "Halt {i} von {n}",
+    "hud.toEnd": "noch {d} bis zur Endstation",
   },
   ach: {
     "first_trip": "Erste Fahrt",

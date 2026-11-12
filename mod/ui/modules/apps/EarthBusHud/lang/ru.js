@@ -82,6 +82,11 @@ export default {
     "note.No signal": "Поворотник не включён",
     "note.Speeding": "Превышение скорости",
     "hud.ach": "Достижение получено",
+    "hud.past.served": "обслужена",
+    "hud.past.missed": "пропущена",
+    "hud.past.passed": "проехали",
+    "hud.stopOf": "Остановка {i} из {n}",
+    "hud.toEnd": "до конца {d}",
   },
   ach: {
     "first_trip": "Первый рейс",

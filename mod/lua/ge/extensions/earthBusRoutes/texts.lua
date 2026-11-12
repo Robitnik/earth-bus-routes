@@ -10,6 +10,8 @@ M.PATH = '/settings/earthBusRoutes/lang.json'
 
 local PACKS = {
   en = {
+    mkWaiting = '{n} waiting',
+    mkMissed = 'missed',
     needsEarth = 'Earth Bus Routes needs BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Taking you to {name}…',
@@ -31,6 +33,8 @@ local PACKS = {
     shiftEndedTeleport = 'Shift ended: you were teleported',
   },
   uk = {
+    mkWaiting = 'чекає {n}',
+    mkMissed = 'пропущено',
     needsEarth = 'Earth Bus Routes потребує BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Переношу вас до {name}…',
@@ -52,6 +56,8 @@ local PACKS = {
     shiftEndedTeleport = 'Зміну завершено: вас телепортовано',
   },
   de = {
+    mkWaiting = '{n} warten',
+    mkMissed = 'verpasst',
     needsEarth = 'Earth Bus Routes braucht BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Du wirst nach {name} gebracht…',
@@ -73,6 +79,8 @@ local PACKS = {
     shiftEndedTeleport = 'Schicht beendet: Du wurdest teleportiert',
   },
   es = {
+    mkWaiting = '{n} esperan',
+    mkMissed = 'omitida',
     needsEarth = 'Earth Bus Routes necesita BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Te llevamos a {name}…',
@@ -94,6 +102,8 @@ local PACKS = {
     shiftEndedTeleport = 'Turno terminado: te teletransportaron',
   },
   fr = {
+    mkWaiting = '{n} attendent',
+    mkMissed = 'manqué',
     needsEarth = 'Earth Bus Routes a besoin de BeamNG.Earth : {reason}',
     gps = 'GPS : {name}',
     taking = 'Vous êtes emmené à {name}…',
@@ -115,6 +125,8 @@ local PACKS = {
     shiftEndedTeleport = 'Service terminé : vous avez été téléporté',
   },
   ja = {
+    mkWaiting = '{n}人待ち',
+    mkMissed = '通過',
     needsEarth = 'Earth Bus Routes には BeamNG.Earth が必要です: {reason}',
     gps = 'GPS: {name}',
     taking = '{name} へ移動します…',
@@ -136,6 +148,8 @@ local PACKS = {
     shiftEndedTeleport = '乗務を終了しました: テレポートされました',
   },
   ko = {
+    mkWaiting = '{n}명 대기',
+    mkMissed = '놓침',
     needsEarth = 'Earth Bus Routes에는 BeamNG.Earth가 필요합니다: {reason}',
     gps = 'GPS: {name}',
     taking = '{name}(으)로 이동합니다…',
@@ -157,6 +171,8 @@ local PACKS = {
     shiftEndedTeleport = '근무 종료: 순간이동되었습니다',
   },
   pl = {
+    mkWaiting = 'czeka {n}',
+    mkMissed = 'pominięty',
     needsEarth = 'Earth Bus Routes wymaga BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Przenoszę cię do: {name}…',
@@ -178,6 +194,8 @@ local PACKS = {
     shiftEndedTeleport = 'Zmiana zakończona: zostałeś przeniesiony',
   },
   pt_BR = {
+    mkWaiting = '{n} esperando',
+    mkMissed = 'perdida',
     needsEarth = 'O Earth Bus Routes precisa do BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Levando você para {name}…',
@@ -199,6 +217,8 @@ local PACKS = {
     shiftEndedTeleport = 'Turno encerrado: você foi teletransportado',
   },
   pt_PT = {
+    mkWaiting = '{n} à espera',
+    mkMissed = 'falhada',
     needsEarth = 'O Earth Bus Routes precisa do BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'A levá-lo para {name}…',
@@ -220,6 +240,8 @@ local PACKS = {
     shiftEndedTeleport = 'Turno terminado: foi teletransportado',
   },
   ru = {
+    mkWaiting = 'ждут {n}',
+    mkMissed = 'пропущена',
     needsEarth = 'Earth Bus Routes нужен BeamNG.Earth: {reason}',
     gps = 'GPS: {name}',
     taking = 'Переношу вас к: {name}…',
@@ -241,6 +263,8 @@ local PACKS = {
     shiftEndedTeleport = 'Смена завершена: вас телепортировали',
   },
   zh_Hans = {
+    mkWaiting = '{n} 人等候',
+    mkMissed = '错过',
     needsEarth = 'Earth Bus Routes 需要 BeamNG.Earth：{reason}',
     gps = 'GPS：{name}',
     taking = '正在送你前往 {name}…',
@@ -262,6 +286,8 @@ local PACKS = {
     shiftEndedTeleport = '班次结束：你被传送了',
   },
   zh_Hant = {
+    mkWaiting = '{n} 人等候',
+    mkMissed = '錯過',
     needsEarth = 'Earth Bus Routes 需要 BeamNG.Earth：{reason}',
     gps = 'GPS：{name}',
     taking = '正在送你前往 {name}…',

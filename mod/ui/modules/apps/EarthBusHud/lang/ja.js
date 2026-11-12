@@ -82,6 +82,11 @@ export default {
     "note.No signal": "方向指示器なし",
     "note.Speeding": "スピード超過",
     "hud.ach": "実績を解除",
+    "hud.past.served": "停車済み",
+    "hud.past.missed": "取り残し",
+    "hud.past.passed": "通過",
+    "hud.stopOf": "{n}停留所中 {i}番目",
+    "hud.toEnd": "終点まで {d}",
   },
   ach: {
     "first_trip": "初めての便",

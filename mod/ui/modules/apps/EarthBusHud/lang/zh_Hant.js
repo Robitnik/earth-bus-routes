@@ -82,6 +82,11 @@ export default {
     "note.No signal": "未打方向燈",
     "note.Speeding": "超速",
     "hud.ach": "解鎖新成就",
+    "hud.past.served": "已停靠",
+    "hud.past.missed": "錯過",
+    "hud.past.passed": "已駛過",
+    "hud.stopOf": "第 {i} 站，共 {n} 站",
+    "hud.toEnd": "距終點 {d}",
   },
   ach: {
     "first_trip": "第一趟行程",
