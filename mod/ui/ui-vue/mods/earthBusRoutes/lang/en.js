@@ -431,4 +431,9 @@ export default {
   "res.connections": "Connections made",
   "note.No signal": "No indicator",
   "note.Speeding": "Speeding",
+  "build.err.The BeamNG.Earth world is not ready yet": "The BeamNG.Earth world is not ready yet",
+  "build.err.Could not read the map data": "Could not read the map data",
+  "build.err.No stop found there": "No stop found there",
+  "build.err.A trip is already running": "A trip is already running",
+  "build.err.The world did not load in time": "The world did not load in time",
 }

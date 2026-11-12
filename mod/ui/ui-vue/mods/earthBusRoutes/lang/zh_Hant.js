@@ -431,4 +431,9 @@ export default {
   "res.connections": "順利轉乘次數",
   "note.No signal": "未打方向燈",
   "note.Speeding": "超速",
+  "build.err.The BeamNG.Earth world is not ready yet": "BeamNG.Earth 世界尚未就緒",
+  "build.err.Could not read the map data": "無法讀取地圖資料",
+  "build.err.No stop found there": "那裡找不到站點",
+  "build.err.A trip is already running": "已有行程正在進行",
+  "build.err.The world did not load in time": "世界未能及時載入",
 }

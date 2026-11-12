@@ -431,4 +431,9 @@ export default {
   "res.connections": "乗り継ぎ成功",
   "note.No signal": "方向指示器なし",
   "note.Speeding": "スピード超過",
+  "build.err.The BeamNG.Earth world is not ready yet": "BeamNG.Earth のワールドの準備がまだできていません",
+  "build.err.Could not read the map data": "地図データを読み込めませんでした",
+  "build.err.No stop found there": "そこにはバス停が見つかりませんでした",
+  "build.err.A trip is already running": "すでに便が運行中です",
+  "build.err.The world did not load in time": "ワールドの読み込みが間に合いませんでした",
 }

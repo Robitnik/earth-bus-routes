@@ -479,7 +479,9 @@ import DepartureBoard from "./DepartureBoard.vue"
 import { useEvents } from "@/services/events"
 import { state, call, onState, distance, plateInk, pad, typing } from "./store.js"
 import { lang, setLang, resetLang, isAuto, syncLang, LANGS, t, noteText } from "./i18n.js"
-const pickLang = v => (v === "auto" ? resetLang() : setLang(v))
+// the Lua side shows toasts too: it is told which language the menu shows ("auto": the game's)
+const tellLua = () => call("uiLang", isAuto() ? "auto" : lang.value)
+const pickLang = v => { if (v === "auto") resetLang(); else setLang(v); tellLua() }
 const langName = computed(() => (LANGS.find(l => l.code === lang.value) || LANGS[0]).name)
 
 const events = useEvents()
@@ -498,6 +500,7 @@ const s = state
 onBeforeUnmount(() => typing(false))
 onMounted(() => {
   if (rootEl.value) rootEl.value.focus()
+  tellLua()
   call("uiState")
 })
 

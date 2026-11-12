@@ -25,6 +25,7 @@ local menu = require('earthBusRoutes/menu')
 local builder = require('earthBusRoutes/builder')
 local markers = require('earthBusRoutes/markers')
 local world = require('earthBusRoutes/world')
+local texts = require('earthBusRoutes/texts')            -- the toasts in the player's language
 local geo = require('earthBusRoutes/geomath')
 local quick = require('earthBusRoutes/quick')
 local cabin = require('earthBusRoutes/cabin')
@@ -82,7 +83,7 @@ local function refreshEarth()
   if not ok and not S.warned then
     S.warned = true
     log('W', TAG, 'Earth Bus Routes is idle: ' .. S.reason)
-    world.toast('Earth Bus Routes needs BeamNG.Earth: ' .. S.reason, 6)
+    world.toast(texts.t('needsEarth', { reason = S.reason }), 6)
   end
   return ok
 end
@@ -527,13 +528,13 @@ function M.uiMapGo(action)
   if not st then return end
   if action == 'gps' then
     if not world.gpsRoute({ { lat = st.lat, lon = st.lon, name = st.name } }) then map.actErr = 'gps' publish() return end
-    world.toast('GPS: ' .. tostring(st.name), 5)
+    world.toast(texts.t('gps', { name = tostring(st.name) }), 5)
     goPlay()
   elseif action == 'teleport' then
     local ok, err = world.teleport(st.lat, st.lon, st.name)
     if not ok then map.actErr = 'teleport: ' .. tostring(err) publish() return end
     S.cell = nil                                      -- the stops round you are elsewhere now
-    world.toast('Taking you to ' .. tostring(st.name) .. '…', 5)
+    world.toast(texts.t('taking', { name = tostring(st.name) }), 5)
     goPlay()
   elseif action == 'lines' then
     openStationAt({ lat = st.lat, lon = st.lon, name = st.name })
@@ -1375,7 +1376,7 @@ local function beginTrip(plan, rotate)
   if bearing and rotate then world.faceHeading(veh, bearing) end       -- only after our own teleport: never move a bus the player drove there
   if world.ensureHud() and not S.hudAsked then
     S.hudAsked = true
-    world.toast('Bus HUD added to your UI layout. Move or remove it in Esc > UI Apps.', 7)
+    world.toast(texts.t('hudAdded'), 7)
   end
   world.busDisplay(veh, plan.route, stopsAhead(S.trip))
   gpsAhead(S.trip)
@@ -1403,7 +1404,7 @@ function M.uiStart()
   S.starting = { plan = plan, t = 0, seenTeleport = false }
   publish()
   goPlay()
-  world.toast('Taking you to ' .. tostring(stop.name) .. '…', 5)
+  world.toast(texts.t('taking', { name = tostring(stop.name) }), 5)
 end
 
 -- ---- "next trip from here" (plan 006, idea 11) -----------------------------------------------------------------------------
@@ -1481,7 +1482,7 @@ function M.uiDriveToStart()
     mode = S.sel.mode, sel = sel, hudTimer = 0 }
   S.err = nil
   world.gpsRoute({ { lat = stop.lat, lon = stop.lon, name = stop.name } })
-  world.toast('Drive to ' .. tostring(stop.name) .. ': the trip begins there.', 6)
+  world.toast(texts.t('driveTo', { name = tostring(stop.name) }), 6)
   goPlay()
   publish()
 end
@@ -1491,7 +1492,7 @@ function M.uiCancelArmed(silent)
   S.armed = nil
   world.gpsClear()
   if not silent then
-    world.toast('Cancelled', 3)
+    world.toast(texts.t('cancelled'), 3)
     guihooks.trigger('EarthBusRoutesHud', { idle = true })
   end
   publish()
@@ -1524,7 +1525,7 @@ local function armedFrame(dt)
     local plan, why = buildPlan()
     if not plan then
       S.err = why
-      world.toast('Could not start: ' .. tostring(why), 5)
+      world.toast(texts.t('couldNotStart', { why = tostring(why) }), 5)
       guihooks.trigger('EarthBusRoutesHud', { idle = true })
       publish()
       return
@@ -1618,7 +1619,7 @@ function M.uiCancelTrip()
   S.result = nil
   publish()
   guihooks.trigger('EarthBusRoutesHud', { idle = true })
-  world.toast('Trip cancelled', 3)
+  world.toast(texts.t('tripCancelled'), 3)
 end
 
 -- After a trip: the way back (opposite direction, from here), when the data has it
@@ -1689,7 +1690,7 @@ local function handleEvents(t)
       S.doneStop = { index = e.data.index, at = S.markerClock or 0 }     -- its bay turns green and fades
       pcall(askConnections, t)
     elseif e.name == 'missed' then
-      world.toast('Missed stop: ' .. tostring(e.data.stop.name), 4)
+      world.toast(texts.t('missedStop', { name = tostring(e.data.stop.name) }), 4)
       gpsAhead(t)
       pcall(askConnections, t)
     elseif e.name == 'bell' then
@@ -1709,7 +1710,7 @@ local function tripFrame(dt)
   if not veh then return end
   if t.veh and veh:getID() ~= t.veh:getID() then
     M.uiCancelTrip()
-    world.toast('Trip cancelled: you changed vehicle', 4)
+    world.toast(texts.t('cancelledVehicle'), 4)
     return
   end
   local aL, aR = world.accel(veh, dt)
@@ -1809,7 +1810,13 @@ end
 
 -- ---- game hooks ------------------------------------------------------------------------------------------------------
 
+-- The menu tells which language it shows (a code, or 'auto' for the game's): the toasts use it too
+function M.uiLang(code)
+  texts.set(code)
+end
+
 function M.onExtensionLoaded()
+  pcall(texts.load)
   refreshEarth()
   readOptions()
   datasvc.ping(function() end)            -- which features the service has (instant searches, progress)
@@ -1831,15 +1838,15 @@ end
 
 -- A teleport the player asked for during a trip ends it (the bus is no longer where the trip is)
 function M.onBeamNGEarthTeleported()
-  if S.armed then M.uiCancelArmed(true) world.toast('Drive-to-start cancelled: you were teleported', 4) guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
-  if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you were teleported', 4) end
+  if S.armed then M.uiCancelArmed(true) world.toast(texts.t('driveCancelledTeleport'), 4) guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
+  if S.trip then M.uiCancelTrip() world.toast(texts.t('cancelledTeleport'), 4) end
   shiftrun.onTeleport()
   busnetrun.onTeleport()
   fleetrun.onTeleport()
 end
 
 function M.onVehicleSwitched()
-  if S.trip then M.uiCancelTrip() world.toast('Trip cancelled: you changed vehicle', 4) end
+  if S.trip then M.uiCancelTrip() world.toast(texts.t('cancelledVehicle'), 4) end
 end
 
 -- The vehicle-side driver of an AI bus reports (extensions.hook('onEarthBusDriverEvent', vehId, name, data), busdriver.lua)

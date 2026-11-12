@@ -431,4 +431,9 @@ export default {
   "res.connections": "성사된 환승",
   "note.No signal": "방향지시등 안 켬",
   "note.Speeding": "과속",
+  "build.err.The BeamNG.Earth world is not ready yet": "BeamNG.Earth 월드가 아직 준비되지 않았습니다",
+  "build.err.Could not read the map data": "지도 데이터를 읽을 수 없습니다",
+  "build.err.No stop found there": "그곳에서 정류장을 찾지 못했습니다",
+  "build.err.A trip is already running": "이미 운행 중입니다",
+  "build.err.The world did not load in time": "월드가 제시간에 로드되지 않았습니다",
 }

@@ -10,6 +10,7 @@ local osm = require('earthBusRoutes/osm')
 local geo = require('earthBusRoutes/geomath')
 local datasvc = require('earthBusRoutes/datasvc')
 local world = require('earthBusRoutes/world')
+local texts = require('earthBusRoutes/texts')
 local M = {}
 local TAG = 'earthBusRoutes'
 
@@ -181,7 +182,7 @@ local function startFirst(plan)
   S.starting = { plan = plan, t = 0, seenTeleport = false }
   H.publish()
   H.goPlay()
-  world.toast('Taking you to ' .. tostring(stop.name) .. '…', 5)
+  world.toast(texts.t('taking', { name = tostring(stop.name) }), 5)
 end
 
 -- The empty run: the bus begins at the depot, the GPS leads to the first stop, the trip begins there
@@ -200,7 +201,7 @@ local function beginRun(plan, depot)
   world.watchDoors(world.vehicle())
   world.busDisplay(world.vehicle(), { to = 'Služební jízda', ref = '', colour = plan.route.colour }, {})    -- the sign of an empty run
   world.gpsRoute({ { lat = stop.lat, lon = stop.lon, name = stop.name } })
-  world.toast(('Service run from %s to %s: the trip begins there.'):format(tostring(depot.name), tostring(stop.name)), 7)
+  world.toast(texts.t('serviceRun', { depot = tostring(depot.name), stop = tostring(stop.name) }), 7)
   H.goPlay()
   H.publish()
   M.sendHud()
@@ -226,7 +227,7 @@ local function launch(plan, sp, depot)
     S.starting = { plan = plan, t = 0, seenTeleport = false, after = function() M.beginRun(plan, depot) end }
     H.publish()
     H.goPlay()
-    world.toast('Taking you to ' .. tostring(depot.name) .. '…', 5)
+    world.toast(texts.t('taking', { name = tostring(depot.name) }), 5)
   else
     startFirst(plan)
   end
@@ -291,7 +292,7 @@ local function startLayover(sh, t, nxt)
       if S.shift ~= sh or sh.layover ~= L then return end
       if not route then
         log('W', TAG, 'shift: the next trip could not be loaded: ' .. tostring(why))
-        world.toast('The dispatcher could not give you the next trip: the shift ends.', 6)
+        world.toast(texts.t('noNextTrip'), 6)
         M.uiShiftEnd()
         return
       end
@@ -301,8 +302,8 @@ local function startLayover(sh, t, nxt)
     routeReady(sh, L, nxt.route)
   end
   local label = clockLabel(nxt.start)
-  world.toast(('Shift: trip %d done. Next: %s to %s at %s%s'):format(#sh.trips, tostring(nxt.ref), tostring(nxt.to), label,
-    L.wound and (' (the clock moved on to ' .. clockLabel(L.clock) .. ')') or ''), 8)
+  world.toast(texts.t('shiftNext', { n = #sh.trips, ref = tostring(nxt.ref), to = tostring(nxt.to), time = label })
+    .. (L.wound and texts.t('shiftWound', { time = clockLabel(L.clock) }) or ''), 8)
   H.publish()
   M.sendHud()
 end
@@ -398,7 +399,7 @@ function M.abandon()
   if sh then
     sh.layover, sh.run = nil, nil
     if not S.trip and not S.starting then H.endClockAndGps() guihooks.trigger('EarthBusRoutesHud', { idle = true }) end
-    world.toast('The shift was dropped because of an error.', 5)
+    world.toast(texts.t('shiftDropped'), 5)
   end
   if S.starting and S.starting.after then S.starting = nil end
 end
@@ -476,7 +477,7 @@ end
 function M.onCancel()
   if not S.shift then return false end
   M.uiShiftEnd()
-  world.toast('Shift ended', 3)
+  world.toast(texts.t('shiftEnded'), 3)
   return true
 end
 
@@ -487,7 +488,7 @@ function M.onTeleport()
   if (S.markerClock or 0) - (sh.beganAt or 0) < M.TELEPORT_GRACE_S then return end
   if sh.layover or sh.run then
     M.uiShiftEnd()
-    world.toast('Shift ended: you were teleported', 4)
+    world.toast(texts.t('shiftEndedTeleport'), 4)
   end
 end
 

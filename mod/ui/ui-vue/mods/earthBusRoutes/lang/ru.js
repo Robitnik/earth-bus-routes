@@ -431,4 +431,9 @@ export default {
   "res.connections": "Пересадок состоялось",
   "note.No signal": "Поворотник не включён",
   "note.Speeding": "Превышение скорости",
+  "build.err.The BeamNG.Earth world is not ready yet": "Мир BeamNG.Earth ещё не готов",
+  "build.err.Could not read the map data": "Не удалось прочитать данные карты",
+  "build.err.No stop found there": "Там не найдено остановок",
+  "build.err.A trip is already running": "Рейс уже идёт",
+  "build.err.The world did not load in time": "Мир не успел загрузиться",
 }

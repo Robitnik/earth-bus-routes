@@ -431,4 +431,9 @@ export default {
   "res.connections": "Correspondances assurées",
   "note.No signal": "Pas de clignotant",
   "note.Speeding": "Excès de vitesse",
+  "build.err.The BeamNG.Earth world is not ready yet": "Le monde BeamNG.Earth n’est pas encore prêt",
+  "build.err.Could not read the map data": "Impossible de lire les données de la carte",
+  "build.err.No stop found there": "Aucun arrêt trouvé à cet endroit",
+  "build.err.A trip is already running": "Une course est déjà en cours",
+  "build.err.The world did not load in time": "Le monde ne s’est pas chargé à temps",
 }

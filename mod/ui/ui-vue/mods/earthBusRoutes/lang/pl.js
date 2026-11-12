@@ -431,4 +431,9 @@ export default {
   "res.connections": "Zachowane przesiadki",
   "note.No signal": "Brak kierunkowskazu",
   "note.Speeding": "Przekroczenie prędkości",
+  "build.err.The BeamNG.Earth world is not ready yet": "Świat BeamNG.Earth nie jest jeszcze gotowy",
+  "build.err.Could not read the map data": "Nie udało się odczytać danych mapy",
+  "build.err.No stop found there": "Nie znaleziono tam przystanku",
+  "build.err.A trip is already running": "Kurs już trwa",
+  "build.err.The world did not load in time": "Świat nie załadował się na czas",
 }
