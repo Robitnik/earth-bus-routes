@@ -16,7 +16,11 @@ local function setup(opts)
     has = function(f) if f == 'departures' then return opts.departures == true end return true end,
     update = function() end, reset = function() end, forget = function() end, busy = function() return false end,
     ping = function(cb) cb({}) end,
-    nearby = function(lat, lon, cb) cb(H.fixture('nachod_around_slim3'), {}) end,
+    nearby = function(lat, lon, cb) env.nearbyAsked = (env.nearbyAsked or 0) + 1 cb(H.fixture('nachod_around_slim3'), {}) end,
+    -- 0.10.3: the background asks only for what the service keeps on this computer
+    nearbyKept = function(lat, lon, cb) env.nearbyKept = (env.nearbyKept or 0) + 1 cb(H.fixture('nachod_around_slim3'), {}) end,
+    drop = function() env.dropped = (env.dropped or 0) + 1 return 0 end,
+    watching = opts.menu ~= false,     -- the menu is open (the net is built only then, or for the AI buses)
     stations = function(lat, lon, cb) cb({ elements = {} }, {}) end,
     route = function(id, cb, low)
       env.routeAsked[#env.routeAsked + 1] = { id = id, low = low }
@@ -148,6 +152,30 @@ function T.a_board_for_the_station_on_screen()
   cleanup()
 end
 
+
+-- 0.10.3: the user saw "stops nearby, 141 s, 2 more in the queue" while driving: the net asked Overpass each kilometre of a
+-- trip, with the menu closed. Now it is built only while the menu is open (or for the AI buses), from what the service keeps.
+function T.nothing_is_built_or_asked_with_the_menu_closed()
+  local m, model, env, frames = setup({ menu = false })
+  frames(20)
+  assert((env.nearbyAsked or 0) == 0 and (env.nearbyKept or 0) == 0 and #env.routeAsked == 0, 'nothing asked in the background')
+  assert(model().buses == nil or #model().buses == 0)
+  -- the AI buses need the net: then it is built, still without a public server
+  env.opts.aiBuses = '2'
+  m.onBeamNGEarthAddonOptions({ values = { aiBuses = '2' } })
+  frames(8)
+  assert((env.nearbyKept or 0) >= 1 and (env.nearbyAsked or 0) == 0, 'for the AI buses: from this computer only')
+  cleanup()
+end
+
+function T.the_net_never_asks_a_public_server_for_the_stops_round_you()
+  local m, model, env, frames = setup()
+  frames(6)
+  env.pose.lat = env.pose.lat + 0.02
+  frames(8)
+  assert((env.nearbyKept or 0) >= 2, 'the net asks for kept answers on each rebuild: ' .. tostring(env.nearbyKept))
+  cleanup()
+end
 
 -- 0.10.1: the background loads never wait for a public server, the dots go to the menu as a small event of their own
 function T.background_loads_ask_only_for_kept_routes_and_the_dots_come_as_a_small_event()

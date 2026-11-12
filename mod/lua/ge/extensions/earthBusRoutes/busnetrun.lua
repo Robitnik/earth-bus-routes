@@ -143,13 +143,19 @@ local function refresh(pose, clock, day)
     st.asking = false
     startJob(pose, clock, day, heads, deps)
   end
-  datasvc.nearby(pose.lat, pose.lon, function(data)
-    if data then
-      local ok, a = pcall(osm.parseAround, data)
-      if ok then heads = a.routes end
-    end
+  -- the lines round the player only from what the service keeps on this computer: the background never asks a public
+  -- server (0.10.0 asked Overpass each kilometre of a trip, and the queue grew); an older service: the timetables alone
+  if datasvc.has('nearbycached') == true then
+    datasvc.nearbyKept(pose.lat, pose.lon, function(data)
+      if data then
+        local ok, a = pcall(osm.parseAround, data)
+        if ok then heads = a.routes end
+      end
+      done()
+    end)
+  else
     done()
-  end, 'low')
+  end
   if datasvc.has('departures') == true then
     datasvc.departures(pose.lat, pose.lon, clock, day, 30, function(data)
       if type(data) == 'table' and type(data.patterns) == 'table' then deps = data end
@@ -236,7 +242,9 @@ function M.frame(dt)
     stale = (st.builtAt and st.t - st.builtAt > M.REFRESH_S) or (st.center and geo.dist(st.center.lat, st.center.lon, pose.lat, pose.lon) > M.MOVE_M)
       or st.net.day ~= day or math.abs(clock - (st.builtClock or clock)) > 1800
   end
-  if stale and not st.job then
+  -- built only while somebody looks (the open menu) or the AI buses need it
+  local needed = datasvc.watching or (S and S.opts and (S.opts.aiBuses or 'off') ~= 'off')
+  if stale and not st.job and needed then
     local waited = st.askedAt and st.t - st.askedAt or math.huge
     if (not st.asking or waited > 60) and waited > (st.net and 5 or 3) and not (st.failedAt and st.t - st.failedAt < M.RETRY_S)
       and datasvc.state.up ~= false then

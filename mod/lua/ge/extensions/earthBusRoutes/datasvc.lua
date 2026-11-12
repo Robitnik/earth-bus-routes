@@ -8,7 +8,7 @@ local M = {}
 M.HOST = '127.0.0.1'
 M.PORT = 47630
 M.RETRY_S = 6                -- after the service did not answer, ask again this much later
-M.TOTAL_S = 240              -- the service tries several public servers, each can take 45 s
+M.TOTAL_S = 120              -- the service gives a request to the public servers 90 s at most (0.10.3; it was 240)
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
 M.LANES = 3                  -- requests running at once
 
@@ -28,7 +28,7 @@ end
 
 -- GET `path`; cb(data, info) with info = { cached = bool } or cb(nil, { error = text, down = bool })
 -- opts: fresh (skip the memo), low (a background prefetch: an urgent request may cancel it), urgent (goes first),
--- total (seconds to wait for the answer)
+-- total (seconds to wait for the answer), keep (not dropped when the menu closes or a trip begins: a route, a shift)
 function M.get(path, cb, opts)
   opts = opts or {}
   if opts.fast then
@@ -41,13 +41,14 @@ function M.get(path, cb, opts)
     if j.path == path then
       j.cbs[#j.cbs + 1] = cb
       if opts.urgent then j.low = false end
+      if opts.keep then j.keep = true end
       return
     end
   end
   for _, a in ipairs(actives) do
-    if a.job.path == path then a.job.cbs[#a.job.cbs + 1] = cb return end
+    if a.job.path == path then a.job.cbs[#a.job.cbs + 1] = cb if opts.keep then a.job.keep = true end return end
   end
-  local job = { path = path, cbs = { cb }, tries = 0, low = opts.low or false, total = opts.total }
+  local job = { path = path, cbs = { cb }, tries = 0, low = opts.low or false, total = opts.total, keep = opts.keep or false }
   if opts.urgent then
     table.insert(queue, 1, job)
     -- every lane busy: a prefetch nobody waits for gives way
@@ -78,8 +79,11 @@ end
 function M.nearby(lat, lon, cb, how)
   M.get(('/v1/nearby?lat=%.5f&lon=%.5f'):format(lat, lon), cb, { low = how == 'low', urgent = how == 'urgent' })
 end
-function M.path(pts, cb) M.get('/v1/path?pts=' .. pts, cb, { urgent = true, total = 60 }) end
-function M.along(pts, cb) M.get('/v1/along?pts=' .. pts, cb, { urgent = true }) end
+function M.path(pts, cb) M.get('/v1/path?pts=' .. pts, cb, { urgent = true, total = 60, keep = true }) end
+function M.along(pts, cb) M.get('/v1/along?pts=' .. pts, cb, { urgent = true, keep = true }) end
+-- the stops round a point only if the service has them on this computer (service 0.10.3+, has('nearbycached')): for the
+-- background (the buses of the lines), which never asks a public server
+function M.nearbyKept(lat, lon, cb) M.get(('/v1/nearby?lat=%.5f&lon=%.5f&cached=1'):format(lat, lon), cb, { fast = true, total = 10 }) end
 function M.stations(lat, lon, cb) M.get(('/v1/stations?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 -- fast: only what the service already knows, answered at once (on the second lane); else it asks the public servers
 function M.search(q, lat, lon, cb, fast)
@@ -94,7 +98,7 @@ end
 -- the cities, towns and villages round a point (the map of towns)
 function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 -- low: a background load (the virtual bus network): an urgent request of the player may cancel it
-function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id), cb, low and { low = true } or nil) end
+function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id), cb, low and { low = true } or { keep = true }) end
 -- a route only if the service has it on this computer (never a request to a public server; service 0.10.1+): for the
 -- background loads, which must not queue in front of what the player asked for
 function M.routeKept(id, cb) M.get(('/v1/route?id=%d&cached=1'):format(id), cb, { fast = true, total = 10 }) end
@@ -103,9 +107,9 @@ function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
 -- shifts (plan 006 B): the real trips that follow a timetable trip at its terminus; the depot (or a bus station) near a point
 function M.shift(pid, start, day, mins, cb)
-  M.get(('/v1/shift?pid=%d&start=%d&day=%d&mins=%d'):format(math.floor(pid), math.floor(start), math.floor(day), math.floor(mins)), cb, { urgent = true, total = 30 })
+  M.get(('/v1/shift?pid=%d&start=%d&day=%d&mins=%d'):format(math.floor(pid), math.floor(start), math.floor(day), math.floor(mins)), cb, { urgent = true, total = 30, keep = true })
 end
-function M.depot(lat, lon, cb) M.get(('/v1/depot?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
+function M.depot(lat, lon, cb) M.get(('/v1/depot?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120, keep = true }) end
 -- the lines arriving at the stop at (lat, lon) within a few minutes of `t` (s from midnight) on weekday `day`, `ref` left out
 -- (transfers: from the service's timetables, answered at once)
 function M.connections(lat, lon, t, day, ref, cb)
@@ -247,6 +251,31 @@ function M.update(dt)
 end
 
 function M.busy() return #actives > 0 or #queue > 0 end
+
+-- The menu closed or a trip began: every request nobody needs any more is dropped (closing its connection tells the service
+-- to stop asking the public servers for it). Kept: the ones marked keep (a route, a shift, the road of a route being built).
+-- Their callbacks hear cb(nil, { error = 'cancelled', cancelled = true }). -> how many were dropped.
+function M.drop()
+  local gone = {}
+  local i = 1
+  while i <= #queue do
+    if queue[i].keep then i = i + 1 else gone[#gone + 1] = table.remove(queue, i) end
+  end
+  i = 1
+  while i <= #actives do
+    local a = actives[i]
+    if a.job.keep then
+      i = i + 1
+    else
+      if a.req then pcall(http.cancel, a.req) end
+      table.remove(actives, i)
+      gone[#gone + 1] = a.job
+    end
+  end
+  for _, job in ipairs(gone) do finish(job, nil, { error = 'cancelled', cancelled = true }) end
+  if #gone > 0 then M.state.progress = nil end
+  return #gone
+end
 
 function M.reset()
   for _, a in ipairs(actives) do if a.req then http.cancel(a.req) end end

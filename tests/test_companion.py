@@ -814,6 +814,122 @@ class Upstream(unittest.TestCase):
         self.assertIn("out of memory", str(cm.exception))
 
 
+class NobodyWaits(unittest.TestCase):
+    """0.10.3: a request to the public servers has a budget (BUDGET_S, its wait in the queue included) and stops when nobody
+    waits for its answer any more (the game closed the connection: the menu was closed, a trip began). The user saw "stops
+    nearby, 141 s, 2 more in the queue" after the trip had started."""
+
+    def tearDown(self):
+        d.CURRENT.check = None
+        d.CURRENT.wanted = None
+
+    def test_no_next_mirror_once_nobody_waits(self):
+        calls, waiting = [], [True]
+        d.CURRENT.check = lambda: waiting[0]
+
+        def sender(url, query):
+            calls.append(url)
+            waiting[0] = False                 # the game gave up during the first try
+            raise urllib.error.HTTPError(url, 504, "gateway timeout", {}, None)
+
+        with self.assertRaises(d.Abandoned):
+            d.fetch_upstream("q", mirrors=["http://a/x", "http://b/x"], sender=sender, sleep=lambda s: None)
+        self.assertEqual(calls, ["http://a/x"])
+        self.assertFalse(d._lock.locked(), "the queue goes on")
+
+    def test_the_budget_ends_the_tries(self):
+        now = [0.0]
+        calls = []
+
+        def sender(url, query):
+            calls.append((url, d.CURRENT.attempt_timeout))
+            now[0] += 50                       # each try took 50 s
+            raise TimeoutError()
+
+        with self.assertRaises(RuntimeError) as cm:
+            d.fetch_upstream("q", mirrors=["http://a/x", "http://b/x", "http://c/x"], sender=sender, sleep=lambda s: None,
+                             clock=lambda: now[0])
+        self.assertEqual(len(calls), 2, "50 + 40 s: the budget of 90 s is spent")
+        self.assertEqual(calls[0][1], d.TIMEOUT_S)
+        self.assertEqual(calls[1][1], d.BUDGET_S - 50, "the last try only gets what is left")
+        self.assertIn("limit", str(cm.exception))
+        self.assertFalse(d._lock.locked())
+
+    def test_the_queue_is_left_when_nobody_waits(self):
+        d._lock.acquire()                      # another request is at the public servers
+        try:
+            d.CURRENT.check = lambda: False
+            t0 = time.monotonic()
+            with self.assertRaises(d.Abandoned):
+                d.fetch_upstream("q", mirrors=["http://a/x"], sender=lambda u, q: self.fail("never sent"), sleep=lambda s: None)
+            self.assertLess(time.monotonic() - t0, 2)
+        finally:
+            d._lock.release()
+
+    def test_a_fetch_for_nobody_lives_on_a_lease(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sent = []
+            svc = d.Service(d.Cache(tmp), upstream=lambda q: d.fetch_upstream(
+                q, mirrors=["http://a/x"], sender=lambda u, qq: sent.append(u) or json.dumps(NEAR), sleep=lambda s: None))
+            d.CURRENT.wanted = lambda: False   # (as the detached nearby fetch: no connection of its own)
+            with self.assertRaises(d.Abandoned):
+                svc.get("near3_lease_a", "q")
+            self.assertEqual(sent, [], "nobody asked lately: not sent")
+            self.assertEqual(svc.served["dropped"], 1)
+            d.INTEREST.touch("near3_lease_b")
+            svc.get("near3_lease_b", "q")
+            self.assertEqual(len(sent), 1, "the menu asked lately: fetched")
+
+    def test_a_closed_connection_is_seen(self):
+        import socket
+        a, b = socket.socketpair()
+        try:
+            self.assertFalse(d.client_gone(a))
+            b.close()
+            self.assertTrue(d.client_gone(a))
+        finally:
+            a.close()
+
+    def test_over_http_a_request_the_game_gave_up_never_reaches_the_public_servers(self):
+        sent = []
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = d.Service(d.Cache(tmp), upstream=lambda q: d.fetch_upstream(
+                q, mirrors=["http://a/x"], sender=lambda u, qq: sent.append(u) or json.dumps(NEAR), sleep=lambda s: None))
+            httpd = d.QuietServer(("127.0.0.1", 0), d.make_handler(svc, 0))
+            port = httpd.server_address[1]
+            httpd.RequestHandlerClass = d.make_handler(svc, port)
+            httpd.daemon_threads = True
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            d._lock.acquire()                  # the public servers are busy with somebody else's request
+            try:
+                c = http.client.HTTPConnection("127.0.0.1", port, timeout=0.5)
+                c.request("GET", "/v1/nearby?lat=50.41&lon=16.16", headers={"Host": f"127.0.0.1:{port}"})
+                with self.assertRaises(Exception):
+                    c.getresponse()            # the game gives up (the menu was closed)
+                c.close()
+                for _ in range(40):
+                    if svc.served["dropped"]:
+                        break
+                    time.sleep(0.05)
+            finally:
+                d._lock.release()
+            time.sleep(0.3)
+            httpd.shutdown()
+            httpd.server_close()
+            self.assertEqual(svc.served["dropped"], 1, svc.served)
+            self.assertEqual(sent, [], "never sent to a public server")
+
+    def test_nearby_cached_answers_from_this_computer_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            svc = d.Service(d.Cache(tmp), upstream=lambda q: self.fail("a background load never asks a public server"))
+            self.assertEqual(svc.nearby(50.41, 16.16, offline=True), (None, True))
+            svc.cache.put(d.nearby_key(50.41, 16.16), json.dumps(NEAR))
+            text, cached = svc.nearby(50.41, 16.16, offline=True)
+            self.assertTrue(cached)
+            self.assertEqual(json.loads(text), NEAR)
+            self.assertIn("nearbycached", d.FEATURES)
+
+
 class ServiceCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

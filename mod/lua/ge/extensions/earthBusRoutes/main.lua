@@ -11,6 +11,7 @@ M.VERSION = '0.10.3'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
+M.NEARBY_AGAIN_S = 10       -- a partial answer of the stops round you is asked again this often while the menu is open
 M.START_NEAR_M = 250         -- already this near the start stop: no teleport (the first stop is a stop like the rest)
 M.ARRIVE_M = 60             -- a drive-to-the-start trip begins when the bus is this near the start stop
 M.ARRIVE_SPEED = 4         -- ... and slower than this (m/s)
@@ -105,9 +106,27 @@ local function startIndexFor(route)
   return (menu.nearestStopIndex(route, st.lat, st.lon))
 end
 
+-- What a dropped request (datasvc.drop) left behind: no error to show, nothing loading, the map and the search asked again
+-- when the menu opens
+local function forgetDropped()
+  if S.err == 'cancelled' then S.err = nil end
+  if S.loading == 'nearby' then S.loading = nil end
+  if S.map and (S.map.busy or S.map.err == 'cancelled') then S.map = nil end
+  if S.find and (S.find.busy or S.find.err == 'cancelled') then S.find.busy, S.find.err = false, nil end
+  S.nearbyAgain = nil
+end
+
+-- Nothing in the background once the menu is closed or a trip began (the user: "I picked a route and drove off, nothing more
+-- is needed"): the requests of the menu are dropped and the service stops asking the public servers for them
+local function dropBackground()
+  if datasvc.drop then datasvc.drop() end
+  forgetDropped()
+end
+
 -- leaving the menu: the service need not be asked what it is busy with any more
 local function goPlay()
   datasvc.watching = false
+  dropBackground()
   world.navigate('play')
 end
 
@@ -220,10 +239,14 @@ local function loadNearby(silent)
   datasvc.nearby(lat, lon, function(data, info)
     if not data then
       S.loading = nil
+      if info and info.cancelled then return end
       if not silent then S.err = info and info.down and 'service_down' or (info and info.error) or 'unknown error' end
       publish()
       return
     end
+    -- the timetables came first, the map's stops are still being fetched: asked again while the menu stays open (the service
+    -- fetches them only while somebody keeps asking)
+    S.nearbyAgain = (type(data) == 'table' and data.partial and datasvc.watching) and M.NEARBY_AGAIN_S or nil
     local ok, err = pcall(onNearby, data, lat, lon)
     if not ok then log('E', TAG, 'parse failed: ' .. tostring(err)) S.err = 'Could not read the map data' end
     S.loading = nil
@@ -1358,6 +1381,7 @@ local function askConnections(t)
 end
 
 local function beginTrip(plan, rotate)
+  dropBackground()                         -- the trip needs nothing the menu was still waiting for
   local veh = world.vehicle()
   S.result = nil
   S.trip = trip.new(plan)
@@ -1790,9 +1814,17 @@ function M.onUpdate(dtReal, dtSim)
   shiftrun.frame(dtReal or 0, dtSim or 0)
   busnetrun.frame(dtReal or 0)
   fleetrun.frame(dtReal or 0)
-  -- keep the cell around the player ready, so the menu opens at once
+  -- a partial answer of the stops round you: asked again while the menu is open
+  if S.nearbyAgain then
+    if not datasvc.watching or S.trip then S.nearbyAgain = nil
+    else
+      S.nearbyAgain = S.nearbyAgain - (dtReal or 0)
+      if S.nearbyAgain <= 0 then S.nearbyAgain = nil loadNearby(true) end
+    end
+  end
+  -- keep the cell around the player ready while the menu is open (never in the background: 0.10.3)
   S.prefetchTimer = S.prefetchTimer - (dtReal or 0)
-  if S.prefetchTimer <= 0 and not S.trip and not S.starting then
+  if S.prefetchTimer <= 0 and datasvc.watching and not S.trip and not S.starting then
     S.prefetchTimer = 5
     local pose = world.pose()
     if pose and datasvc.state.up ~= false then

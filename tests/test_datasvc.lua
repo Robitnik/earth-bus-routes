@@ -106,4 +106,42 @@ function T.departures_ask_the_timetables_on_the_second_lane_and_a_background_rou
   cleanup()
 end
 
+-- 0.10.3: the menu closed / a trip began: what the menu waited for is dropped (its connection closed, so the service stops
+-- asking the public servers for it); a route, a shift and the road of a route being built are kept
+function T.drop_cancels_what_the_menu_waited_for_and_keeps_routes()
+  local ds, answer, running, reqs = setup()
+  local heard = {}
+  ds.nearby(50.5, 16.2, function(d, info) heard.nearby = info end, 'urgent')
+  ds.towns(50.5, 16.2, function(d, info) heard.towns = info end)
+  ds.route(7185111, function(d, info) heard.route = d end)
+  ds.stations(50.5, 16.2, function(d, info) heard.stations = info end)
+  ds.update(0.1)
+  assert(running() == 3, 'three lanes: the urgent ones first, the route waits')
+  local n = ds.drop()
+  assert(n == 3, 'nearby, towns and stations: ' .. n)
+  assert(heard.nearby.cancelled and heard.towns.cancelled and heard.stations.cancelled)
+  assert(heard.route == nil, 'the route goes on')
+  local cancelled = 0
+  for _, r in ipairs(reqs) do if r.state == 'cancelled' then cancelled = cancelled + 1 end end
+  assert(cancelled == 3 and running() == 0, 'their connections closed')
+  ds.update(0.1)
+  assert(running() == 1, 'the route takes a lane')
+  answer('/v1/route?id=7185111', '{"elements":[]}')
+  ds.update(0.1)
+  assert(heard.route, 'the kept route arrives')
+  assert(ds.drop() == 0)
+  -- a background route of the bus net is not kept
+  ds.route(42, function(d, info) heard.low = info end, true)
+  ds.update(0.1)
+  assert(ds.drop() == 1 and heard.low.cancelled)
+  -- the stops round you from this computer only: the fast lane, never dropped (it answers at once)
+  ds.nearbyKept(50.5, 16.2, function(d) heard.kept = d end)
+  ds.update(0.1)
+  answer('/v1/nearby?lat=50.50000&lon=16.20000&cached=1', '{"elements":[]}')
+  ds.update(0.1)
+  assert(heard.kept)
+  assert(ds.TOTAL_S <= 120, 'the mod waits no longer than the service tries')
+  cleanup()
+end
+
 return T
