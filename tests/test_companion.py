@@ -1612,7 +1612,7 @@ class Translations(unittest.TestCase):
         if not node:
             self.skipTest("Node is not installed")
         root = pathlib.Path(__file__).resolve().parent.parent
-        r = subprocess.run([node, "--no-warnings", str(root / "tools" / "check_i18n.mjs"), "--allow-missing"], capture_output=True, text=True, encoding="utf-8")
+        r = subprocess.run([node, "--no-warnings", str(root / "tools" / "check_i18n.mjs")], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
