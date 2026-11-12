@@ -2,7 +2,10 @@
 
 Earth shows only add-ons of its registry, `addons.json` in the **TecnaGamer/BeamNG.Earth-data** repository (docs/ADDONS.md,
 "The registry"). To be listed, send the two entries of `registry-entries.json` there (a pull request, or an issue asking the
-maintainers to add them). Nothing here has been sent yet.
+maintainers to add them).
+
+**Sent 2026-11-12** as https://github.com/TecnaGamer/BeamNG.Earth/issues/1194 (v0.10.3, `minEarth` 1.9.1-beta.dev.323: the
+Modding API 1.6 the mod needs is only in the dev builds; the stable 1.9.1-beta has 1.1). The draft below is the older one.
 
 `registry-entries.json` is checked with BeamNG.Earth's own parser (`addons.parse_registry`): both entries are valid.
 

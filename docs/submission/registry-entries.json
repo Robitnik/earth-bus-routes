@@ -7,14 +7,16 @@
       "author": "Robitnik",
       "repo": "Robitnik/earth-bus-routes",
       "kind": "beamng-mod",
-      "summary": "Drive real OpenStreetMap bus routes anywhere on Earth: timetable, passengers that follow the time of day, a HUD, scoring, your own routes between any stations. Needs the Earth Bus Routes data service.",
+      "summary": "Drive real bus lines anywhere on Earth: stops and routes from OpenStreetMap, real timetables in Czechia, passengers, a HUD, stop markers, shifts with a dispatcher, a career, your own routes. Needs its data service.",
       "licence": "MIT",
       "asset": "^earth_bus_routes\\.zip$",
       "modFile": "earth-bus-routes.zip",
-      "uiApps": ["EarthBusHud"],
+      "uiApps": [
+        "EarthBusHud"
+      ],
       "trust": "latest",
       "reviewed": [],
-      "minEarth": "1.9.0"
+      "minEarth": "1.9.1-beta.dev.323"
     },
     {
       "id": "earth-bus-routes-data",
@@ -27,8 +29,11 @@
       "asset": "\\.py$",
       "trust": "latest",
       "reviewed": [],
-      "minEarth": "1.9.0",
-      "run": { "args": [], "port": 47630 }
+      "minEarth": "1.9.1-beta.dev.323",
+      "run": {
+        "args": [],
+        "port": 47630
+      }
     }
   ]
 }
