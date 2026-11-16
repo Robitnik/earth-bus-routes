@@ -404,4 +404,17 @@ function T.a_gtfs_line_has_towns_only()
   assert(far and sl.at(r, far) == 90, 'outside it')
 end
 
+-- A line of the route database (service 0.11): the ways of the map, the stops in the timetable's order with their times from the
+-- start, the departures of a typical day: the mod reads it like any route and keeps the timetable.
+function T.a_line_of_the_route_database_is_a_route_with_real_times()
+  local r = assert(osm.parseRoute(H.fixture('routedb_route_361')))
+  assert(r.timetable == 'gtfs' and #r.stops == 12 and #r.gtfsOffs == 12 and r.gtfsOffs[1] == 0, 'the timetable is kept')
+  assert(r.stops[1].name:find('Police', 1, true) and r.stops[12].name:find('Machov', 1, true), 'the stops are in the timetable order')
+  assert(r.gaps == 0 and not r.incomplete and not r.shuffled)
+  for i = 2, 12 do assert(r.gtfsOffs[i] >= r.gtfsOffs[i - 1]) end
+  local wd = r.gtfsStarts['3']
+  assert(#wd > 0 and wd[1] % 60 == 0, 'departures: seconds from midnight, whole minutes')
+  assert(r.gtfsStarts['1'] and r.gtfsStarts['6'] and r.gtfsStarts['7'], 'every weekday has a list')
+end
+
 return T
