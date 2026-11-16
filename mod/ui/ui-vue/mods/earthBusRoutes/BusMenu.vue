@@ -339,11 +339,12 @@
           <div class="card diagram">
             <h3>{{ t("route.stopsTitle") }}</h3>
             <ol class="strip">
-              <li v-for="st in s.route.stops" :key="st.i" :class="{ here: isHere(st.i), passed: isPassed(st.i) }">
+              <li v-for="st in s.route.stops" :key="st.i" :class="{ here: isHere(st.i), passed: isPassed(st.i), end: isEnd(st.i), beyond: isBeyond(st.i), pickable: canEnd(st.i) }" :title="canEnd(st.i) ? t('start.endHint') : ''" @click="pickEnd(st.i)">
                 <span class="dot"></span>
                 <span class="nm">{{ st.name }}</span>
                 <span class="km">{{ units === 'mph' ? (st.km * 0.6214).toFixed(1) : st.km.toFixed(1) }}</span>
                 <span v-if="isHere(st.i)" class="you">{{ t("route.youHere") }}</span>
+                <span v-if="isEnd(st.i)" class="you endtag">{{ t("route.endsHere") }}</span>
               </li>
             </ol>
           </div>
@@ -357,6 +358,14 @@
               <button :class="{ on: s.start.mode === 'first' }" @click="call('uiSetStartMode', 'first')">
                 {{ t("start.first") }}<small>{{ s.route.stops[0].name }}</small>
               </button>
+            </div>
+
+            <div v-if="endChoices.length" class="endstop">
+              <label class="label" for="end-stop">{{ t("start.end") }}</label>
+              <select id="end-stop" :value="s.start.partial ? s.start.endIndex : 0" :title="t('start.endHint')" @change="call('uiSetEnd', Number($event.target.value))">
+                <option :value="0">{{ t("start.endLast", { name: s.route.stops[s.route.stops.length - 1].name }) }}</option>
+                <option v-for="st in endChoices" :key="st.i" :value="st.i">{{ st.i }}. {{ st.name }}</option>
+              </select>
             </div>
 
             <div class="time">
@@ -620,6 +629,17 @@ const sourceText = computed(() => {
   const base = t("source.kind." + src.kind)
   return extra ? `${base} — ${extra}` : base
 })
+// a trip that ends before the end of the line: the stops it can end at (after the start), the stop it ends at, the ones it does not reach
+const endChoices = computed(() => (s.value && s.value.route && s.value.start)
+  ? s.value.route.stops.filter(st => st.i > s.value.start.index && st.i < s.value.route.stops.length) : [])
+const isEnd = i => !!(s.value && s.value.start && s.value.start.partial && s.value.start.endIndex === i)
+const isBeyond = i => !!(s.value && s.value.start && s.value.start.partial && i > s.value.start.endIndex)
+const canEnd = i => !!(s.value && s.value.start && i > s.value.start.index)
+const pickEnd = i => {
+  if (!canEnd(i)) return
+  const last = s.value.route.stops.length
+  call("uiSetEnd", (i === last || isEnd(i)) ? 0 : i)
+}
 const kindText = computed(() => (s.value && s.value.route ? t("route.kind." + s.value.route.kind) : ""))
 const lengthText = computed(() => {
   const km = s.value.route.km
@@ -849,6 +869,14 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   span { font-size: 10px; color: var(--muted); }
   &.peak i { background: var(--line); }
   &.off b { color: var(--muted); font-weight: 400; } }
+.endstop { display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; flex-wrap: wrap;
+  .label { color: var(--muted); font-size: 13px; }
+  select { flex: 1; min-width: 160px; max-width: 100%; border: 1px solid var(--hair); border-radius: 8px; padding: 7px 8px; background: transparent; color: var(--ink); font: inherit; font-weight: 700; cursor: pointer;
+    option { background: #1b2a32; color: #e8f0f2; } } }
+.strip li.pickable { cursor: pointer; }
+.strip li.beyond { opacity: 0.4; }
+.strip li.end .nm { font-weight: 800; }
+.strip li.end .endtag { background: var(--late, #e0a030); color: #17222a; }
 .export-note { margin-top: 10px; font-size: 13px; line-height: 1.4; word-break: break-all; &.ok { color: var(--ok, #6cc08b); } }
 .warn { margin-top: 12px; color: var(--late); font-size: 13px; line-height: 1.4; }
 

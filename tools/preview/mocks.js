@@ -139,6 +139,7 @@ Object.assign(MENU_STATES, {
   buildstraight: { ...common2, screen: "build", stations, build: { ...build, straight: true, pathErr: "no path" } },
   buildstops: { ...common2, screen: "buildStops", stations, build: { ...build, points: chain, line: roadLine, km: 33.1, minutes: 52, stops: buildStops, ref: "310", colour: "#7f6bb7", customColour: "#7f6bb7" } },
   ownexport: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false }, export: { ok: true, cc: "CZ", stops: 3, matched: 2, newStops: 1, road: true, folder: "C:/Users/you/AppData/Local/earth-bus-routes/export/CZ" } },
+  routeend: { ...common2, screen: "route", stations, ...sel, route, start: { ...start, partial: true, endIndex: 6, endName: route.stops[5].name } },
   ownroute: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false } },
 })
 

@@ -95,6 +95,13 @@ function M.status() return { version = M.VERSION, earth = S.earth, reason = S.re
 
 local function stationRef(i) return S.cell and S.cell.model and S.cell.model[i] and S.cell.model[i].ref end
 
+-- The stop a trip ends at (the player may drive only part of the line): the chosen one when it lies after the start, else the last
+local function endIndexFor(route, startIdx)
+  local e = tonumber(S.sel.endIdx)
+  if e and e > startIdx and e < #route.stops then return math.floor(e) end
+  return #route.stops
+end
+
 local function startIndexFor(route)
   if S.sel.custom then
     local p = S.sel.mode ~= 'first' and world.pose() or nil
@@ -175,6 +182,7 @@ local function buildModel()
     local deps, tomorrow = menu.departuresModel(c.trips, idx, sec, 8)
     model.start = { mode = S.sel.mode or 'here', index = idx, stopName = route.stops[idx].name, timeSec = sec,
       timeLabel = menu.clockLabel(sec), deps = deps, tomorrow = tomorrow, dep = S.sel.dep or 1,
+      endIndex = endIndexFor(route, idx), endName = route.stops[endIndexFor(route, idx)].name, partial = endIndexFor(route, idx) < #route.stops,
       reverseId = S.reverseOf[route.id] or nil, reverseGuess = S.reverseOf[route.id] == 'synthetic', reversed = S.sel.reversed or false, saved = S.sel.savedId ~= nil,
       place = S.sel.place, approx = S.sel.approx or false, dist = M.distToStop(route.stops[idx]), canDrive = M.distToStop(route.stops[idx]) > M.START_NEAR_M }
   end
@@ -1259,7 +1267,7 @@ function M.uiSelectRoute(id)
   id = tonumber(id)
   if not id then return end
   S.loading, S.err = 'route', nil
-  S.sel.routeId, S.sel.dep = id, 1
+  S.sel.routeId, S.sel.dep, S.sel.endIdx = id, 1, nil
   publish()
   loadRoute(id, function(route, why)
     S.loading = nil
@@ -1302,6 +1310,13 @@ end
 
 function M.uiSelectDep(i) S.sel.dep = tonumber(i) or 1 publish() end
 
+-- Where the trip ends: stop number `i` of the route (nil, 0 or the last stop: the end of the line). The trip then runs only that far.
+function M.uiSetEnd(i)
+  i = tonumber(i)
+  S.sel.endIdx = (i and i > 0) and math.floor(i) or nil
+  publish()
+end
+
 -- The opposite direction of the chosen route, when the data has it
 -- The route driven the other way (kept for the session): returns its id
 function M.syntheticReverse(route)
@@ -1323,7 +1338,8 @@ end
 
 -- ---- starting a trip -----------------------------------------------------------------------------------------------
 
-local function buildPlan()
+-- `full`: the whole line even when the player chose an end stop (shifts drive whole lines)
+local function buildPlan(full)
   readOptions()
   local route = currentRoute()
   if not route then return nil, 'no route chosen' end
@@ -1340,7 +1356,7 @@ local function buildPlan()
   if not veh then return nil, 'Sit in a bus first' end
   local clock = entry and schedule.scheduled(entry.trip, idx) or sec
   return {
-    route = route, trips = c.trips, entry = entry, startIndex = idx, day = c.day, clock = clock, ctx = c.ctx,
+    route = full and route or menu.partialRoute(route, endIndexFor(route, idx)), trips = c.trips, entry = entry, startIndex = idx, day = c.day, clock = clock, ctx = c.ctx,
     opts = { density = S.opts.density or 'normal', difficulty = S.opts.difficulty or 'normal', timeScale = S.opts.timeScale or 1,
       weather = world.weather(),
       -- the dispatcher's events, tickets sold by the driver and transfers: on unless the player turned them off

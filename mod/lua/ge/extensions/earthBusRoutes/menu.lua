@@ -138,6 +138,22 @@ function M.routeModel(route, trips, day, ctx)
   }
 end
 
+-- The route cut short: the same line and road, its stops only up to stop `e` (a trip that ends there). `route` itself when `e` is its last
+-- stop or beyond. Its last stop is the end of the line for the trip (everybody gets off), its `to` is that stop's name.
+function M.partialRoute(route, e)
+  e = math.floor(tonumber(e) or #route.stops)
+  if e >= #route.stops or e < 2 then return route end
+  local r = {}
+  for k, v in pairs(route) do r[k] = v end
+  local stops = {}
+  for i = 1, e do stops[i] = route.stops[i] end
+  r.stops = stops
+  r.to = stops[e].name or route.to
+  r.partial, r.loop = true, false
+  if (stops[e].along or 0) > 0 then r.length = stops[e].along end
+  return r
+end
+
 -- Departure choices from stop `index` at or after `sec` (a day's trips); wraps to tomorrow's first ones.
 function M.departuresModel(trips, index, sec, count)
   count = count or 8

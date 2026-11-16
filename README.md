@@ -29,7 +29,8 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 - **Search**: type a station name or a line number (363, N1); results appear as you type from the data service's own index, and the public servers fill in the rest.
 - **Lines from, to and through a station**: three tabs; a line that ends at the station you stand at can be driven from its start: teleport there, or drive there with the GPS and the trip begins when you arrive.
 - **Lines and directions**: every line with its operator, network, length, ride time, stops and how often it runs through the day.
-- **Start where you want**: from the stop you stand at, or from the line's first stop; choose the departure time and the game
+- **Start and end where you want**: from the stop you stand at, or from the line's first stop, to the end of the line or to any stop
+  before it (half the line, say); choose the departure time and the game
   clock jumps to it. The timetable is generated (OpenStreetMap almost never says how often a bus runs): city, regional and
   night lines, rush hours, weekends. `interval`, `duration` and `opening_hours` tags win when a line has them.
 - **Passengers**: how many wait at a stop depends on the time of day, the stop, the weather and how late you are. They board

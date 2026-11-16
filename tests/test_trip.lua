@@ -207,6 +207,18 @@ function T.starting_in_the_middle_counts_only_the_rest()
   assert(trip.result(t).served == #r.stops - 2)
 end
 
+-- the player drives only part of the line: the route cut at the chosen stop, which is the end of the line for the trip
+function T.a_trip_that_ends_in_the_middle_finishes_there()
+  local full = route()
+  local r = require('earthBusRoutes/menu').partialRoute(full, 4)
+  assert(#r.stops == 4 and r.partial)
+  local t = newTrip(r, { startIndex = 2 })
+  assert(t.score.planned == 3, 'stops 2, 3 and 4')
+  runAll(t, r)
+  assert(t.finished and trip.result(t).served == 3)
+  assert(t.idx >= 4 and #full.stops > 4, 'it did not go on to the rest of the line')
+end
+
 function T.clock_follows_time_scale()
   local r = route()
   local t = newTrip(r, { timeScale = 5, scheduled = false })

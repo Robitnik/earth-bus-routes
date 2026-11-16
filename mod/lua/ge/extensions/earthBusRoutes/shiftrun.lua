@@ -238,7 +238,7 @@ function M.uiStartShift(minutes, withDepot)
   if not enabled() then S.err = 'shift_off' H.publish() return end
   if S.trip or S.shift or S.starting then S.err = 'A trip is already running' H.publish() return end
   if S.armed then main.uiCancelArmed(true) end
-  local plan, why = H.buildPlan()
+  local plan, why = H.buildPlan(true)
   if not plan then S.err = why H.publish() return end
   if not plan.entry then S.err = 'shift_noentry' H.publish() return end
   S.err = nil

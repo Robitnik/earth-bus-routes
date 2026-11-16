@@ -236,4 +236,18 @@ function T.source_of_a_line_for_its_card()
   assert(menu.sourceOf({ tags = {} , custom = true }) == nil, 'a route the player built has no source')
 end
 
+
+-- a trip that ends before the end of the line (the player drives only part of it)
+function T.a_route_cut_short_ends_at_the_chosen_stop()
+  local route = { id = 7, ref = '7', from = 'A', to = 'E', length = 5000, loop = true, name = '7: A - E',
+    stops = { { name = 'A', along = 0 }, { name = 'B', along = 1000 }, { name = 'C', along = 2000 }, { name = 'D', along = 3500 }, { name = 'E', along = 5000 } } }
+  local cut = menu.partialRoute(route, 3)
+  assert(cut ~= route and #cut.stops == 3 and cut.stops[3].name == 'C', 'three stops')
+  assert(cut.to == 'C' and cut.length == 2000 and cut.partial == true and cut.loop == false)
+  assert(cut.id == 7 and cut.ref == '7' and cut.from == 'A', 'the same line')
+  assert(#route.stops == 5 and route.to == 'E' and route.loop == true, 'the route itself is untouched')
+  assert(menu.partialRoute(route, 5) == route and menu.partialRoute(route, 9) == route and menu.partialRoute(route, nil) == route, 'the end of the line is the whole route')
+  assert(menu.partialRoute(route, 1) == route, 'a trip needs two stops')
+end
+
 return T
