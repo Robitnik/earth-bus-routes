@@ -60,6 +60,8 @@ from GitHub (the tiles round you), no OpenStreetMap server is asked. Elsewhere t
 OpenStreetMap server, which can take up to a minute when that server is busy. Everything is kept on disk, so the next time it is
 instant. `BNE_BUSDATA_DB=0` turns the database off, `BNE_BUSDATA_DB=<folder>` reads a copy on this computer, `BNE_BUSDATA_LIVE=1`
 asks the live servers first.
+The menu has a drop-down for it too (auto / route database only / live only), and the card of a route you built can be exported
+as files for the database's hand-made layer (`%LOCALAPPDATA%\earth-bus-routes\export`).
 
 The data service also downloads, once, the towns of the countries round you (GeoNames, a few MB) and, when you play in Czechia,
 the national bus timetables (about 124 MB, refreshed weekly, kept as a 65 MB index); the progress line in the menu shows it.

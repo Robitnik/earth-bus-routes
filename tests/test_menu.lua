@@ -225,4 +225,15 @@ function T.timetable_lines_fill_the_tabs_of_the_bus_station()
   assert(c.from >= 4 and c.to >= 3, ('from %d to %d'):format(c.from, c.to))
 end
 
+
+-- 0.12: the card of a line says where it comes from (the data service marks the lines of the route database and of the timetables)
+function T.source_of_a_line_for_its_card()
+  local db = menu.sourceOf({ tags = { ['bus_routes:source'] = 'routedb', ['bus_routes:parts'] = 'osm+gtfs', ['bus_routes:feeds'] = 'mdb-1',
+    ['bus_routes:lic'] = 'CC-BY' } })
+  assert(db.kind == 'db' and db.parts == 'osm+gtfs' and db.feeds == 'mdb-1' and db.lic == 'CC-BY')
+  assert(menu.sourceOf({ tags = { ['bus_routes:source'] = 'gtfs' } }).kind == 'timetable')
+  assert(menu.sourceOf({ tags = { ref = '7' } }).kind == 'live', 'an Overpass answer has no mark')
+  assert(menu.sourceOf({ tags = {} , custom = true }) == nil, 'a route the player built has no source')
+end
+
 return T

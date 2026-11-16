@@ -106,6 +106,16 @@ function M.nearestStopIndex(route, lat, lon)
 end
 
 -- Info card of a route
+-- Where a line comes from, for the card: { kind = 'db' | 'timetable' | 'live', parts = 'osm+gtfs', feeds = 'name, name', lic = 'CC-BY' };
+-- nil for a route the player built. The data service marks the lines of the route database (and those of the timetables).
+function M.sourceOf(route)
+  if route.custom then return nil end
+  local tg = route.tags or {}
+  local src = tg['bus_routes:source']
+  return { kind = src == 'routedb' and 'db' or (src == 'gtfs' and 'timetable' or 'live'), parts = tg['bus_routes:parts'],
+    feeds = tg['bus_routes:feeds'], lic = tg['bus_routes:lic'] }
+end
+
 function M.routeModel(route, trips, day, ctx)
   local stops = {}
   for i, s in ipairs(route.stops) do
@@ -122,7 +132,7 @@ function M.routeModel(route, trips, day, ctx)
     network = route.network, operator = route.operator, kind = route.kind, loop = route.loop,
     km = math.floor(route.length / 100 + 0.5) / 10, stopCount = #route.stops, minutes = minutes,
     incomplete = route.incomplete or false, gaps = route.gaps, stops = stops, periods = periods,
-    custom = route.custom or false, straight = route.straight or false, timetable = route.timetable,
+    custom = route.custom or false, straight = route.straight or false, timetable = route.timetable, source = M.sourceOf(route),
     tripsToday = #trips, first = trips[1] and M.clockLabel(trips[1].start) or nil,
     last = trips[#trips] and M.clockLabel(trips[#trips].start) or nil,
   }

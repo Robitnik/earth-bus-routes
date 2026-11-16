@@ -12,6 +12,13 @@ M.TOTAL_S = 120              -- the service gives a request to the public server
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
 M.LANES = 3                  -- requests running at once
 
+-- Where the lines and stops come from, the player's choice (kept in a file; the menu sets it): 'auto' (the route database where it
+-- has the place, else the live map servers and timetables), 'db' (the database only: a place it lacks stays empty), 'live' (the
+-- live servers and timetables only: the old way). The service (0.12+, has('source')) takes it as ?src=.
+M.SOURCES = { 'auto', 'db', 'live' }
+M.PREFS_PATH = '/settings/earthBusRoutes/source.json'
+M.source = 'auto'
+
 local queue, actives = {}, {}
 local fastQueue, fastActive = {}, nil      -- the second lane: answers the service has at once (its index), never behind a slow request
 local wait = 0
@@ -76,14 +83,16 @@ function M.has(feature)
 end
 
 -- how: 'low' (background prefetch) | 'urgent' (somebody waits) | nil
+local function srcQ() return M.source ~= 'auto' and ('&src=' .. M.source) or '' end
+
 function M.nearby(lat, lon, cb, how)
-  M.get(('/v1/nearby?lat=%.5f&lon=%.5f'):format(lat, lon), cb, { low = how == 'low', urgent = how == 'urgent' })
+  M.get(('/v1/nearby?lat=%.5f&lon=%.5f'):format(lat, lon) .. srcQ(), cb, { low = how == 'low', urgent = how == 'urgent' })
 end
 function M.path(pts, cb) M.get('/v1/path?pts=' .. pts, cb, { urgent = true, total = 60, keep = true }) end
 function M.along(pts, cb) M.get('/v1/along?pts=' .. pts, cb, { urgent = true, keep = true }) end
 -- the stops round a point only if the service has them on this computer (service 0.10.3+, has('nearbycached')): for the
 -- background (the buses of the lines), which never asks a public server
-function M.nearbyKept(lat, lon, cb) M.get(('/v1/nearby?lat=%.5f&lon=%.5f&cached=1'):format(lat, lon), cb, { fast = true, total = 10 }) end
+function M.nearbyKept(lat, lon, cb) M.get(('/v1/nearby?lat=%.5f&lon=%.5f&cached=1'):format(lat, lon) .. srcQ(), cb, { fast = true, total = 10 }) end
 function M.stations(lat, lon, cb) M.get(('/v1/stations?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 -- fast: only what the service already knows, answered at once (on the second lane); else it asks the public servers
 function M.search(q, lat, lon, cb, fast)
@@ -98,13 +107,42 @@ end
 -- the cities, towns and villages round a point (the map of towns)
 function M.towns(lat, lon, cb) M.get(('/v1/towns?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
 -- low: a background load (the virtual bus network): an urgent request of the player may cancel it
-function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id), cb, low and { low = true } or { keep = true }) end
+function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id) .. srcQ(), cb, low and { low = true } or { keep = true }) end
 -- a route only if the service has it on this computer (never a request to a public server; service 0.10.1+): for the
 -- background loads, which must not queue in front of what the player asked for
-function M.routeKept(id, cb) M.get(('/v1/route?id=%d&cached=1'):format(id), cb, { fast = true, total = 10 }) end
+function M.routeKept(id, cb) M.get(('/v1/route?id=%d&cached=1'):format(id) .. srcQ(), cb, { fast = true, total = 10 }) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
 function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
+
+-- POST a JSON body (a table): cb(data, info). Used by the export of a hand-made line (service 0.12+, has('export')).
+function M.post(path, body, cb, total)
+  local okE, text = pcall(jsonEncode, body)
+  if not okE or type(text) ~= 'string' then cb(nil, { error = 'bad request', down = false }) return end
+  table.insert(queue, 1, { path = path, cbs = { cb }, tries = 0, total = total or 60, keep = true, method = 'POST', body = text })
+end
+
+-- The player's choice of the source (one of M.SOURCES). Returns true when it changed: what the service answered under the old
+-- choice is forgotten (the answers of another source have other ids), and the choice is kept in a file.
+function M.setSource(code)
+  local known = false
+  for _, c in ipairs(M.SOURCES) do if c == code then known = true end end
+  if not known or code == M.source then return false end
+  M.source = code
+  memo = {}
+  local w = rawget(_G, 'jsonWriteFile')
+  if w then pcall(w, M.PREFS_PATH, { format = 1, source = code }, true) end
+  return true
+end
+
+function M.loadPrefs()
+  local r = rawget(_G, 'jsonReadFile')
+  if not r then return end
+  local ok, d = pcall(r, M.PREFS_PATH)
+  if ok and type(d) == 'table' then
+    for _, c in ipairs(M.SOURCES) do if c == d.source then M.source = c end end
+  end
+end
 -- shifts (plan 006 B): the real trips that follow a timetable trip at its terminus; the depot (or a bus station) near a point
 function M.shift(pid, start, day, mins, cb)
   M.get(('/v1/shift?pid=%d&start=%d&day=%d&mins=%d'):format(math.floor(pid), math.floor(start), math.floor(day), math.floor(mins)), cb, { urgent = true, total = 30, keep = true })
@@ -129,7 +167,8 @@ local function startNext()
   local job = table.remove(queue, 1)
   if not job then return end
   job.tries = job.tries + 1
-  local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = 'GET', path = job.path, connectTimeout = 3, totalTimeout = job.total or M.TOTAL_S })
+  local ok, req = pcall(http.start, { host = M.HOST, port = M.PORT, method = job.method or 'GET', path = job.path, connectTimeout = 3,
+    totalTimeout = job.total or M.TOTAL_S, body = job.body, headers = job.body and { ['Content-Type'] = 'application/json' } or nil })
   if not ok then req = { state = 'error', err = tostring(req) } end
   actives[#actives + 1] = { job = job, req = req }
 end
@@ -223,7 +262,7 @@ local function settle(a)
     learn(data)
     local payload = data.data or data
     -- (an answer marked partial has the timetables only, the map's part is still coming: not kept for the session)
-    if job.path:find('/v1/info', 1, true) == nil and not (type(payload) == 'table' and payload.partial) then memo[job.path] = { data = payload } end
+    if job.method == nil and job.path:find('/v1/info', 1, true) == nil and not (type(payload) == 'table' and payload.partial) then memo[job.path] = { data = payload } end
     finish(job, payload, { cached = data.cached == true })
   else
     local err = tostring(req.err)

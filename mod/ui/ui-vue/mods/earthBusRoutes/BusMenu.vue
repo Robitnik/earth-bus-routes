@@ -28,6 +28,14 @@
           </template>
         </nav>
         <div class="tools">
+          <label v-if="s && s.source" class="lang source" :title="s.source.supported ? t('source.hint') : t('source.needsService')">
+            <span class="lang-icon" aria-hidden="true">🗂</span>
+            <select :value="s.source.choice" :disabled="!s.source.supported || !!s.tripActive" :aria-label="t('source')" @change="call('uiSource', $event.target.value)">
+              <option value="auto">{{ t("source.auto") }}</option>
+              <option value="db">{{ t("source.db") }}</option>
+              <option value="live">{{ t("source.live") }}</option>
+            </select>
+          </label>
           <label class="lang" :title="t('lang')">
             <span class="lang-icon" aria-hidden="true">🌐</span>
             <select :value="isAuto() ? 'auto' : lang" :aria-label="t('lang')" @change="pickLang($event.target.value)">
@@ -295,6 +303,7 @@
               </div>
             </div>
             <dl class="facts">
+              <div v-if="s.route.source"><dt>{{ t("route.source") }}</dt><dd :title="s.route.source.feeds || ''">{{ sourceText }}</dd></div>
               <div v-if="s.route.operator"><dt>{{ t("route.operator") }}</dt><dd>{{ s.route.operator }}</dd></div>
               <div v-if="s.route.network && !s.route.custom"><dt>{{ t("route.network") }}</dt><dd>{{ s.route.network }}</dd></div>
               <div><dt>{{ t("route.length") }}</dt><dd>{{ lengthText }}</dd></div>
@@ -319,7 +328,11 @@
             <div v-if="s.route.custom" class="own-actions">
               <button class="btn ghost" @click="call('uiSave')">{{ saveLabel }}</button>
               <button v-if="s.build" class="btn ghost" @click="call('uiBuildBack')">{{ t("route.editBuild") }}</button>
+              <button class="btn ghost" :title="t('export.hint')" :disabled="!!(s.export && s.export.busy)" @click="call('uiExport')">{{ t("export.button") }}</button>
             </div>
+            <p v-if="s.route.custom && s.export && s.export.busy" class="muted small export-note">{{ t("export.busy") }}</p>
+            <p v-else-if="s.route.custom && s.export && s.export.ok" class="export-note ok">{{ t("export.done", { n: s.export.stops, new: s.export.newStops, folder: s.export.folder }) }}</p>
+            <p v-else-if="s.route.custom && s.export && s.export.error" class="warn">{{ t("export.err." + s.export.error) }}</p>
             <button v-else class="btn ghost extend" @click="call('uiBuildFromRoute')">＋ {{ t("route.extend") }}<small>{{ t("route.extendHint") }}</small></button>
           </div>
 
@@ -598,6 +611,15 @@ const dist = m => distance(m, units.value, t)
 const hudRef = computed(() => (s.value && s.value.route ? s.value.route.ref : ""))
 const hudTo = computed(() => (s.value && s.value.route ? s.value.route.to : ""))
 
+// "Route database — OpenStreetMap + timetable · licence CC-BY": where the line on the card comes from
+const sourceText = computed(() => {
+  const src = s.value && s.value.route && s.value.route.source
+  if (!src) return ""
+  const parts = (src.parts || "").split("+").filter(Boolean).map(p => t("source.part." + p)).join(" + ")
+  const extra = [parts, src.lic ? t("source.lic", { lic: src.lic }) : ""].filter(Boolean).join(" · ")
+  const base = t("source.kind." + src.kind)
+  return extra ? `${base} — ${extra}` : base
+})
 const kindText = computed(() => (s.value && s.value.route ? t("route.kind." + s.value.route.kind) : ""))
 const lengthText = computed(() => {
   const km = s.value.route.km
@@ -827,6 +849,7 @@ h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
   span { font-size: 10px; color: var(--muted); }
   &.peak i { background: var(--line); }
   &.off b { color: var(--muted); font-weight: 400; } }
+.export-note { margin-top: 10px; font-size: 13px; line-height: 1.4; word-break: break-all; &.ok { color: var(--ok, #6cc08b); } }
 .warn { margin-top: 12px; color: var(--late); font-size: 13px; line-height: 1.4; }
 
 .diagram { display: flex; flex-direction: column; }

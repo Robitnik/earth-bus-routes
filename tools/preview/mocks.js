@@ -45,7 +45,7 @@ const lines = [
   { ref: "305", colour: "#2f9e8f" }, { ref: "308", colour: "#c0572b" }, { ref: "309", colour: "#4a6fc7" }, { ref: "302", colour: "#c9a227" }, { ref: "334", colour: "#8a4fb0" }, { ref: "392", colour: "#2d2d2d" },
 ]
 const common = {
-  version: "0.2.0", earth: true, reason: "ok", error: null, loading: null, units: "km/h", day: 3, nowSec: 27300, tripActive: false, starting: false,
+  version: "0.2.0", earth: true, reason: "ok", error: null, loading: null, units: "km/h", day: 3, nowSec: 27300, tripActive: false, starting: false, source: { choice: "auto", supported: true },
   service: { up: true, version: "0.1.0", port: 47630 }, pos: { lat: 50.41573, lon: 16.16261 },
   place: { street: "Masarykovo náměstí", place: "Náchod", country: "Czechia" }, mapCredit: "© OpenStreetMap contributors",
   stats: { trips: 7, passengers: 214, points: 5120 },
@@ -58,7 +58,7 @@ const stations = [
 ]
 const stopNames = ["Náchod, aut. nádraží", "Náchod, Masarykovo náměstí", "Náchod, Staré Město, rozcestí", "Vrchoviny, rozcestí", "Nové Město nad Metují, Malecí nemocnice", "Nové Město nad Metují, Krčín, most", "Černilov, kino", "Sněžka", "Hradec Králové, Šimkova", "Hradec Králové, Pospíšilova", "Hradec Králové, terminál"]
 const rstops = stopNames.map((name, i) => ({ i: i + 1, name, km: Math.round(i * 5.4 * 10) / 10 }))
-const route = {
+const route = { source: { kind: "db", parts: "osm+gtfs", feeds: "Mobility Database 991", lic: "CC-BY" },
   id: 6964117, ref: "305", colour: "#2f9e8f", name: "305: Náchod - Hradec Králové", from: "Náchod", to: "Hradec Králové", network: "IREDO", operator: "ICOM transport a.s.",
   kind: "regional", loop: false, km: 54.2, stopCount: stopNames.length, minutes: 86, incomplete: false, gaps: 0, stops: rstops,
   periods: [
@@ -120,7 +120,7 @@ const buildStops = [
   { id: "6", name: "Machov, rozcestí", km: 20.4, chosen: false, on: true, lat: 50.56, lon: 16.3 },
   { id: "w3", name: chain[2].name, km: 33.1, chosen: true, on: true, lat: 50.5855, lon: 16.332 },
 ]
-const own = { ...route, id: -1, ref: "310", colour: "#7f6bb7", from: chain[0].name, to: chain[2].name, name: "310: Náchod => Broumov", network: "Custom", operator: null, custom: true,
+const own = { ...route, source: null, id: -1, ref: "310", colour: "#7f6bb7", from: chain[0].name, to: chain[2].name, name: "310: Náchod => Broumov", network: "Custom", operator: null, custom: true,
   km: 33.1, stopCount: 9, minutes: 52, stops: buildStops.filter(x => x.on).map((x, i) => ({ i: i + 1, name: x.name, km: x.km })), tripsToday: 14, first: "05:15", last: "20:45" }
 const common2 = { ...common, version: "0.3.0", service: { up: true, version: "0.2.0", port: 47630 }, features: { path: true, along: true, search: true, stations: true } }
 const mine = [
@@ -138,6 +138,7 @@ Object.assign(MENU_STATES, {
   buildbusy: { ...common2, screen: "build", stations, build: { ...build, busy: { cands: true, path: true }, cands: [], legs: [{ from: chain[0].name, to: chain[1].name, km: null, min: null, ready: false }], km: 0, minutes: 0, line: null } },
   buildstraight: { ...common2, screen: "build", stations, build: { ...build, straight: true, pathErr: "no path" } },
   buildstops: { ...common2, screen: "buildStops", stations, build: { ...build, points: chain, line: roadLine, km: 33.1, minutes: 52, stops: buildStops, ref: "310", colour: "#7f6bb7", customColour: "#7f6bb7" } },
+  ownexport: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false }, export: { ok: true, cc: "CZ", stops: 3, matched: 2, newStops: 1, road: true, folder: "C:/Users/you/AppData/Local/earth-bus-routes/export/CZ" } },
   ownroute: { ...common2, screen: "route", stations, route: own, build, start: { ...start, mode: "first", index: 1, stopName: chain[0].name, reverseId: "custom", saved: false } },
 })
 

@@ -350,6 +350,95 @@ class ServiceUsesIt(unittest.TestCase):
         self.assertTrue(calls)
 
 
+    # ---- 0.12: the source of the data is the player's choice, a line says where it comes from, a hand-made line can be exported
+
+    def post(self, path, body):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        raw = json.dumps(body).encode("utf-8")
+        c.putrequest("POST", path, skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.port}")
+        c.putheader("Content-Type", "application/json")
+        c.putheader("Content-Length", str(len(raw)))
+        c.endheaders(raw)
+        r = c.getresponse()
+        return r.status, json.loads(r.read().decode("utf-8"))
+
+    def test_info_lists_source_and_export(self):
+        s, j = self.get("/v1/info")
+        self.assertIn("source", j["features"])
+        self.assertIn("export", j["features"])
+
+    def test_source_db_answers_nothing_for_a_place_the_database_lacks_and_asks_no_map_server(self):
+        s, j = self.get("/v1/nearby?lat=55.0&lon=16.0&src=db")
+        self.assertEqual(s, 200)
+        self.assertEqual(j["data"]["elements"], [])
+        self.assertEqual(self.upstream_calls, [])
+
+    def test_source_live_skips_the_database(self):
+        calls = []
+
+        def upstream(q):
+            calls.append(q)
+            return json.dumps({"elements": []})
+        svc = d.Service(d.Cache(pathlib.Path(self.tmp.name) / "cache3"), upstream=upstream, db=self.svc.db)
+        text, cached = svc.nearby(LAT + 0.002, LON + 0.002, src="live")
+        self.assertTrue(calls)
+        self.assertNotIn("routedb", text)
+        text, cached = svc.nearby(LAT + 0.002, LON + 0.002, src="auto")
+        self.assertIn("routedb", text)
+
+    def test_route_source_live_refuses_a_database_only_line_and_db_refuses_an_unknown_one(self):
+        self.assertEqual(self.get("/v1/route?id=3000000000008&src=live")[0], 404)
+        self.assertEqual(self.get("/v1/route?id=3000000000008&src=db&cached=1")[0], 200)
+        self.assertEqual(self.get("/v1/route?id=424242&src=db")[0], 404)
+        self.assertEqual(self.upstream_calls, [])
+
+    def test_an_unknown_source_means_auto(self):
+        self.assertEqual(d.parse_src({"src": ["nonsense"]}), "auto")
+        self.assertEqual(d.parse_src({}), "auto")
+        self.assertEqual(d.parse_src({"src": ["db"]}), "db")
+
+    def test_a_database_line_says_where_it_comes_from(self):
+        s, j = self.get("/v1/route?id=3000000000008&cached=1")
+        tags = j["data"]["elements"][0]["tags"]
+        self.assertEqual(tags["bus_routes:source"], "routedb")
+        self.assertEqual(tags["bus_routes:parts"], "gtfs")
+        s, j = self.get("/v1/route?id=7")
+        self.assertEqual(j["data"]["elements"][0]["tags"]["bus_routes:parts"], "osm")
+
+    def test_export_writes_the_files_of_the_hand_made_layer(self):
+        body = {"points": [{"name": "Alpha", "lat": 50.0010, "lon": 16.0010}, {"name": "Brand new", "lat": 50.0040, "lon": 16.0040},
+                           {"name": "Beta", "lat": 50.0050, "lon": 16.0050}], "ref": "363", "name": "363: Alpha - Beta", "colour": "#aa3300"}
+        s, j = self.post("/v1/export", body)
+        self.assertEqual(s, 200, j)
+        r = j["data"]
+        self.assertEqual((r["cc"], r["stops"], r["matched"], r["new_stops"], r["road"]), ("CZ", 3, 2, 1, False))
+        rec = json.loads(pathlib.Path(r["files"][0]).read_text(encoding="utf-8"))
+        self.assertEqual(rec["cc"], "CZ")
+        self.assertEqual([x["s"] for x in rec["stops"]][0], 1)                    # Alpha: the stop the database has
+        self.assertEqual(rec["stops"][1]["s"] // d.EXPORT_STOP_BASE, 1)           # a new stop: in the band of the hand-made stops
+        self.assertEqual(rec["t"]["colour"], "#aa3300")
+        self.assertEqual(rec["src"][0]["k"], "edit")
+        stops = json.loads(pathlib.Path(r["files"][1]).read_text(encoding="utf-8"))
+        self.assertEqual(list(stops.values())[0]["n"], "Brand new")
+        self.assertEqual(self.post("/v1/export", body)[1]["data"]["id"], r["id"])  # the same line again: the same id and file
+
+    def test_export_refuses_bad_input_and_a_non_json_post(self):
+        self.assertEqual(self.post("/v1/export", {"points": [{"lat": 1, "lon": 1}]})[0], 400)
+        self.assertEqual(self.post("/v1/export", {"points": [{"lat": 999, "lon": 1}, {"lat": 1, "lon": 1}]})[0], 400)
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.putrequest("POST", "/v1/export", skip_host=True)
+        c.putheader("Host", f"127.0.0.1:{self.port}")
+        c.putheader("Content-Type", "text/plain")
+        c.putheader("Content-Length", "2")
+        c.endheaders(b"{}")
+        self.assertEqual(c.getresponse().status, 415)
+
+    def test_polyline_roundtrip(self):
+        pts = [(50.0, 16.0), (50.00123, 16.00456), (49.99, 15.99)]
+        self.assertEqual([(round(a, 5), round(b, 5)) for a, b in d.polyline_decode(d.polyline_encode(pts))], pts)
+
+
 class EnvConfig(unittest.TestCase):
     def test_off_default_and_custom(self):
         self.assertEqual(d.db_repos_from_env("x", {"BNE_BUSDATA_DB": "0"}), [])

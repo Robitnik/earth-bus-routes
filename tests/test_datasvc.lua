@@ -7,7 +7,7 @@ local function setup()
   H.reset()
   local reqs = {}
   local fake = {
-    start = function(o) local r = { state = 'pending', path = o.path, parser = {} } reqs[#reqs + 1] = r return r end,
+    start = function(o) local r = { state = 'pending', path = o.path, parser = {}, o = o } reqs[#reqs + 1] = r return r end,
     step = function() end,
     body = function(p) return p.text end,
     cancel = function(r) r.state = 'cancelled' end,
@@ -141,6 +141,70 @@ function T.drop_cancels_what_the_menu_waited_for_and_keeps_routes()
   ds.update(0.1)
   assert(heard.kept)
   assert(ds.TOTAL_S <= 120, 'the mod waits no longer than the service tries')
+  cleanup()
+end
+
+
+-- 0.12: the source of the data is the player's choice: it goes to the service as ?src=, is kept in a file, and what was answered
+-- under the old choice is forgotten
+function T.the_source_choice_goes_to_the_service_and_is_kept()
+  local ds, answer, running, reqs = setup()
+  local files = {}
+  jsonWriteFile = function(path, t) files[path] = t return true end
+  jsonReadFile = function(path) return files[path] end
+  assert(ds.source == 'auto')
+  ds.nearby(50.5, 16.2, function() end, 'urgent')
+  ds.update(0.1)
+  assert(reqs[#reqs].path == '/v1/nearby?lat=50.50000&lon=16.20000', 'auto asks without src: ' .. reqs[#reqs].path)
+  answer('/v1/nearby?lat=50.50000&lon=16.20000', '{"elements":[]}')
+  ds.update(0.1)
+  local memoHit
+  ds.nearby(50.5, 16.2, function(d, info) memoHit = info and info.memo end, 'urgent')
+  assert(memoHit, 'the second answer comes from memory')
+  assert(ds.setSource('db') == true and ds.source == 'db')
+  assert(ds.setSource('db') == false, 'no change')
+  assert(ds.setSource('nonsense') == false and ds.source == 'db')
+  assert(files[ds.PREFS_PATH].source == 'db', 'kept in a file')
+  ds.nearby(50.5, 16.2, function() end, 'urgent')
+  ds.update(0.1)
+  assert(reqs[#reqs].path == '/v1/nearby?lat=50.50000&lon=16.20000&src=db', 'the choice is asked for, the old memo is gone: ' .. reqs[#reqs].path)
+  ds.route(7, function() end)
+  ds.update(0.1)
+  assert(reqs[#reqs].path == '/v1/route?id=7&src=db')
+  ds.setSource('live')
+  ds.routeKept(7, function() end)
+  ds.update(0.1)
+  assert(reqs[#reqs].path == '/v1/route?id=7&cached=1&src=live')
+  answer('/v1/route?id=7&cached=1&src=live', '{"elements":[]}')           -- (the fast lane runs one at a time)
+  ds.update(0.1)
+  ds.nearbyKept(50.5, 16.2, function() end)
+  ds.update(0.1)
+  assert(reqs[#reqs].path == '/v1/nearby?lat=50.50000&lon=16.20000&cached=1&src=live')
+  -- the next session reads the file
+  local ds2 = setup()
+  jsonReadFile = function(path) return files[path] end         -- (setup resets the globals)
+  ds2.loadPrefs()
+  assert(ds2.source == 'live')
+  jsonWriteFile, jsonReadFile = nil, nil
+  cleanup()
+end
+
+function T.post_sends_a_json_body_and_the_answer_is_not_kept_in_memory()
+  local ds, answer, running, reqs = setup()
+  jsonEncode = function(t) return '{"n":' .. #t.points .. '}' end
+  local got
+  ds.post('/v1/export', { points = { {}, {} } }, function(d) got = d end)
+  ds.update(0.1)
+  local r = reqs[#reqs]
+  assert(r.o.method == 'POST' and r.o.body == '{"n":2}', 'POST with the body')
+  assert(r.o.headers and r.o.headers['Content-Type'] == 'application/json')
+  answer('/v1/export', '{"cc":"CZ","files":[]}')
+  ds.update(0.1)
+  assert(got and got.cc == 'CZ')
+  local again
+  ds.post('/v1/export', { points = { {}, {} } }, function(d) again = d end)
+  ds.update(0.1)
+  assert(again == nil, 'it is asked again, not answered from memory')
   cleanup()
 end
 

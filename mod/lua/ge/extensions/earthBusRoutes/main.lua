@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.11.0'
+M.VERSION = '0.12.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -187,6 +187,10 @@ local function buildModel()
   model.progress = datasvc.state.progress
   model.map = S.map
   model.saved = M.savedModel()
+  -- where the data comes from (the choice is the player's; the service must be 0.12+) and the export of the route on screen
+  model.source = { choice = datasvc.source, supported = datasvc.has('source') == true }
+  model.export = S.sel and S.sel.export or nil
+  model.canExport = datasvc.has('export') == true
   model.features = datasvc.state.features
   if S.build then model.build = M.buildModelOf() end
   -- plan 007 T1: the buses of the lines round you (moving dots) and the board of the station on screen; nil when the option is off
@@ -1188,6 +1192,40 @@ function M.uiState() publish() end
 
 function M.uiRefresh() datasvc.forget() S.cell = nil loadNearby(false) end
 
+-- The source of the data: 'auto' (the route database where it has the place, else the live servers), 'db' (the database only),
+-- 'live' (the map servers and timetables only). What was loaded under the old choice is dropped; the stops round you are asked again.
+function M.uiSource(code)
+  if not datasvc.setSource(code) then return end
+  S.routes, S.reverseOf, S.trips = {}, {}, {}
+  if S.trip or S.starting then publish() return end              -- (the trip has its route; the next screen reads the new choice)
+  S.cell, S.sel, S.result = nil, {}, nil
+  if S.screen ~= 'build' and S.screen ~= 'buildStops' then S.screen = 'nearby' end
+  loadNearby(false)
+end
+
+-- Export the hand-made route on screen as files for the hand-made layer of the route database (the service writes them into its
+-- export folder, with a README on how to send them in). The result (or an error code) is shown on the card: S.sel.export.
+function M.uiExport()
+  local route = currentRoute()
+  local ser = route and S.customSer[route.id]
+  if not ser or not S.sel then return end
+  if datasvc.has('export') ~= true then S.sel.export = { error = 'old' } publish() return end
+  local pts = {}
+  for i, p in ipairs(ser.points) do pts[i] = { name = p.name or '', lat = p.lat, lon = p.lon } end
+  S.sel.export = { busy = true }
+  publish()
+  local sel = S.sel
+  datasvc.post('/v1/export', { points = pts, ref = ser.ref or route.ref, name = ser.name or route.name, colour = ser.colour or route.colour }, function(data, info)
+    if S.sel ~= sel then return end
+    if data then
+      sel.export = { ok = true, cc = data.cc, folder = data.folder, stops = data.stops, matched = data.matched, newStops = data.new_stops, road = data.road }
+    else
+      sel.export = { error = (info and info.down) and 'down' or 'failed', detail = info and info.error or nil }
+    end
+    publish()
+  end)
+end
+
 function M.uiBackTo(screen)
   S.screen = screen
   if screen == 'nearby' then
@@ -1854,6 +1892,7 @@ end
 
 function M.onExtensionLoaded()
   pcall(texts.load)
+  pcall(datasvc.loadPrefs)
   refreshEarth()
   readOptions()
   datasvc.ping(function() end)            -- which features the service has (instant searches, progress)
