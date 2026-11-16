@@ -65,7 +65,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.10.3"
+VERSION = "0.11.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -1158,10 +1158,11 @@ def fold_words(text):
     return " ".join(re.findall(r"\w+", fold(text)))
 
 
-def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None):
+def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None, ref_fn=None):
     """Index a GTFS zip into an sqlite file: stops, the patterns (one line's one way of going: its stops with their times
     from the start) with how many trips run on the next `days` days from `today` (a datetime.date), and the departures with a
-    bit per day. Streams the files: stop_times.txt is a gigabyte for a country. Returns {stops, patterns, trips}."""
+    bit per day. Streams the files: stop_times.txt is a gigabyte for a country. Returns {stops, patterns, trips}.
+    `ref_fn(route_short_name, route_long_name)` gives the number of a line (default gtfs_ref: made for the Czech national feed)."""
     import csv
     import datetime
     import sqlite3
@@ -1188,7 +1189,7 @@ def build_gtfs_index(zip_path, db_path, today, days=GTFS_DAYS, progress=None):
     r, ix = reader("routes.txt")
     for row in r:
         if _bus_route(col(ix, row, "route_type")):
-            ref = gtfs_ref(col(ix, row, "route_short_name"), col(ix, row, "route_long_name"))
+            ref = (ref_fn or gtfs_ref)(col(ix, row, "route_short_name"), col(ix, row, "route_long_name"))
             routes[col(ix, row, "route_id")] = (ref, col(ix, row, "route_long_name"), agencies.get(col(ix, row, "agency_id"), ""))
     say_p("trips", 0.04)
     trips, services = {}, set()
@@ -1988,6 +1989,8 @@ class RouteDb:
         self.repos = list(repos or [])
         self._mem = {}                       # (repo index, country, tile name) -> tile dict (LRU by insertion order)
         self._where = {}                     # line id -> (repo index, country): learnt from the tiles
+        self._sets = {}                      # (repo index, country) -> the names of its tiles
+        self.last = None                     # (lat, lon) of the last place a nearby answer was made for
         self._lock = threading.RLock()
 
     @property
@@ -2003,14 +2006,36 @@ class RouteDb:
                 out += [(i, cc, e) for cc, e in sorted(m["countries"].items())]
         return out
 
+    def _have(self, i, cc, e, online=True):
+        """The set of the tiles a country has: the manifest's own list (small databases) or its index file (data/<cc>/index.json,
+        fetched once and kept). None when the index cannot be had."""
+        have = self._sets.get((i, cc))
+        if have is not None:
+            return have
+        names = e.get("tiles")
+        if names is None:
+            text = self.repos[i].read(e.get("index") or f"data/{cc}/index.json", ttl=DB_MANIFEST_TTL_S, online=online)
+            try:
+                names = json.loads(text)["tiles"] if text else None
+            except (ValueError, KeyError, TypeError):
+                names = None
+            if names is None:
+                return None
+        have = self._sets[(i, cc)] = set(names)
+        return have
+
     def _tiles(self, lat0, lon0, lat1, lon1, online=True):
-        """[(repo index, cc, tile name)] of the tiles that exist and touch the box."""
+        """[(repo index, cc, tile name)] of the tiles that exist and touch the box. Only the countries whose bounding box touches
+        the box are looked into (one index file each, the first time)."""
         out = []
         for i, cc, e in self.countries(online):
+            bb = e.get("bbox")
+            if bb and (lat1 < bb[0] - 0.1 or lat0 > bb[2] + 0.1 or lon1 < bb[1] - 0.1 or lon0 > bb[3] + 0.1):
+                continue
+            have = self._have(i, cc, e, online)
+            if not have:
+                continue
             deg = e.get("tile_deg", 0.1)
-            have = e.get("_set")
-            if have is None:
-                have = e["_set"] = set(e.get("tiles", ()))
             (ya, xa), (yb, xb) = tile_index(lat0, lon0, deg), tile_index(lat1, lon1, deg)
             for y in range(ya, yb + 1):
                 for x in range(xa, xb + 1):
@@ -2020,7 +2045,7 @@ class RouteDb:
 
     def covers(self, lat, lon, online=True):
         """The database knows this place: a tile at it or next to it exists."""
-        return bool(self._tiles(lat - 0.1, lon - 0.1, lat + 0.1, lon + 0.1, online))
+        return bool(self._tiles(lat - 0.1, lon - 0.1, lat + 0.1, lon + 0.1, online))             # (a tile at it or next to it)
 
     def tile(self, key, online=True):
         with self._lock:
@@ -2067,6 +2092,7 @@ class RouteDb:
         keys = self._tiles(lat - dlat, lon - dlon, lat + dlat, lon + dlon, online)
         if not keys:
             return None
+        self.last = (lat, lon)
         nodes, rels = {}, {}
         for key in keys:
             t = self.tile(key, online)
@@ -2102,7 +2128,16 @@ class RouteDb:
         """(repo index, cc, record) of a line, or None."""
         rel = f"routes/{rid % 1000:03d}/{rid}.json"
         known = self._where.get(rid)
-        order = ([known] if known else []) + [(i, cc) for i, cc, _ in self.countries(online) if (i, cc) != known]
+        if known:
+            order = [known]                 # a line seen in a tile is in that country
+        else:
+            # (a line asked for before any place was: the countries round the last place the database answered for, else all
+            # of them when there are only a few)
+            allc = self.countries(online)
+            last = self.last
+            near = [(i, cc) for i, cc, e in allc if not e.get("bbox") or last is None
+                    or (e["bbox"][0] - 0.2 <= last[0] <= e["bbox"][2] + 0.2 and e["bbox"][1] - 0.2 <= last[1] <= e["bbox"][3] + 0.2)]
+            order = near if (last is not None or len(allc) <= 4) else []
         for i, cc in order:
             text = self.repos[i].read(f"data/{cc}/{rel}", online=online)
             if text is not None:

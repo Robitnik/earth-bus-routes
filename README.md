@@ -9,6 +9,11 @@ time of day, keep to a generated timetable and get scored at the end. Then drive
 ## What you get
 
 - **Stops near you**: the bus stops and stations within 600 m, with the lines that call at each.
+- **A prepared route database (Europe, Ukraine, the United States)**: lines and stops of 79 countries and states, built in
+  advance from OpenStreetMap and from open timetable feeds and kept in
+  [`earth-bus-routes-db-eu`](https://github.com/Robitnik/earth-bus-routes-db-eu): a place opens in a fraction of a second, no
+  public server is asked, and you can correct a line by hand. Where the database lacks a place the old way (live OpenStreetMap)
+  still works.
 - **Real timetables (Czechia)**: every bus line of the country from the state's timetable register, with its real departures
   and the time at every stop, also the lines OpenStreetMap lacks. Elsewhere the timetable is generated.
 - **Map, towns, stations and stops**: a map tab with a chip for every town round you and the stations and stops as chips and
@@ -50,8 +55,11 @@ all 13 languages of the game plus Ukrainian (English, Ukrainian, German, Spanish
    the internet itself.
 3. In a bus (other vehicles work too but score half): **Ctrl+Shift+B**, or the pause menu > Mods > Bus routes.
 
-The first visit to a place fetches its data from a public OpenStreetMap server, which can take up to a minute when that server is
-busy. Everything is kept on disk, so the next time it is instant.
+Where the route database has the place (most of Europe and the United States), the first visit downloads only a few small files
+from GitHub (the tiles round you), no OpenStreetMap server is asked. Elsewhere the first visit fetches its data from a public
+OpenStreetMap server, which can take up to a minute when that server is busy. Everything is kept on disk, so the next time it is
+instant. `BNE_BUSDATA_DB=0` turns the database off, `BNE_BUSDATA_DB=<folder>` reads a copy on this computer, `BNE_BUSDATA_LIVE=1`
+asks the live servers first.
 
 The data service also downloads, once, the towns of the countries round you (GeoNames, a few MB) and, when you play in Czechia,
 the national bus timetables (about 124 MB, refreshed weekly, kept as a 65 MB index); the progress line in the menu shows it.

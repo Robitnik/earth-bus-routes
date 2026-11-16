@@ -227,6 +227,47 @@ class Db(unittest.TestCase):
         self.assertEqual(self.db.status()[0]["countries"]["CZ"]["routes"], 2)
 
 
+class BigManifest(unittest.TestCase):
+    """A database of many countries: tiles listed in data/<cc>/index.json, countries chosen by their bounding box."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = pathlib.Path(self.tmp.name)
+        make_db(root)                                                        # CZ-like country "CZ" (50.0, 16.0)
+        m = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        cz = m["countries"]["CZ"]
+        (root / "data" / "CZ" / "index.json").write_text(json.dumps({"v": 1, "cc": "CZ", "tile_deg": 0.1, "tiles": cz.pop("tiles")}), encoding="utf-8")
+        cz.update({"index": "data/CZ/index.json", "bbox": [49.9, 15.9, 50.2, 16.3], "tile_count": 2})
+        # a far away country that must not even have its index read
+        m["countries"]["US-AL"] = {"routes": 1, "stops": 1, "tile_count": 1, "tile_deg": 0.05, "index": "data/US-AL/index.json",
+                                   "bbox": [30.0, -88.0, 35.0, -85.0]}
+        (root / "manifest.json").write_text(json.dumps(m), encoding="utf-8")
+        self.reads = []
+        repo = d.DbRepo([str(root)])
+        orig = repo.read
+        repo.read = lambda rel, **kw: (self.reads.append(rel), orig(rel, **kw))[1]
+        self.db = d.RouteDb([repo])
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_only_the_country_round_the_place_has_its_index_read(self):
+        text = self.db.nearby(LAT + 0.002, LON + 0.002, 650)
+        self.assertIn("routedb", text)
+        self.assertIn("data/CZ/index.json", self.reads)
+        self.assertNotIn("data/US-AL/index.json", self.reads)
+
+    def test_a_line_asked_for_first_is_looked_for_round_the_last_place(self):
+        self.assertIsNotNone(self.db.route(7))                              # nothing seen yet, two countries: tried
+        db2 = d.RouteDb(self.db.repos)
+        db2.last = (33.0, -86.0)                                            # in Alabama: the Czech file is not looked for there
+        self.assertIsNone(db2.route(7))
+
+    def test_a_place_without_an_index_means_the_old_way(self):
+        (pathlib.Path(self.tmp.name) / "data" / "CZ" / "index.json").unlink()
+        self.assertIsNone(self.db.nearby(LAT + 0.002, LON + 0.002, 650))
+
+
 class ServiceUsesIt(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

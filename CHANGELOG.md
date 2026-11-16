@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.0
+
+- **A prepared route database.** The lines and stops of the 27 EU countries, Ukraine, Czechia and the 50 US states with Washington DC (79 extracts, 3 million stops, 268 thousand lines) are now built in advance from OpenStreetMap and from timetable feeds with an explicitly open licence, and kept as small JSON files in [earth-bus-routes-db-eu](https://github.com/Robitnik/earth-bus-routes-db-eu). The data service reads them from GitHub (raw, with jsDelivr as a mirror) and keeps what it read on disk: a place opens in 0.3-5 seconds the first time and instantly after, with no OpenStreetMap server asked; a line opens in a third of a second. Where the database lacks a place, or a file cannot be had, everything works the old way. Each line carries where it comes from and the licence of its timetable; the list of feeds is in the database's `sources/FEEDS.md`.
+- **Timetables far beyond Czechia.** Lines that have a "typical day" timetable (weekday, Saturday, Sunday) in the database use the real departures: in Germany, France, Poland, Austria, Finland, the Netherlands, Belgium, Ukraine and others, not only Czechia. In the United States feeds with an open licence are rare, so most American lines are still generated.
+- **Hand-made corrections.** The database has an `edits/` layer for fixing a line by hand that survives every rebuild; `BNE_BUSDATA_DB=<folder>` makes the service read a local copy of it.
+- Data service 0.11.0 (update it on the Add-ons page too). `BNE_BUSDATA_DB=0` turns the database off, `BNE_BUSDATA_LIVE=1` asks the live servers first. Nothing is fetched with the menu closed (as in 0.10.3).
+- Not in this release: choosing the source in the menu (Earth takes only 16 options for an add-on, all are used), a badge of the source on a line, and "export my route to the database". The routes you build yourself stay on this computer.
+
 ## 0.10.3
 
 - **The stop markers on the road are back.** Since 0.9.2 the light fill of the bay was handed to the game's drawer in a form it refuses, so the first frame of every trip failed and all the markers (corners, arrow, name) and the ghost turned themselves off for the session. Fixed; and if one part cannot be drawn now, only that part goes (the fill, the name), not the rest.
