@@ -439,6 +439,34 @@ class ServiceUsesIt(unittest.TestCase):
         self.assertEqual([(round(a, 5), round(b, 5)) for a, b in d.polyline_decode(d.polyline_encode(pts))], pts)
 
 
+class RoutersDown(unittest.TestCase):
+    """The routing servers cannot be reached (a firewall, no network): the first request finds it out (one round of the servers),
+    the next ones get "straight lines" at once for a while instead of waiting minutes each."""
+
+    def test_unreachable_servers_are_not_asked_again_at_once(self):
+        import urllib.error
+        calls = []
+
+        def dead(url, *a, **k):
+            calls.append(url)
+            raise urllib.error.URLError("timed out")
+        old_get, old_sleep = d.get_url, d.time.sleep
+        d.get_url, d.time.sleep = dead, lambda s: None
+        d._routers["down_until"] = 0.0
+        try:
+            with self.assertRaises(RuntimeError):
+                d.fetch_osrm([(50.0, 16.0), (50.01, 16.01)])
+            first = len(calls)
+            self.assertEqual(first, len(d.OSRM), "one round of the servers, not two")
+            with self.assertRaises(RuntimeError) as c:
+                d.fetch_osrm([(50.0, 16.0), (50.01, 16.01)])
+            self.assertEqual(len(calls), first, "no new request while the servers are known to be down")
+            self.assertIn("a moment ago", str(c.exception))
+        finally:
+            d.get_url, d.time.sleep = old_get, old_sleep
+            d._routers["down_until"] = 0.0
+
+
 class EnvConfig(unittest.TestCase):
     def test_off_default_and_custom(self):
         self.assertEqual(d.db_repos_from_env("x", {"BNE_BUSDATA_DB": "0"}), [])

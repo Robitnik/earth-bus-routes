@@ -208,4 +208,27 @@ function T.post_sends_a_json_body_and_the_answer_is_not_kept_in_memory()
   cleanup()
 end
 
+
+-- 0.12.1: the stops round you (somebody waits) never queue behind the roads of the lines: they have a lane of their own
+function T.an_urgent_request_has_a_lane_when_the_others_are_busy()
+  local ds, answer, running, reqs = setup()
+  ds.route(1, function() end)
+  ds.route(2, function() end)
+  ds.route(3, function() end)
+  ds.update(0.1)
+  assert(running() == 3, 'three slow roads running')
+  local got
+  ds.nearby(50.5, 16.2, function(d) got = d end, 'urgent')
+  ds.update(0.1)
+  assert(running() == 4, 'the urgent request started at once')
+  answer('/v1/nearby?lat=50.50000&lon=16.20000', '{"elements":[]}')
+  ds.update(0.1)
+  assert(got, 'and was answered')
+  -- a fourth ordinary request still waits for a free lane
+  ds.route(4, function() end)
+  ds.update(0.1)
+  assert(running() == 3, 'the road of the 4th line waits')
+  cleanup()
+end
+
 return T

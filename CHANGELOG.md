@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- **No more minutes of "laying the road" with the menu empty.** Seen in the game: the stops round you did not appear for a long time while the progress bar said "Laying the road, 11 s, 2 more in the queue". The lines that exist only in the timetables have no road in the route database, so the data service asks the routing servers for it, and when those cannot even be connected to (a firewall, a bad network) each request waited about 90 s, one after another; the card "Next trip from here" asked for the roads of every line of the nearest station at once. Now: (1) when no routing server can be connected to, the service finds it out once (one round, not two) and answers "straight lines" at once for the next 2 minutes; (2) the stops round you have a lane of their own and never queue behind roads; (3) the next-trip card loads at most 6 lines, after everything the player waits for.
+- Data service 0.12.1 (update it too).
+
 ## 0.12.0
 
 - **Choose where the trip ends.** The start card has "Trip ends at": a list of the stops after your start (the end of the line by default), and you can click a stop in the list of the line instead. The stops beyond it are dimmed and the chosen one is marked "ends here"; the trip then runs only that far: its last stop is the end for passengers, the timetable, the score and the GPS, and the ghost and the record are kept apart from the whole line. Shifts still drive whole lines.

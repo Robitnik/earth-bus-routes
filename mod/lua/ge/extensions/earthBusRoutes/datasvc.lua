@@ -10,7 +10,8 @@ M.PORT = 47630
 M.RETRY_S = 6                -- after the service did not answer, ask again this much later
 M.TOTAL_S = 120              -- the service gives a request to the public servers 90 s at most (0.10.3; it was 240)
 M.CONNECT_TRIES = 2          -- a refused connection is retried this often before the callbacks hear "service down"
-M.LANES = 3                  -- requests running at once
+M.LANES = 3                  -- requests running at once ...
+M.LANES_URGENT = 4           -- ... and one more for a request somebody waits for (the stops round you must not queue behind roads)
 
 -- Where the lines and stops come from, the player's choice (kept in a file; the menu sets it): 'auto' (the route database where it
 -- has the place, else the live map servers and timetables), 'db' (the database only: a place it lacks stays empty), 'live' (the
@@ -55,7 +56,7 @@ function M.get(path, cb, opts)
   for _, a in ipairs(actives) do
     if a.job.path == path then a.job.cbs[#a.job.cbs + 1] = cb if opts.keep then a.job.keep = true end return end
   end
-  local job = { path = path, cbs = { cb }, tries = 0, low = opts.low or false, total = opts.total, keep = opts.keep or false }
+  local job = { path = path, cbs = { cb }, tries = 0, low = opts.low or false, total = opts.total, keep = opts.keep or false, urgent = opts.urgent or false }
   if opts.urgent then
     table.insert(queue, 1, job)
     -- every lane busy: a prefetch nobody waits for gives way
@@ -286,7 +287,7 @@ function M.update(dt)
     end
   end
   if wait > 0 then wait = wait - dt return end
-  while #actives < M.LANES and #queue > 0 do startNext() end
+  while #queue > 0 and (#actives < M.LANES or (queue[1].urgent and #actives < M.LANES_URGENT)) do startNext() end
 end
 
 function M.busy() return #actives > 0 or #queue > 0 end

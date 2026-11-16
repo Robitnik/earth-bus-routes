@@ -66,7 +66,7 @@ import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.12.0"
+VERSION = "0.12.1"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -2356,11 +2356,21 @@ def fetch_osrm(pts, bases=None, getter=None, sleep=time.sleep):
         ACTIVITY.end(token)
 
 
+ROUTERS_DOWN_S = 120                 # after none of the routing servers could be reached: no new try for this long (straight lines meanwhile)
+_routers = {"down_until": 0.0}
+
+
 def _fetch_osrm(pts, bases, getter, sleep, token):
+    live = getter is None                # (the real network: a test with its own getter is left alone)
     getter = getter or get_url
+    if live and time.monotonic() < _routers["down_until"]:
+        raise RuntimeError("the routing servers could not be reached a moment ago")
     errors = []
+    unreachable = 0
     start = time.monotonic()
     for n, base in enumerate((bases or OSRM) * 2):
+        if live and n >= len(bases or OSRM) and unreachable >= len(bases or OSRM):
+            break                        # every server was tried and none could be connected to: a second round only waits longer
         if n and not still_wanted():
             raise Abandoned("nobody waits for it any more")
         if time.monotonic() - start > BUDGET_S:
@@ -2378,7 +2388,12 @@ def _fetch_osrm(pts, bases, getter, sleep, token):
             errors.append(f"{host}: {type(e).__name__} {str(e)[:60]}")
             if isinstance(e, ValueError) and "no route" in str(e):
                 break
+            if not isinstance(e, ValueError):
+                unreachable += 1
         sleep(BACKOFF_S[min(n, len(BACKOFF_S) - 1)] / 2)
+    if live and unreachable >= len(bases or OSRM):
+        _routers["down_until"] = time.monotonic() + ROUTERS_DOWN_S
+        say(f"no routing server could be reached: straight lines for {ROUTERS_DOWN_S} s")
     raise RuntimeError("; ".join(errors[-3:]) or "no routing server")
 
 

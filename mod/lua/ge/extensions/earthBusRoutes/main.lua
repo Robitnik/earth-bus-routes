@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.12.0'
+M.VERSION = '0.12.1'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -269,7 +269,7 @@ local function loadNearby(silent)
 end
 
 -- Load (or take from memory) one route relation: cb(route) or cb(nil, why)
-local function loadRoute(id, cb)
+local function loadRoute(id, cb, low)
   if S.routes[id] then cb(S.routes[id]) return end
   datasvc.route(id, function(data, info)
     if not data then cb(nil, info and info.error or 'unknown error') return end
@@ -278,7 +278,7 @@ local function loadRoute(id, cb)
     if not route then cb(nil, why) return end
     S.routes[id] = route
     cb(route)
-  end)
+  end, low)
 end
 
 -- After a route is chosen: load its sibling variants (same line) in the background to find its opposite direction
@@ -1489,6 +1489,8 @@ end
 
 -- The routes of the lines at the nearest stop are loaded (a few, cached) and the earliest departure over them is the card on top of
 -- the Stops tab. S.nextTrip = { station, ctx, cands } ; a new nearby answer starts it again.
+M.NEXT_TRIP_VARIANTS = 6
+
 function M.nextTripRefresh()
   S.nextTrip = nil
   local cell = S.cell
@@ -1497,12 +1499,15 @@ function M.nextTripRefresh()
   local lines = menu.linesModel(st.ref, cell.routes)
   local nt = { station = st.id, ctx = { busy = #lines >= 4 }, cands = {} }      -- the same context the menu's own timetable uses
   S.nextTrip = nt
-  for _, v in ipairs(quick.variants(lines)) do
+  -- the card is a convenience: its lines are loaded after everything the player waits for (lowest priority, so an urgent request
+  -- takes the lane), and only the first few, so a slow road server cannot hold the menu up
+  for i, v in ipairs(quick.variants(lines)) do
+    if i > M.NEXT_TRIP_VARIANTS then break end
     loadRoute(v.id, function(route)
       if S.nextTrip ~= nt or not route then return end
       local ok, cand = pcall(quick.candidate, route, st, nt.ctx)
       if ok and cand then nt.cands[#nt.cands + 1] = cand publish() end
-    end)
+    end, true)
   end
 end
 
