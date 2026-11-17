@@ -504,6 +504,23 @@ function M.stopBell()
   return ok
 end
 
+-- A voice clip of the stop announcer (a WAV file the data service wrote on this computer): played through the intercom channel,
+-- the one the rally co-driver speaks on (its volume is the player's "Intercom" slider). Not heard in a game session yet; a call
+-- that fails turns the voice off for the session, never the trip.
+local clipOff = false
+function M.playClip(path)
+  if clipOff then return false end
+  local ok, err = pcall(function()
+    if rawget(_G, 'FS') and FS.fileExists and not FS:fileExists(path) then error('no such file: ' .. tostring(path)) end
+    return Engine.Audio.intercomPlayPacenote({ filename = path })
+  end)
+  if not ok then
+    clipOff = true
+    log('W', TAG, 'world: the announcer is off: ' .. tostring(err))
+  end
+  return ok
+end
+
 -- ---- the clock ---------------------------------------------------------------------------------------------------
 
 local clock = { savedMode = nil, savedTime = nil, active = false, lastSet = -1 }

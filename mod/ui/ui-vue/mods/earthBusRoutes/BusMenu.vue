@@ -36,6 +36,13 @@
               <option value="live">{{ t("source.live") }}</option>
             </select>
           </label>
+          <label v-if="s && s.voice" class="lang source" :title="s.voice.supported ? t('voice.hint') : t('voice.needsService')">
+            <span class="lang-icon" aria-hidden="true">🔊</span>
+            <select :value="s.voice.on ? 'on' : 'off'" :disabled="!s.voice.supported" :aria-label="t('voice')" @change="call('uiVoice', $event.target.value)">
+              <option value="on">{{ t("voice.on") }}</option>
+              <option value="off">{{ t("voice.off") }}</option>
+            </select>
+          </label>
           <label class="lang" :title="t('lang')">
             <span class="lang-icon" aria-hidden="true">🌐</span>
             <select :value="isAuto() ? 'auto' : lang" :aria-label="t('lang')" @change="pickLang($event.target.value)">

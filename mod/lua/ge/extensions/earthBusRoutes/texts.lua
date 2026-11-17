@@ -31,6 +31,8 @@ local PACKS = {
     shiftDropped = 'The shift was dropped because of an error.',
     shiftEnded = 'Shift ended',
     shiftEndedTeleport = 'Shift ended: you were teleported',
+    voiceLoading = 'Loading the announcer voice (first time only)…',
+    voiceFailed = 'The announcer voice could not be loaded: no announcements on this trip.',
   },
   uk = {
     mkWaiting = 'чекає {n}',
@@ -54,6 +56,8 @@ local PACKS = {
     shiftDropped = 'Зміну скинуто через помилку.',
     shiftEnded = 'Зміну завершено',
     shiftEndedTeleport = 'Зміну завершено: вас телепортовано',
+    voiceLoading = 'Завантажую голос інформатора (лише вперше)…',
+    voiceFailed = 'Не вдалося завантажити голос інформатора: у цьому рейсі без оголошень.',
   },
   de = {
     mkWaiting = '{n} warten',
@@ -77,6 +81,8 @@ local PACKS = {
     shiftDropped = 'Die Schicht wurde wegen eines Fehlers verworfen.',
     shiftEnded = 'Schicht beendet',
     shiftEndedTeleport = 'Schicht beendet: Du wurdest teleportiert',
+    voiceLoading = 'Lade die Ansagestimme (nur beim ersten Mal)…',
+    voiceFailed = 'Die Ansagestimme konnte nicht geladen werden: keine Ansagen auf dieser Fahrt.',
   },
   es = {
     mkWaiting = '{n} esperan',
@@ -100,6 +106,8 @@ local PACKS = {
     shiftDropped = 'El turno se descartó por un error.',
     shiftEnded = 'Turno terminado',
     shiftEndedTeleport = 'Turno terminado: te teletransportaron',
+    voiceLoading = 'Descargando la voz del anunciador (solo la primera vez)…',
+    voiceFailed = 'No se pudo descargar la voz: sin anuncios en este viaje.',
   },
   fr = {
     mkWaiting = '{n} attendent',
@@ -123,6 +131,8 @@ local PACKS = {
     shiftDropped = 'Le service a été abandonné à cause d’une erreur.',
     shiftEnded = 'Service terminé',
     shiftEndedTeleport = 'Service terminé : vous avez été téléporté',
+    voiceLoading = 'Téléchargement de la voix des annonces (la première fois seulement)…',
+    voiceFailed = 'La voix des annonces n\'a pas pu être chargée : pas d\'annonces sur ce trajet.',
   },
   ja = {
     mkWaiting = '{n}人待ち',
@@ -146,6 +156,8 @@ local PACKS = {
     shiftDropped = 'エラーのため乗務を中止しました。',
     shiftEnded = '乗務を終了しました',
     shiftEndedTeleport = '乗務を終了しました: テレポートされました',
+    voiceLoading = 'アナウンスの音声をダウンロード中です（初回のみ）…',
+    voiceFailed = 'アナウンスの音声を読み込めませんでした。この運行ではアナウンスなしです。',
   },
   ko = {
     mkWaiting = '{n}명 대기',
@@ -169,6 +181,8 @@ local PACKS = {
     shiftDropped = '오류로 근무가 중단되었습니다.',
     shiftEnded = '근무 종료',
     shiftEndedTeleport = '근무 종료: 순간이동되었습니다',
+    voiceLoading = '안내 방송 음성을 내려받는 중입니다(처음 한 번만)…',
+    voiceFailed = '안내 방송 음성을 불러오지 못했습니다. 이번 운행에는 안내 방송이 없습니다.',
   },
   pl = {
     mkWaiting = 'czeka {n}',
@@ -192,6 +206,8 @@ local PACKS = {
     shiftDropped = 'Zmiana została porzucona z powodu błędu.',
     shiftEnded = 'Zmiana zakończona',
     shiftEndedTeleport = 'Zmiana zakończona: zostałeś przeniesiony',
+    voiceLoading = 'Pobieram głos zapowiedzi (tylko za pierwszym razem)…',
+    voiceFailed = 'Nie udało się pobrać głosu zapowiedzi: w tym kursie bez zapowiedzi.',
   },
   pt_BR = {
     mkWaiting = '{n} esperando',
@@ -215,6 +231,8 @@ local PACKS = {
     shiftDropped = 'O turno foi descartado por causa de um erro.',
     shiftEnded = 'Turno encerrado',
     shiftEndedTeleport = 'Turno encerrado: você foi teletransportado',
+    voiceLoading = 'Baixando a voz do anunciador (só na primeira vez)…',
+    voiceFailed = 'Não foi possível baixar a voz: sem anúncios nesta viagem.',
   },
   pt_PT = {
     mkWaiting = '{n} à espera',
@@ -238,6 +256,8 @@ local PACKS = {
     shiftDropped = 'O turno foi descartado devido a um erro.',
     shiftEnded = 'Turno terminado',
     shiftEndedTeleport = 'Turno terminado: foi teletransportado',
+    voiceLoading = 'A descarregar a voz do anunciador (só da primeira vez)…',
+    voiceFailed = 'Não foi possível descarregar a voz: sem anúncios nesta viagem.',
   },
   ru = {
     mkWaiting = 'ждут {n}',
@@ -261,6 +281,8 @@ local PACKS = {
     shiftDropped = 'Смена сброшена из-за ошибки.',
     shiftEnded = 'Смена завершена',
     shiftEndedTeleport = 'Смена завершена: вас телепортировали',
+    voiceLoading = 'Загружаю голос информатора (только в первый раз)…',
+    voiceFailed = 'Не удалось загрузить голос информатора: в этом рейсе без объявлений.',
   },
   zh_Hans = {
     mkWaiting = '{n} 人等候',
@@ -284,6 +306,8 @@ local PACKS = {
     shiftDropped = '由于出错，班次已放弃。',
     shiftEnded = '班次结束',
     shiftEndedTeleport = '班次结束：你被传送了',
+    voiceLoading = '正在下载报站语音（仅首次）…',
+    voiceFailed = '无法加载报站语音：本次行程不报站。',
   },
   zh_Hant = {
     mkWaiting = '{n} 人等候',
@@ -307,6 +331,8 @@ local PACKS = {
     shiftDropped = '由於發生錯誤，班次已放棄。',
     shiftEnded = '班次結束',
     shiftEndedTeleport = '班次結束：你被傳送了',
+    voiceLoading = '正在下載報站語音（僅首次）…',
+    voiceFailed = '無法載入報站語音：本次行程不報站。',
   },
 }
 M.PACKS = PACKS

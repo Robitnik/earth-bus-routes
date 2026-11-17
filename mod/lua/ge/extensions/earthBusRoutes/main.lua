@@ -7,7 +7,7 @@
 
 local M = {}
 local TAG = 'earthBusRoutes'
-M.VERSION = '0.12.1'
+M.VERSION = '0.13.0'
 -- Features of beamngEarth_api this mod needs (docs/ADDONS.md "Modding API v1").
 M.NEEDS = { 'pose', 'place', 'teleport', 'gpsRoute', 'events', 'options' }
 M.PREFETCH_MOVE_M = 250
@@ -35,6 +35,8 @@ local connections = require('earthBusRoutes/connections')
 local ghostrun = require('earthBusRoutes/ghostrun')     -- the ghost of the best trip (plan 006 D)
 local careersvc = require('earthBusRoutes/careersvc')       -- the profile, ranks, achievements, the driven-lines layer (plan 006, stage E)
 local busnetrun = require('earthBusRoutes/busnetrun')       -- the virtual bus network: moving dots on the map, a live station board (plan 007 T1)
+local voice = require('earthBusRoutes/voice')               -- the stop announcer's voice (informer.lua says when, this says it)
+local informer = require('earthBusRoutes/informer')
 local fleetrun = require('earthBusRoutes/fleetrun')         -- the physical AI buses that take trips of the net over (plan 007 T4/T5)
 
 local S = {
@@ -197,6 +199,7 @@ local function buildModel()
   model.saved = M.savedModel()
   -- where the data comes from (the choice is the player's; the service must be 0.12+) and the export of the route on screen
   model.source = { choice = datasvc.source, supported = datasvc.has('source') == true }
+  model.voice = { on = voice.on, supported = voice.supported(), state = voice.status() }
   model.export = S.sel and S.sel.export or nil
   model.canExport = datasvc.has('export') == true
   model.features = datasvc.state.features
@@ -1211,6 +1214,13 @@ function M.uiSource(code)
   loadNearby(false)
 end
 
+-- The stop announcer on or off (kept in a file)
+function M.uiVoice(on)
+  voice.setOn(on == true or on == 'on')
+  informer.enabled = voice.on
+  publish()
+end
+
 -- Export the hand-made route on screen as files for the hand-made layer of the route database (the service writes them into its
 -- export folder, with a README on how to send them in). The result (or an error code) is shown on the card: S.sel.export.
 function M.uiExport()
@@ -1440,6 +1450,8 @@ local function beginTrip(plan, rotate)
   S.result = nil
   S.trip = trip.new(plan)
   S.trip.veh = veh
+  informer.enabled = voice.on
+  pcall(voice.begin, S.trip)
   cabin.configure(S.trip, S.opts)
   pcall(ghostrun.begin, S.trip, S.opts)
   careersvc.begin()
@@ -1664,6 +1676,7 @@ local function finishTrip(t)
   S.finishedLast = lastStop and { name = lastStop.name, lat = lastStop.lat, lon = lastStop.lon, station = lastStop.station } or nil
   S.finishedStation = S.sel.station
   S.trip = nil
+  pcall(voice.stop)
   endClockAndGps()
   S.screen = 'result'
   publish()
@@ -1697,6 +1710,7 @@ function M.uiCancelTrip()
   if not S.trip then return end
   if shiftrun.onCancel() then return end                       -- cancelling a trip of a shift ends the shift
   S.trip = nil
+  pcall(voice.stop)
   endClockAndGps()
   S.screen = 'nearby'
   S.result = nil
@@ -1783,6 +1797,8 @@ local function handleEvents(t)
       gpsAhead(t)
     elseif e.name == 'bell' then
       world.stopBell()
+    elseif e.name == 'say' then
+      pcall(voice.say, e.data)
     elseif e.name == 'finished' then
       finishTrip(t)
       return true
@@ -1877,6 +1893,7 @@ function M.onUpdate(dtReal, dtSim)
   if S.armed and not S.trip and not S.starting then armedFrame(dtReal or 0) end
   shiftrun.frame(dtReal or 0, dtSim or 0)
   busnetrun.frame(dtReal or 0)
+  voice.frame(dtReal or 0)
   fleetrun.frame(dtReal or 0)
   -- a partial answer of the stops round you: asked again while the menu is open
   if S.nearbyAgain then
@@ -1914,6 +1931,7 @@ end
 function M.onExtensionLoaded()
   pcall(texts.load)
   pcall(datasvc.loadPrefs)
+  pcall(voice.load)
   refreshEarth()
   readOptions()
   datasvc.ping(function() end)            -- which features the service has (instant searches, progress)

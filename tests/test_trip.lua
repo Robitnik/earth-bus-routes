@@ -312,7 +312,7 @@ function T.a_trip_that_begins_away_from_the_first_stop_waits_for_it()
   while ((t.alightLeft or 0) > 0 or (t.boardLeft or 0) > 0) and guard < 60 do s:dwell(5) guard = guard + 1 end
   assert(t.departedStops >= 0 and (t.boarded > 0 or t.phase == 'atStop' or t.idx > 1), 'the first stop was not served')
   local ev = {}
-  for _, e in ipairs(trip.takeEvents(t)) do ev[#ev + 1] = e.name end
+  for _, e in ipairs(trip.takeEvents(t)) do if e.name ~= 'say' then ev[#ev + 1] = e.name end end     -- (the announcer's 'say' events are not the trip's)
   assert(ev[1] == 'arrived', table.concat(ev, ','))
 end
 

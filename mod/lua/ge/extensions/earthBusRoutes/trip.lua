@@ -8,6 +8,7 @@ local cabin = require('earthBusRoutes/cabin')
 local schedule = require('earthBusRoutes/schedule')
 local dispatch = require('earthBusRoutes/dispatch')
 local connections = require('earthBusRoutes/connections')
+local informer = require('earthBusRoutes/informer')
 local rules = require('earthBusRoutes/rules')
 local speedlimit = require('earthBusRoutes/speedlimit')
 local M = {}
@@ -296,6 +297,7 @@ function M.update(t, dt, s)
   end
   dispatch.step(t, dt, doorsOpen)
   connections.step(t, dt, doorsOpen)
+  informer.step(t, dt, doorsOpen)              -- the stop announcer: 'say' events
 end
 
 -- The numbers the HUD shows

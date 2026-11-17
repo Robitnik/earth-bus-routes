@@ -46,6 +46,7 @@ Run it from BeamNG.Earth's Add-ons page (a "companion"), or by hand: python bus_
 Map data (c) OpenStreetMap contributors, ODbL. Towns (c) GeoNames, CC BY 4.0. Standard library only. MIT licence.
 """
 import argparse
+import array
 import concurrent.futures
 import hashlib
 import io
@@ -53,21 +54,26 @@ import math
 import json
 import os
 import pathlib
+import platform
 import datetime
 import re
 import select
+import shutil
 import socket
+import subprocess
 import sys
+import tarfile
 import threading
 import unicodedata
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.12.1"
+VERSION = "0.13.0"
 APP = "earth-bus-routes-data"
 PORT = 47630
 UA = f"{APP}/{VERSION} (+https://github.com/Robitnik/earth-bus-routes)"   # Overpass refuses clients without one
@@ -2595,10 +2601,473 @@ def polyline_encode(points):
     return "".join(out)
 
 
+# ---- the stop announcer (informator): offline voices ---------------------------------------------------------------------
+# The mod asks for one sentence at a time ("Next stop: X") in the language of the country the bus drives in; Piper (MIT, the
+# 2023.11.14-2 engine) reads it on this computer with a voice of rhasspy/piper-voices (each voice has its own licence, see its
+# MODEL_CARD). The engine (22 MB) and one voice per language (60-110 MB) are downloaded once, when a trip first wants them, and
+# only while the mod keeps asking: a trip that ends stops the download. Nothing runs between trips (an idle engine is closed).
+
+PIPER_REL = "https://github.com/rhasspy/piper/releases/download/2023.11.14-2/"
+PIPER_ASSETS = {("win32", "amd64"): "piper_windows_amd64.zip", ("linux", "x86_64"): "piper_linux_x86_64.tar.gz",
+                ("linux", "aarch64"): "piper_linux_aarch64.tar.gz", ("darwin", "arm64"): "piper_macos_aarch64.tar.gz",
+                ("darwin", "x86_64"): "piper_macos_x64.tar.gz"}
+PIPER_MAX_BYTES = 40 * 1048576
+VOICE_MAX_BYTES = 160 * 1048576
+VOICE_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/{rev}/{path}"
+VOICE_OLD = "v1.0.0"                                       # the voices as the 2023 engine reads them
+VOICE_NEW = "4a409e3cbfd0a189930b38f127a38e107677e8ac"     # 2026-11-15: voices that exist only in the newer form (pinned: the
+                                                           # voices are retrained in place, a moving "main" would change them)
+# the language of the announcements -> (voice, revision, speaker or None). A language without a voice of its own the 2023 engine
+# can read takes the nearest one (lt: Latvian, hr: Slovenian); bg and et have only new voices (their diphthong symbols are dropped).
+VOICES = {
+    "uk": ("uk_UA-ukrainian_tts-medium", VOICE_OLD, 2),     # speakers: lada 0, mykyta 1, tetiana 2
+    "cs": ("cs_CZ-jirka-medium", VOICE_OLD, None),
+    "sk": ("sk_SK-lili-medium", VOICE_OLD, None),
+    "pl": ("pl_PL-gosia-medium", VOICE_OLD, None),
+    "de": ("de_DE-thorsten-medium", VOICE_OLD, None),
+    "de_AT": ("de_DE-thorsten-medium", VOICE_OLD, None),
+    "hu": ("hu_HU-anna-medium", VOICE_OLD, None),
+    "ro": ("ro_RO-mihai-medium", VOICE_OLD, None),
+    "fr": ("fr_FR-siwis-medium", VOICE_OLD, None),
+    "nl": ("nl_NL-pim-medium", VOICE_OLD, None),
+    "nl_BE": ("nl_BE-nathalie-medium", VOICE_OLD, None),
+    "it": ("it_IT-paola-medium", VOICE_OLD, None),
+    "es": ("es_ES-davefx-medium", VOICE_OLD, None),
+    "pt": ("pt_PT-tugão-medium", VOICE_OLD, None),
+    "sv": ("sv_SE-lisa-medium", VOICE_OLD, None),
+    "da": ("da_DK-talesyntese-medium", VOICE_OLD, None),
+    "no": ("no_NO-talesyntese-medium", VOICE_OLD, None),
+    "fi": ("fi_FI-harri-medium", VOICE_OLD, None),
+    "et": ("et_EE-news-medium", VOICE_NEW, 0),
+    "lv": ("lv_LV-aivars-medium", VOICE_OLD, None),
+    "lt": ("lv_LV-aivars-medium", VOICE_OLD, None),
+    "sl": ("sl_SI-artur-medium", VOICE_OLD, None),
+    "hr": ("sl_SI-artur-medium", VOICE_OLD, None),
+    "bg": ("bg_BG-dimitar-medium", VOICE_NEW, None),
+    "el": ("el_GR-joy-medium", VOICE_NEW, None),
+    "en_GB": ("en_GB-alba-medium", VOICE_OLD, None),
+    "en_US": ("en_US-lessac-medium", VOICE_OLD, None),
+}
+COUNTRY_LANG = {
+    "UA": "uk", "CZ": "cs", "SK": "sk", "PL": "pl", "DE": "de", "AT": "de_AT", "CH": "de", "LI": "de", "HU": "hu", "RO": "ro",
+    "MD": "ro", "FR": "fr", "MC": "fr", "LU": "fr", "NL": "nl", "IT": "it", "SM": "it", "VA": "it", "ES": "es", "AD": "es",
+    "PT": "pt", "SE": "sv", "DK": "da", "NO": "no", "FI": "fi", "EE": "et", "LV": "lv", "LT": "lt", "SI": "sl", "HR": "hr",
+    "BG": "bg", "GR": "el", "CY": "el", "IE": "en_GB", "MT": "en_GB", "GB": "en_GB", "US": "en_US",
+}
+# What the bus says, the way the country's own buses say it (docs/research/stop-announcements.md): "at" when it nears a stop,
+# "end" when it nears the terminus, "next" once the doors close, "nextEnd" when that next stop is the terminus; "...Req" for a
+# request stop where the country says so. {s} is the stop's name.
+PHRASES = {
+    "uk": {"at": "Зупинка {s}.", "atReq": "Зупинка {s}, на вимогу.", "end": "Кінцева зупинка {s}. Прохання звільнити салон.",
+           "next": "Наступна зупинка: {s}.", "nextReq": "Наступна зупинка: {s}, на вимогу.", "nextEnd": "Наступна зупинка: {s}, кінцева."},
+    "cs": {"at": "{s}.", "atReq": "{s}, na znamení.", "end": "{s}. Konečná zastávka, prosíme, vystupte.",
+           "next": "Příští zastávka: {s}.", "nextReq": "Příští zastávka: {s}, na znamení.", "nextEnd": "Příští zastávka: {s}, konečná."},
+    "sk": {"at": "{s}.", "atReq": "{s}, na znamenie.", "end": "{s}. Konečná zastávka, prosíme, vystúpte.",
+           "next": "Nasledujúca zastávka: {s}.", "nextReq": "Nasledujúca zastávka: {s}, na znamenie.",
+           "nextEnd": "Nasledujúca zastávka: {s}, konečná."},
+    "pl": {"at": "Przystanek {s}.", "atReq": "Przystanek na żądanie {s}.", "end": "Przystanek końcowy {s}. Prosimy o opuszczenie pojazdu.",
+           "next": "Następny przystanek: {s}.", "nextReq": "Następny przystanek: {s}, na żądanie.",
+           "nextEnd": "Następny przystanek: {s}. Przystanek końcowy."},
+    "de": {"at": "{s}.", "end": "{s}. Endhaltestelle. Bitte alle aussteigen.", "next": "Nächster Halt: {s}.",
+           "nextEnd": "Nächster Halt: {s}. Endhaltestelle."},
+    "de_AT": {"at": "{s}.", "end": "{s}. Endstation. Bitte alle aussteigen.", "next": "Nächste Haltestelle: {s}.",
+              "nextEnd": "Nächste Haltestelle: {s}. Endstation."},
+    "hu": {"at": "{s}.", "atReq": "{s}, feltételes megálló.", "end": "{s}, végállomás. Kérjük, szálljanak le!",
+           "next": "Következik: {s}.", "nextReq": "Következik: {s}, feltételes megálló.", "nextEnd": "Következik: {s}, végállomás."},
+    "ro": {"at": "Stația {s}.", "atReq": "Stația {s}, stație facultativă.", "end": "Stația {s}. Capăt de linie. Vă rugăm să coborâți.",
+           "next": "Următoarea stație: {s}.", "nextReq": "Următoarea stație: {s}, stație facultativă.",
+           "nextEnd": "Următoarea stație: {s}, capăt de linie."},
+    "fr": {"at": "{s}.", "end": "{s}. Terminus. Tout le monde descend.", "next": "Prochain arrêt : {s}.",
+           "nextEnd": "Prochain arrêt : {s}. Terminus."},
+    "nl": {"at": "{s}.", "end": "{s}. Eindhalte. Iedereen uitstappen, alstublieft.", "next": "Volgende halte: {s}.",
+           "nextEnd": "Volgende halte: {s}. Eindhalte."},
+    "nl_BE": {"at": "{s}.", "end": "{s}. Eindhalte. Iedereen uitstappen, alstublieft.", "next": "Volgende halte: {s}.",
+              "nextEnd": "Volgende halte: {s}. Eindhalte."},
+    "it": {"at": "{s}.", "atReq": "{s}, fermata a richiesta.", "end": "{s}. Capolinea.", "next": "Prossima fermata: {s}.",
+           "nextReq": "Prossima fermata: {s}, fermata a richiesta.", "nextEnd": "Prossima fermata: {s}. Capolinea."},
+    "es": {"at": "{s}.", "end": "{s}. Final de trayecto.", "next": "Próxima parada: {s}.", "nextEnd": "Próxima parada: {s}. Final de trayecto."},
+    "pt": {"at": "{s}.", "end": "{s}. Fim de linha.", "next": "Próxima paragem: {s}.", "nextEnd": "Próxima paragem: {s}. Fim de linha."},
+    "sv": {"at": "{s}.", "end": "{s}. Slutstation.", "next": "Nästa hållplats: {s}.", "nextEnd": "Nästa hållplats: {s}. Slutstation."},
+    "da": {"at": "{s}.", "end": "{s}. Endestation.", "next": "Næste stop: {s}.", "nextEnd": "Næste stop: {s}. Endestation."},
+    "no": {"at": "{s}.", "end": "{s}. Endeholdeplass.", "next": "Neste holdeplass: {s}.", "nextEnd": "Neste holdeplass: {s}. Endeholdeplass."},
+    "fi": {"at": "{s}.", "end": "{s}. Päätepysäkki.", "next": "Seuraava pysäkki: {s}.", "nextEnd": "Seuraava pysäkki: {s}. Päätepysäkki."},
+    "et": {"at": "{s}.", "end": "{s}. Lõpp-peatus.", "next": "Järgmine peatus: {s}.", "nextEnd": "Järgmine peatus: {s}. Lõpp-peatus."},
+    "lv": {"at": "{s}.", "end": "{s}. Galapunkts.", "next": "Nākamā pietura: {s}.", "nextEnd": "Nākamā pietura: {s}. Galapunkts."},
+    "lt": {"at": "{s}.", "end": "{s}. Galinė stotelė.", "next": "Kita stotelė: {s}.", "nextEnd": "Kita stotelė: {s}. Galinė stotelė."},
+    "sl": {"at": "{s}.", "end": "{s}. Končna postaja.", "next": "Naslednja postaja: {s}.", "nextEnd": "Naslednja postaja: {s}. Končna postaja."},
+    "hr": {"at": "{s}.", "end": "{s}. Posljednje stajalište.", "next": "Sljedeće stajalište: {s}.",
+           "nextEnd": "Sljedeće stajalište: {s}. Posljednje stajalište."},
+    "bg": {"at": "Спирка {s}.", "end": "{s}. Последна спирка.", "next": "Следваща спирка: {s}.", "nextEnd": "Следваща спирка: {s}. Последна спирка."},
+    "el": {"at": "{s}.", "end": "{s}. Τέλος διαδρομής.", "next": "Επόμενη στάση: {s}.", "nextEnd": "Επόμενη στάση: {s}. Τέλος διαδρομής."},
+    "en_GB": {"at": "{s}.", "end": "{s}. This is the last stop. All change, please.", "next": "Next stop: {s}.",
+              "nextEnd": "Next stop: {s}. This bus terminates there."},
+    "en_US": {"at": "{s}.", "end": "{s}. This is the last stop.", "next": "Next stop: {s}.", "nextEnd": "Next stop: {s}, the last stop."},
+}
+SAY_KINDS = ("at", "end", "next", "nextEnd")
+SAY_MAX_CHARS = 300
+# the short forms of stop names, read out in full (a voice reads "nám." as "nam"): [(pattern, replacement)] per language
+_UP = "A-ZÁÄČĎÉĚÍĹĽŇÓÔŔŘŠŤÚŮÝŽ"
+EXPAND = {
+    "uk": [(r"\bвул\.\s*", "вулиця "), (r"\bпл\.\s*", "площа "), (r"\b(?:просп|пр-т|пр)\.\s*", "проспект "),
+           (r"\b(?:бульв|б-р)\.\s*", "бульвар "), (r"\bпров\.\s*", "провулок "), (r"\bм-н\b\.?\s*", "мікрорайон "),
+           (r"\bАС\b", "автостанція"), (r"\bзал\.\s*вокз\.?", "залізничний вокзал"), (r"\bс\.\s+", "село "), (r"\bсмт\.?\s+", "селище ")],
+    "cs": [(r"\bnám\.\s*", "náměstí "), (r"\baut\.\s*st\.?|\bAS\b", "autobusové stanoviště"), (r"\bžel\.\s*st\.?", "železniční stanice"),
+           (r"\bžel\.\s*zast\.?", "železniční zastávka"), (r"\bhl\.\s*n\.?", "hlavní nádraží"), (r"\brozc\.\s*", "rozcestí "),
+           (r"\bsídl\.\s*", "sídliště "), (r"\bnem\.\s*", "nemocnice "), (r"\bkřiž\.\s*", "křižovatka "), (r"\bZŠ\b", "základní škola"),
+           (r"\bMŠ\b", "mateřská škola"), (r"\b(?:OÚ|ObÚ)\b", "obecní úřad"), (r"\bMěÚ\b", "městský úřad"), (r"\bhost\.\s*", "hostinec "),
+           (rf"\bn\.\s*(?=[{_UP}])", "nad "), (rf"\bp\.\s*(?=[{_UP}])", "pod "), (r"\bMet\.", "Metují"), (r"\bOrl\.", "Orlicí"),
+           (r"\bLab\.", "Labem")],
+    "sk": [(r"\bnám\.\s*", "námestie "), (r"\baut\.\s*st\.?|\bAS\b", "autobusová stanica"), (r"\bžel\.\s*st\.?", "železničná stanica"),
+           (r"\brázc\.\s*", "rázcestie "), (r"\bsídl\.\s*", "sídlisko "), (r"\bZŠ\b", "základná škola"), (r"\bOÚ\b", "obecný úrad"),
+           (rf"\bn\.\s*(?=[{_UP}])", "nad "), (rf"\bp\.\s*(?=[{_UP}])", "pod ")],
+    "pl": [(r"\bul\.\s*", ""), (r"\bpl\.\s*", "plac "), (r"\bal\.\s*", "aleja "), (r"\bos\.\s*", "osiedle "), (r"\b[Dd]w\.\s*", "Dworzec "),
+           (r"\s*\bn/ż\b", "")],
+    "de": [(r"(\w)str\.", r"\1straße"), (r"\bStr\.", "Straße"), (r"\bPl\.", "Platz"), (r"\bHbf\b\.?", "Hauptbahnhof"),
+           (r"\bBf\b\.?", "Bahnhof"), (r"\bS\+U\b", "S- und U-Bahnhof"), (r"\bAbzw\.\s*", "Abzweig "), (r"\bRi\.\s*", "Richtung ")],
+    "de_AT": [(r"(\w)str\.", r"\1straße"), (r"\bStr\.", "Straße"), (r"\bPl\.", "Platz"), (r"\bHbf\b\.?", "Hauptbahnhof"), (r"\bBf\b\.?", "Bahnhof")],
+    "hu": [(r"\bu\.", "utca"), (r"\bkrt\.", "körút"), (r"\bvá\.", "vasútállomás"), (r"\bpu\.", "pályaudvar"), (r"\baut\.\s*áll\.", "autóbusz-állomás")],
+    "ro": [(r"\bStr\.\s*", "Strada "), (r"\b(?:Bd|B-dul)\.?\s*", "Bulevardul "), (r"\bP-ța\s*|\bPța\.\s*", "Piața "), (r"\bCal\.\s*", "Calea ")],
+    "fr": [(r"\bPl\.\s*", "Place "), (r"\bAv\.\s*", "Avenue "), (r"\bBd\b\.?\s*", "Boulevard "), (r"\bSt[e]?-", lambda m: "Sainte-" if m.group(0) == "Ste-" else "Saint-")],
+    "it": [(r"\bP\.?\s?zz?a\b\.?\s*", "Piazza "), (r"\bV\.le\s*", "Viale "), (r"\bC\.so\s*", "Corso "), (r"\bV\.\s*", "Via "), (r"\bStaz\.\s*", "Stazione ")],
+    "es": [(r"\bAv(?:da)?\.\s*", "Avenida "), (r"\bC/\s*", "Calle "), (r"\bPza?\.\s*", "Plaza "), (r"\bEst\.\s*", "Estación ")],
+    "pt": [(r"\bAv\.\s*", "Avenida "), (r"\bR\.\s*", "Rua "), (r"\bPç\.\s*", "Praça "), (r"\bEst\.\s*", "Estação ")],
+}
+
+
+def speakable(name, lang):
+    """A stop's name as a voice should read it: short forms in full, no quotes or brackets, separators as pauses."""
+    s = str(name or "").strip()
+    for pat, rep in EXPAND.get(lang, ()):
+        s = re.sub(pat, rep, s)
+    s = re.sub(r"[\"«»„“”]", "", s)
+    s = re.sub(r"\s*[()\[\]]\s*", ", ", s)
+    s = re.sub(r"\s*(?:/|;|\s[-–—]\s|\|)\s*", ", ", s)
+    s = re.sub(r"\s*,\s*", ", ", s)
+    s = re.sub(r"(?:,\s*)+", ", ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip(" ,.")
+    return s
+
+
+def announce_lang(cc, lat=None, lon=None, fallback=None):
+    """The language of the announcements in a country (Belgium: Dutch in Flanders, French in Wallonia and Brussels); else the
+    game's language when there is a voice for it; else None."""
+    cc = (cc or "").upper()
+    if cc == "BE":
+        if lat is None or lon is None:
+            return "fr"
+        brussels = 50.77 <= lat <= 50.92 and 4.24 <= lon <= 4.49
+        return "nl_BE" if lat >= 50.76 and not brussels else "fr"
+    if cc in COUNTRY_LANG:
+        return COUNTRY_LANG[cc]
+    f = (fallback or "").replace("-", "_")
+    if f in PHRASES:
+        return f
+    f = {"en": "en_US", "pt_BR": "pt", "pt_PT": "pt"}.get(f, f[:2])
+    return f if f in PHRASES else None
+
+
+def announcement(lang, kind, name, request=False):
+    """The sentence the bus says (kind: one of SAY_KINDS) in the language `lang` (a key of PHRASES)."""
+    p = PHRASES[lang]
+    key = kind + "Req" if request and kind + "Req" in p else kind
+    return p[key].format(s=speakable(name, lang))
+
+
+def chime(rate, seconds=1.0):
+    """The two-tone gong the announcements begin with (16-bit mono PCM at `rate`)."""
+    n = int(rate * seconds)
+    out = array.array("h", bytes(2 * n))
+    for f, start in ((659.25, 0.0), (523.25, 0.38)):
+        s0 = int(start * rate)
+        for i in range(n - s0):
+            t = i / rate
+            env = min(1.0, t / 0.006) * math.exp(-4.2 * t)
+            v = math.sin(2 * math.pi * f * t) + 0.35 * math.sin(4 * math.pi * f * t) + 0.12 * math.sin(6 * math.pi * f * t)
+            out[s0 + i] = max(-32767, min(32767, out[s0 + i] + int(9000 * env * v)))
+    return out.tobytes()
+
+
+def wav_bytes(rate, pcm):
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def with_chime(speech_wav, gong=True):
+    """The finished clip: the gong, a breath, the speech, a short tail. Returns (wav bytes, seconds)."""
+    with wave.open(io.BytesIO(speech_wav), "rb") as w:
+        rate, width, ch = w.getframerate(), w.getsampwidth(), w.getnchannels()
+        pcm = w.readframes(w.getnframes())
+    if width != 2 or ch != 1:
+        raise ValueError("the voice gave no 16-bit mono sound")
+    head = (chime(rate) + bytes(2 * int(rate * 0.1))) if gong else b""
+    body = head + pcm + bytes(2 * int(rate * 0.25))
+    return wav_bytes(rate, body), round(len(body) / 2 / rate, 2)
+
+
+def voice_path(key):
+    """"uk_UA-ukrainian_tts-medium" -> "uk/uk_UA/ukrainian_tts/medium/uk_UA-ukrainian_tts-medium" (the folder of rhasspy/piper-voices)."""
+    code, rest = key.split("-", 1)
+    name, quality = rest.rsplit("-", 1)
+    return f"{code.split('_')[0]}/{code}/{name}/{quality}/{key}"
+
+
+def fit_config(cfg):
+    """A voice config the 2023 engine reads: the newer voices name symbols of two letters (diphthongs) it cannot load."""
+    ids = cfg.get("phoneme_id_map") or {}
+    multi = [k for k in ids if len(k) != 1]
+    if multi or "vowel_clusters" in cfg:
+        cfg = dict(cfg, phoneme_id_map={k: v for k, v in ids.items() if len(k) == 1})
+        cfg.pop("vowel_clusters", None)
+    return cfg
+
+
+class VoiceNotReady(RuntimeError):
+    pass
+
+
+class PiperProc:
+    """One running engine with one voice loaded: a sentence in (a JSON line), the path of its WAV out."""
+
+    def __init__(self, exe, model, clock=time.monotonic):
+        flags = 0x08000000 if sys.platform == "win32" else 0        # CREATE_NO_WINDOW: no console pops up over the game
+        self.p = subprocess.Popen([str(exe), "--model", str(model), "--json-input"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL, cwd=str(pathlib.Path(exe).parent), creationflags=flags,
+                                  text=True, encoding="utf-8")
+        self.lock = threading.Lock()
+        self.clock = clock
+        self.used = clock()
+
+    def speak(self, text, out, speaker=None, timeout=30):
+        with self.lock:
+            self.used = self.clock()
+            msg = {"text": text, "output_file": str(out)}
+            if speaker is not None:
+                msg["speaker_id"] = speaker
+            killer = threading.Timer(timeout, self.close)
+            killer.start()
+            try:
+                self.p.stdin.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                self.p.stdin.flush()
+                line = self.p.stdout.readline().strip()
+            finally:
+                killer.cancel()
+            self.used = self.clock()
+            if not line:
+                raise RuntimeError("the voice engine stopped")
+            return pathlib.Path(line)
+
+    def alive(self):
+        return self.p.poll() is None
+
+    def close(self):
+        try:
+            self.p.kill()
+        except OSError:
+            pass
+
+
+class Announcer:
+    """The voices of this computer (folder voice/: engine/, models/, clips/). prepare(lang) gets what a language needs (in a thread
+    of its own, while the mod keeps asking: a lease of LEASE_S); speak(lang, text) gives the finished clip."""
+    LEASE_S = 90
+    IDLE_S = 120
+    CLIPS_MAX_BYTES = 200 * 1048576
+
+    def __init__(self, directory=None, fetch=download_file, clock=time.monotonic, engine=None):
+        self.dir = pathlib.Path(directory) if directory else None
+        self.fetch, self.clock = fetch, clock
+        self.engine = engine          # tests: engine(model_path, text, speaker) -> WAV bytes, instead of the Piper program
+        self._lock = threading.Lock()
+        self._jobs = {}               # voice -> {"state": "downloading" | "failed", "got", "total", "error"}
+        self._until = {}              # voice -> clock: somebody still wants it
+        self._procs = {}
+        self._reaper = None
+        self._writes = 0
+
+    # where things are
+    def _asset(self):
+        return PIPER_ASSETS.get((sys.platform, platform.machine().lower()))
+
+    def _exe(self):
+        return self.dir / "engine" / "piper" / ("piper.exe" if sys.platform == "win32" else "piper")
+
+    def _model(self, key):
+        return self.dir / "models" / (key + ".onnx")
+
+    def _ready(self, key):
+        if self.dir is None:
+            return False
+        m = self._model(key)
+        return m.exists() and m.with_suffix(".onnx.json").exists() and (self.engine is not None or self._exe().exists())
+
+    def status(self, lang):
+        if not lang or lang not in VOICES:
+            return {"lang": lang, "state": "none"}
+        key, _, _ = VOICES[lang]
+        out = {"lang": lang, "voice": key}
+        if self.dir is None or (self.engine is None and not self._asset()):
+            return dict(out, state="unsupported")
+        if self._ready(key):
+            return dict(out, state="ready")
+        with self._lock:
+            job = dict(self._jobs.get(key) or {"state": "missing"})
+        return dict(out, **job)
+
+    def prepare(self, lang):
+        """The status of a language's voice; a missing one starts downloading (a failed one is tried again after a minute)."""
+        st = self.status(lang)
+        if st["state"] in ("none", "unsupported", "ready"):
+            return st
+        key = st["voice"]
+        with self._lock:
+            self._until[key] = self.clock() + self.LEASE_S
+            job = self._jobs.get(key)
+            busy = job and (job["state"] == "downloading" or (job["state"] == "failed" and self.clock() - job["at"] < 60))
+            if not busy:
+                self._jobs[key] = {"state": "downloading", "got": 0, "total": 0, "at": self.clock()}
+        if not busy:
+            threading.Thread(target=self._download, args=(lang,), daemon=True).start()
+        return self.status(lang)
+
+    def _download(self, lang):
+        key, rev, _ = VOICES[lang]
+
+        def progress(done, total, base=0):
+            with self._lock:
+                job = self._jobs.get(key)
+                if job:
+                    job["got"], job["total"] = base + done, max(job["total"], base + total)
+                if self.clock() > self._until.get(key, 0):
+                    raise Abandoned("nobody waits for the voice")
+
+        try:
+            (self.dir / "models").mkdir(parents=True, exist_ok=True)
+            base = 0
+            if self.engine is None and not self._exe().exists():
+                asset = self._asset()
+                arc = self.dir / asset
+                say(f"voice: downloading the engine {asset}")
+                self.fetch(PIPER_REL + asset, arc, PIPER_MAX_BYTES, progress)
+                base = arc.stat().st_size
+                tmp = self.dir / "engine.tmp"
+                shutil.rmtree(tmp, ignore_errors=True)
+                if asset.endswith(".zip"):
+                    with zipfile.ZipFile(arc) as z:
+                        z.extractall(tmp)
+                else:
+                    with tarfile.open(arc) as t:
+                        t.extractall(tmp, filter="data")
+                shutil.rmtree(self.dir / "engine", ignore_errors=True)
+                os.replace(tmp, self.dir / "engine")
+                arc.unlink()
+                if sys.platform != "win32":
+                    self._exe().chmod(0o755)
+            path = urllib.parse.quote(voice_path(key))
+            cfg_dest = self._model(key).with_suffix(".onnx.json")
+            say(f"voice: downloading {key}")
+            self.fetch(VOICE_URL.format(rev=rev, path=path + ".onnx.json"), cfg_dest, 1048576)
+            cfg = fit_config(json.loads(cfg_dest.read_text(encoding="utf-8")))
+            cfg_dest.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+            model = self._model(key)
+            part = model.with_suffix(".dl")
+            self.fetch(VOICE_URL.format(rev=rev, path=path + ".onnx"), part, VOICE_MAX_BYTES,
+                       lambda d, t: progress(d, t, base))
+            os.replace(part, model)
+            with self._lock:
+                self._jobs.pop(key, None)
+            say(f"voice: {key} ready")
+        except Exception as e:  # noqa: BLE001 - whatever failed, the trip goes on without a voice
+            for p in (self.dir / "models").glob(key + ".*"):
+                if p.suffix in (".dl", ".part") or not self._model(key).exists():
+                    p.unlink(missing_ok=True)
+            for p in self.dir.glob("piper_*"):                       # a half-downloaded engine
+                p.unlink(missing_ok=True)
+            shutil.rmtree(self.dir / "engine.tmp", ignore_errors=True)
+            with self._lock:
+                self._jobs[key] = {"state": "failed", "error": str(e)[:120], "at": self.clock()}
+            say(f"voice: {key} failed: {e!r}")
+
+    def speak(self, lang, text, gong=True):
+        """(wav bytes, seconds, clip id) of a sentence; VoiceNotReady when the language's voice is not on this computer."""
+        st = self.status(lang)
+        if st["state"] != "ready":
+            raise VoiceNotReady(st["state"])
+        key, _, speaker = VOICES[lang]
+        text = str(text)[:SAY_MAX_CHARS]
+        cid = hashlib.sha1(f"{key}|{speaker}|{int(gong)}|{text}".encode("utf-8")).hexdigest()[:16]
+        clips = self.dir / "clips"
+        clip = clips / (cid + ".wav")
+        if clip.exists():
+            data = clip.read_bytes()
+            with wave.open(io.BytesIO(data), "rb") as w:
+                return data, round(w.getnframes() / w.getframerate(), 2), cid
+        clips.mkdir(parents=True, exist_ok=True)
+        if self.engine is not None:
+            speech = self.engine(self._model(key), text, speaker)
+        else:
+            raw = clips / (cid + ".raw.wav")
+            self._proc(key).speak(text, raw.resolve(), speaker)
+            speech = raw.read_bytes()
+            raw.unlink(missing_ok=True)
+        data, secs = with_chime(speech, gong)
+        clip.write_bytes(data)
+        self._writes += 1
+        if self._writes % 50 == 1:
+            self._trim(clips)
+        return data, secs, cid
+
+    def clip_path(self, cid):
+        return (self.dir / "clips" / (cid + ".wav")).resolve()
+
+    def _proc(self, key):
+        with self._lock:
+            p = self._procs.get(key)
+            if p is None or not p.alive():
+                p = PiperProc(self._exe(), self._model(key), self.clock)
+                self._procs[key] = p
+            if self._reaper is None:
+                self._reaper = threading.Thread(target=self._reap, daemon=True)
+                self._reaper.start()
+            return p
+
+    def _reap(self):
+        """Closes an engine nobody spoke through for IDLE_S; ends when none is left."""
+        while True:
+            time.sleep(5)
+            with self._lock:
+                for k, p in list(self._procs.items()):
+                    if not p.alive() or self.clock() - p.used > self.IDLE_S:
+                        p.close()
+                        del self._procs[k]
+                if not self._procs:
+                    self._reaper = None
+                    return
+
+    def close(self):
+        with self._lock:
+            for p in self._procs.values():
+                p.close()
+            self._procs.clear()
+
+    def _trim(self, clips):
+        files = sorted(clips.glob("*.wav"), key=lambda p: p.stat().st_mtime)
+        total = sum(p.stat().st_size for p in files)
+        while files and total > self.CLIPS_MAX_BYTES:
+            p = files.pop(0)
+            total -= p.stat().st_size
+            p.unlink(missing_ok=True)
+
+
 class Service:
     def __init__(self, cache, upstream=fetch_upstream, ttl=TTL_S, router=fetch_osrm, geocoder=geo_search, places=None, gtfs=None,
-                 db=None, live=False):
+                 db=None, live=False, voice=None):
         self.cache, self.upstream, self.ttl, self.router, self.geocoder = cache, upstream, ttl, router, geocoder
+        self.voice = voice or Announcer(None)       # the stop announcer's voices (none without a folder)
         self.db = db or RouteDb([])
         self.live = live                     # True: ignore the route database (fresh data from the map servers and timetables)
         self.places = places or Gazetteer(None)
@@ -3078,7 +3547,8 @@ DEPOT_RADIUS_M = 10000
 DEPOT_CELL_DEG = 0.05
 FEATURES.extend(["shift", "depot"])
 FEATURES.append("routecached")
-FEATURES.extend(["source", "export"])        # ?src=auto|db|live on nearby and route (0.12); POST /v1/export (0.12)
+FEATURES.extend(["source", "export"])
+FEATURES.append("voice")          # /v1/voice (the voice of a country, downloaded while asked), /v1/say (a WAV): the stop announcer (0.13)        # ?src=auto|db|live on nearby and route (0.12); POST /v1/export (0.12)
 FEATURES.append("nearbycached")    # /v1/nearby?..&cached=1: from this computer only (0.10.3)      # /v1/route?id=..&cached=1: from this computer only (0.10.1)
 
 
@@ -3326,6 +3796,44 @@ def make_handler(service, port):
                         return self.fail(400, "lat / lon out of range")
                     text, cached = find_depot(service, lat, lon)
                     return self.send_json(200, b'{"ok":true,"cached":' + (b"true" if cached else b"false") + b',"data":' + text.encode("utf-8") + b"}")
+                if u.path in ("/v1/voice", "/v1/say"):
+                    lat = float(q["lat"][0]) if q.get("lat") else None
+                    lon = float(q["lon"][0]) if q.get("lon") else None
+                    lang = q.get("lang", [""])[0]
+                    if lang not in VOICES:
+                        cc = q.get("cc", [""])[0]
+                        if not cc and lat is not None and lon is not None and service.places.base:
+                            near = service.places.countries_near(lat, lon)
+                            cc = near[0] if near else ""
+                        lang = announce_lang(cc, lat, lon, q.get("ui", [""])[0])
+                    if u.path == "/v1/voice":
+                        return self.send_json(200, json.dumps({"ok": True, "data": service.voice.prepare(lang)}))
+                    if q.get("text"):
+                        text = q["text"][0]
+                    else:
+                        kind = q.get("kind", [""])[0]
+                        if kind not in SAY_KINDS or not q.get("name") or not lang:
+                            return self.fail(400, "kind / name / lang")
+                        text = announcement(lang, kind, q["name"][0], q.get("req", ["0"])[0] == "1")
+                    try:
+                        data, secs, cid = service.voice.speak(lang, text, q.get("gong", ["1"])[0] != "0")
+                    except VoiceNotReady as e:
+                        return self.fail(409, f"voice {e}")
+                    if q.get("file", ["0"])[0] == "1":      # the game and the service share this computer: the clip's path is enough
+                        return self.send_json(200, json.dumps({"ok": True, "data": {
+                            "path": str(service.voice.clip_path(cid)), "seconds": secs, "clip": cid, "lang": lang, "text": text}}, ensure_ascii=False))
+                    self.send_response(200)
+                    self.send_header("Content-Type", "audio/wav")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("X-Seconds", str(secs))
+                    self.send_header("X-Clip", cid)
+                    self.send_header("X-Lang", lang)
+                    self.send_header("X-Text", urllib.parse.quote(text))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return None
                 if u.path == "/v1/progress":
                     return self.send_json(200, json.dumps({"ok": True, "data": ACTIVITY.snapshot()}))
                 if u.path == "/v1/status":
@@ -3466,7 +3974,8 @@ def serve(port=PORT, cache_dir=None, service=None):
         base = pathlib.Path(cache.dir).parent
         no_gtfs = os.environ.get("BNE_BUSDATA_GTFS") == "0"
         service = Service(cache, places=Gazetteer(base / "places"), gtfs=Gtfs(None if no_gtfs else base / "timetables"),
-                          db=RouteDb(db_repos_from_env(base)), live=os.environ.get("BNE_BUSDATA_LIVE") == "1")
+                          db=RouteDb(db_repos_from_env(base)), live=os.environ.get("BNE_BUSDATA_LIVE") == "1",
+                          voice=Announcer(None if os.environ.get("BNE_BUSDATA_VOICE") == "0" else base / "voice"))
     httpd = QuietServer(("127.0.0.1", port), make_handler(service, port))
     httpd.daemon_threads = True
     say(f"{APP} {VERSION} listening on 127.0.0.1:{port}, cache {service.cache.dir}")
