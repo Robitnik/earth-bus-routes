@@ -467,6 +467,133 @@ class RoutersDown(unittest.TestCase):
             d._routers["down_until"] = 0.0
 
 
+class DbFirst(unittest.TestCase):
+    """0.12.1: where the database has the place, the lines by number, the stations of a town, the stops along a built route, the
+    map's stops and the stop names come from it. Before, each asked Overpass, which answered 502 or not at all for 90 s."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        make_db(pathlib.Path(self.tmp.name) / "db")
+        self.calls = []
+
+        def upstream(query):
+            self.calls.append(query)
+            raise RuntimeError("the map servers must not be asked")
+
+        road = {"points": [[50.0, 16.0], [50.006, 16.006]], "legs": [{"dist": 800, "dur": 90}], "dist": 800, "dur": 90, "source": "osrm"}
+        self.db = d.RouteDb([d.DbRepo([str(pathlib.Path(self.tmp.name) / "db")])])
+        self.svc = d.Service(d.Cache(pathlib.Path(self.tmp.name) / "cache"), upstream=upstream, db=self.db,
+                             router=lambda pts: json.dumps(road), geocoder=lambda q, lat, lon: {"elements": [], "places": []})
+        self.svc.upstream_once = upstream
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_lines_by_number_round_the_player(self):
+        data = json.loads(self.db.lines_numbered("7", LAT, LON))
+        self.assertEqual([(e["id"], e["tags"]["ref"], e["tags"]["type"]) for e in data["elements"]], [(7, "7", "route")])
+        self.assertEqual([e["id"] for e in json.loads(self.db.lines_numbered("8", LAT, LON))["elements"]], [3000000000008])
+        self.assertEqual(json.loads(self.db.lines_numbered("99", LAT, LON))["elements"], [], "the place is known: no line, no Overpass")
+        self.assertIsNone(self.db.lines_numbered("7", 55.0, 16.0), "a place the database lacks: the old way")
+        text, _ = self.svc.lines("7", LAT, LON)
+        self.assertEqual(json.loads(text)["source"], "routedb")
+        text, _ = self.svc.lines("7", LAT, LON, local=True)
+        self.assertEqual(json.loads(text)["source"], "routedb", "the instant search too (only the tiles on this computer)")
+        self.assertEqual(self.calls, [])
+
+    def test_the_stations_of_a_town_and_its_busiest_stops(self):
+        ids = [e["id"] for e in json.loads(self.db.stations(LAT, LON))["elements"]]
+        self.assertEqual(ids, [3], "the bus station; no stop has 3 lines")
+        old = d.DB_HUB_LINES
+        d.DB_HUB_LINES = 2
+        try:
+            data = json.loads(self.db.stations(LAT, LON))
+        finally:
+            d.DB_HUB_LINES = old
+        self.assertEqual(sorted(e["id"] for e in data["elements"]), [1, 2, 3], "a stop two lines call at is a hub then")
+        self.assertEqual(next(e for e in data["elements"] if e["id"] == 3)["tags"]["amenity"], "bus_station")
+        self.assertIsNone(self.db.stations(55.0, 16.0))
+        self.svc.stations(LAT, LON)
+        self.assertEqual(self.calls, [])
+
+    def test_the_stops_along_a_built_route(self):
+        data = json.loads(self.db.along([(50.0, 16.0), (50.006, 16.006)]))
+        self.assertEqual(sorted(e["id"] for e in data["elements"]), [1, 2, 3, 5], "on the road (Twin 15 m off it); Delta far away")
+        self.assertIsNone(self.db.along([(55.0, 16.0), (55.01, 16.01)]))
+        text, cached = self.svc.along([(50.0, 16.0), (50.006, 16.006)])
+        self.assertEqual(json.loads(text)["source"], "routedb")
+        self.assertEqual(self.calls, [], "no Overpass for the stops along the road")
+
+    def test_the_map_has_the_stations_and_the_stops_lines_call_at(self):
+        places = {p[0]: (p[3], p[4]) for p in self.db.map_places(LAT, LON, 3000)}
+        self.assertEqual(places["Bus station"], (set(), "station"))
+        self.assertEqual(places["Alpha"], ({"7", "8"}, "stop"))
+        self.assertNotIn("Twin", places, "no line calls there")
+        out = self.svc.map_stops(LAT, LON, 3000)
+        self.assertEqual(out["stops"][0]["name"], "Bus station")
+        self.assertTrue(out["timetables"])
+
+    def test_stop_names_are_found_in_the_tiles_on_this_computer(self):
+        self.assertEqual([e["id"] for e in self.db.named("alph", LAT, LON)], [1])
+        self.assertEqual(self.db.named("a", LAT, LON), [], "too short")
+        found = self.svc.local_search("beta", LAT, LON)
+        self.assertIn(2, [e.get("id") for e in found["elements"]])
+
+    def test_a_name_nobody_knows_in_a_known_place_does_not_go_to_overpass(self):
+        text, _ = self.svc.search("zzqx nothing", LAT, LON)
+        self.assertEqual(json.loads(text)["elements"], [])
+        self.assertEqual(self.calls, [])
+
+    def test_no_timetables_are_downloaded_where_the_database_answers(self):
+        class G:
+            enabled = True
+
+            def want(self, ccs):
+                raise AssertionError("no timetables to download here")
+        self.svc.gtfs = G()
+        self.assertTrue(self.svc.db_covers(LAT, LON))
+        self.svc.want_timetables(LAT, LON)
+        self.assertFalse(self.svc.db_covers(LAT, LON, "live"))
+
+    def test_the_source_choice_reaches_them(self):
+        with self.assertRaises(RuntimeError):
+            self.svc.lines("7", LAT, LON, src="live")                       # (the old way: the map servers)
+        self.assertTrue(self.calls)
+        self.assertEqual(json.loads(self.svc.stations(55.0, 16.0, src="db")[0])["elements"], [])
+
+    def test_tiles_of_a_cold_place_are_read_together(self):
+        keys = self.db._tiles(LAT - 0.01, LON - 0.01, LAT + 0.01, LON + 0.15)
+        got = self.db.load(keys)
+        self.assertEqual(sorted(got), sorted(keys))
+        self.assertEqual(len(keys), 2)
+
+
+class SpeedLimitsFast(unittest.TestCase):
+    def test_the_grid_gives_the_towns_of_the_brute_force(self):
+        import random
+        rnd = random.Random(7)
+        places = [(i, "", 50 + rnd.uniform(-0.3, 0.3), 14 + rnd.uniform(-0.4, 0.4), "", rnd.choice([50, 800, 5000, 40000, 200000]),
+                   rnd.choice(["CZ", "DE"])) for i in range(3000)]
+        road = [(50 + 0.002 * k + rnd.uniform(-0.001, 0.001), 14 + 0.003 * k) for k in range(-80, 80)]
+
+        def in_box(box):
+            return [p for p in places if box[0] <= p[2] <= box[2] and box[1] <= p[3] <= box[3]]
+
+        samples = d.road_samples(road)
+        lats, lons = [p[0] for p in samples], [p[1] for p in samples]
+        towns, nearest = [], None
+        for p in in_box((min(lats) - 0.06, min(lons) - 0.06, max(lats) + 0.06, max(lons) + 0.06)):
+            best = min(d._dist_m(p[2], p[3], la, lo) for la, lo in samples)
+            if nearest is None or best < nearest[0]:
+                nearest = (best, p[6])
+            if best <= d.town_radius(p[5]):
+                towns.append([round(p[2], 5), round(p[3], 5), d.town_radius(p[5])])
+        got = d.road_limits(in_box, road)
+        self.assertEqual(got["towns"], towns)
+        self.assertEqual(got["cc"], nearest[1])
+        self.assertGreater(len(towns), 50)
+
+
 class EnvConfig(unittest.TestCase):
     def test_off_default_and_custom(self):
         self.assertEqual(d.db_repos_from_env("x", {"BNE_BUSDATA_DB": "0"}), [])

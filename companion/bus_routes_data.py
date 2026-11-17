@@ -46,6 +46,7 @@ Run it from BeamNG.Earth's Add-ons page (a "companion"), or by hand: python bus_
 Map data (c) OpenStreetMap contributors, ODbL. Towns (c) GeoNames, CC BY 4.0. Standard library only. MIT licence.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import io
 import math
@@ -1096,9 +1097,26 @@ def road_limits(places, road):
     lats, lons = [p[0] for p in samples], [p[1] for p in samples]
     margin = 0.06                                         # degrees: a bit over the biggest radius
     box = (min(lats) - margin, min(lons) - margin, max(lats) + margin, max(lons) + margin)
+    # the road's points on a grid of cells as big as the biggest town radius: a town looks only at the 3 x 3 cells round it
+    # (a city line: 12 000 places x 2 600 points were 32 million distances, 7 s for each opening of a Berlin line)
+    kx = math.cos(math.radians(samples[0][0])) * 111320
+    cell = float(TOWN_RADIUS_MAX_M)
+    grid = {}
+    for la, lo in samples:
+        grid.setdefault((int(la * 110574 // cell), int(lo * kx // cell)), []).append((la, lo))
+    probe = samples[::max(1, len(samples) // 16)] + samples[-1:]      # (the country: the nearest town also when it is farther)
     towns, nearest = [], None
     for p in places(box):
-        best = min(_dist_m(p[2], p[3], la, lo) for la, lo in samples)
+        cy, cx = int(p[2] * 110574 // cell), int(p[3] * kx // cell)
+        best = float("inf")
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for la, lo in grid.get((cy + dy, cx + dx), ()):
+                    d = _dist_m(p[2], p[3], la, lo)
+                    if d < best:
+                        best = d
+        if best > cell:
+            best = min(_dist_m(p[2], p[3], la, lo) for la, lo in probe)
         if nearest is None or best < nearest[0]:
             nearest = (best, p[6])
         if best <= town_radius(p[5]):
@@ -1859,7 +1877,14 @@ DB_MAX_BYTES = 8 * 1024 * 1024
 DB_MANIFEST_TTL_S = 86400                 # the database is rebuilt monthly: a day is plenty
 DB_MANIFEST_RETRY_S = 600                 # after a failure (offline, repo not there) it is left alone this long
 DB_FILE_TTL_S = 14 * 86400
-DB_TILES_IN_MEMORY = 48
+DB_TILES_IN_MEMORY = 400                  # (a tile is ~10 KB of JSON: a 25 km map of tiles fits)
+DB_FETCH_THREADS = 16                     # the tiles of a cold place are fetched this many at a time
+DB_LINES_M = (12000, 30000)               # a line number is looked for this far round the player (the second only when the first finds none)
+DB_STATIONS_M = 7000                      # the stations of a town: the menu shows those within 6 km of its centre
+DB_HUB_LINES = 3                          # ... and the stops with at least this many lines (a village has no bus station)
+DB_HUBS_MAX = 60
+DB_NAME_M = 15000                         # a stop name typed in the search: the tiles this near that are already on this computer
+DB_ALONG_CELL_DEG = 0.005                 # the grid that finds the bits of the road near a stop
 DB_TWIN_M = 30                            # a stop this near the road, not listed by the line, is on the road (the other side)
 DB_TWIN_TILES = 6                         # ... looked for when the line spans no more tiles than this
 DB_WAY_ID = 7 * 10 ** 12                  # ids of the made-up ways of an answer made from a database line (only used as keys)
@@ -2077,6 +2102,154 @@ class RouteDb:
                 self._where[r["id"]] = (i, cc)
         return t
 
+    def load(self, keys, online=True):
+        """{key: tile} of the tiles of `keys` that exist; the ones not in memory are read at once in parallel (a cold place: one
+        round trip to the net, not one per tile)."""
+        out, todo = {}, []
+        with self._lock:
+            for k in keys:
+                t = self._mem.get(k)
+                if t is None:
+                    todo.append(k)
+                else:
+                    out[k] = t
+        if len(todo) == 1:
+            t = self.tile(todo[0], online)
+            if t is not None:
+                out[todo[0]] = t
+        elif todo:
+            with concurrent.futures.ThreadPoolExecutor(min(DB_FETCH_THREADS, len(todo))) as ex:
+                for k, t in zip(todo, ex.map(lambda k: self.tile(k, online), todo)):
+                    if t is not None:
+                        out[k] = t
+        return out
+
+    @staticmethod
+    def box(lat, lon, radius):
+        """(lat0, lon0, lat1, lon1) of a square round a point."""
+        dlat = radius / 110574 + 0.0005
+        dlon = radius / (111320 * max(0.2, math.cos(math.radians(lat)))) + 0.0005
+        return lat - dlat, lon - dlon, lat + dlat, lon + dlon
+
+    def node(self, st):
+        return {"type": "node", "id": st["id"], "lat": st["lat"], "lon": st["lon"], "tags": self.stop_tags(st)}
+
+    def lines_numbered(self, ref, lat, lon, online=True):
+        """The text of the lines with this number round a point (the relations' tags: the search lists them, opening one asks for
+        its route), or None when the database does not know the place. Nearer first: a second, wider look only when the first
+        finds none."""
+        want = fold(str(ref))
+        found = {}
+        for radius in DB_LINES_M:
+            keys = self._tiles(*self.box(lat, lon, radius), online)
+            if not keys:
+                return None
+            for t in self.load(keys, online).values():
+                for r in t["routes"]:
+                    if r["id"] not in found and fold(str(r["t"].get("ref") or "")) == want:
+                        tags = dict(r["t"])
+                        tags["type"] = "route"
+                        tags.setdefault("route", "bus")
+                        found[r["id"]] = {"type": "relation", "id": r["id"], "tags": tags, "members": [], "n": r["n"]}
+            if found:
+                break
+        return json.dumps({"elements": [found[k] for k in sorted(found)], "source": "routedb"}, separators=(",", ":"),
+                          ensure_ascii=False)
+
+    def stations(self, lat, lon, radius=DB_STATIONS_M, online=True):
+        """The text of the bus stations round a point, and the stops most lines call at (a town without a bus station still
+        has a main stop), or None when the database does not know the place."""
+        keys = self._tiles(*self.box(lat, lon, radius), online)
+        if not keys:
+            return None
+        tiles = self.load(keys, online).values()
+        calls = {}
+        for t in tiles:
+            for r in t["routes"]:
+                for item in r["s"]:
+                    calls[item[0]] = calls.get(item[0], 0) + 1
+        stations, hubs = [], []
+        for t in tiles:
+            for st in t["stops"]:
+                if not st.get("n") or not _near(lat, lon, st["lat"], st["lon"], radius):
+                    continue
+                if st.get("k") == "s":
+                    stations.append(st)
+                elif calls.get(st["id"], 0) >= DB_HUB_LINES:
+                    hubs.append(st)
+        hubs.sort(key=lambda st: -calls[st["id"]])
+        elements = [self.node(st) for st in stations + hubs[:DB_HUBS_MAX]]
+        return json.dumps({"elements": elements, "source": "routedb"}, separators=(",", ":"), ensure_ascii=False)
+
+    def along(self, road, radius=ALONG_M, online=True):
+        """The text of the stops on a road [(lat, lon), ...] (within `radius` metres of it; a bus station within ALONG_STATION_M),
+        or None when the database does not know the places of the road."""
+        path = simplify([tuple(p) for p in road], 3)
+        if len(path) < 2:
+            return None
+        g, m = DB_ALONG_CELL_DEG, 0.0015                    # (the margin covers ALONG_STATION_M)
+        cells, keys = {}, set()
+        for i, ((la, lo), (lb, lob)) in enumerate(zip(path, path[1:])):
+            y0, y1 = min(la, lb) - m, max(la, lb) + m
+            x0, x1 = min(lo, lob) - m, max(lo, lob) + m
+            keys.update(self._tiles(y0, x0, y1, x1, online))
+            for y in range(int(math.floor(y0 / g)), int(math.floor(y1 / g)) + 1):
+                for x in range(int(math.floor(x0 / g)), int(math.floor(x1 / g)) + 1):
+                    cells.setdefault((y, x), []).append(i)
+        if not keys:
+            return None
+        out = []
+        for t in self.load(sorted(keys), online).values():
+            for st in t["stops"]:
+                segs = cells.get((int(math.floor(st["lat"] / g)), int(math.floor(st["lon"] / g))))
+                if not segs:
+                    continue
+                limit = ALONG_STATION_M if st.get("k") == "s" else radius
+                if min(dist_to_path(st["lat"], st["lon"], path[i:i + 2]) for i in segs) <= limit:
+                    out.append(self.node(st))
+        return json.dumps({"elements": out, "source": "routedb"}, separators=(",", ":"), ensure_ascii=False)
+
+    def map_places(self, lat, lon, radius, online=True):
+        """[[name, lat, lon, {line numbers}, kind]] of the bus stations and of the stops lines call at round a point, for the
+        map; None when the database does not know the place."""
+        keys = self._tiles(*self.box(lat, lon, radius), online)
+        if not keys:
+            return None
+        tiles = self.load(keys, online).values()
+        refs = {}
+        for t in tiles:
+            for r in t["routes"]:
+                ref = str(r["t"].get("ref") or "")
+                if ref:
+                    for item in r["s"]:
+                        refs.setdefault(item[0], set()).add(ref)
+        out = []
+        for t in tiles:
+            for st in t["stops"]:
+                if not st.get("n") or not _near(lat, lon, st["lat"], st["lon"], radius):
+                    continue
+                kind = "station" if st.get("k") == "s" else "stop"
+                r = refs.get(st["id"])
+                if kind == "stop" and not r:
+                    continue                                # a stop no line of the database calls at
+                out.append([st["n"], st["lat"], st["lon"], set(r or ()), kind])
+        return out
+
+    def named(self, text, lat, lon, radius=DB_NAME_M, limit=40):
+        """Stops whose name has `text` in it, round a point, from the tiles already on this computer (no request: the search
+        answers in milliseconds), nearest first."""
+        want = fold(text).strip()
+        if len(want) < 2:
+            return []
+        keys = self._tiles(*self.box(lat, lon, radius), online=False)
+        hits = {}
+        for t in self.load(keys, online=False).values():
+            for st in t["stops"]:
+                if st.get("n") and want in fold(st["n"]) and _near(lat, lon, st["lat"], st["lon"], radius):
+                    hits[st["id"]] = st
+        best = sorted(hits.values(), key=lambda st: _dist_m(lat, lon, st["lat"], st["lon"]))[:limit]
+        return [self.node(st) for st in best]
+
     @staticmethod
     def stop_tags(st):
         tags = {"name": st["n"]} if st.get("n") else {}
@@ -2105,8 +2278,9 @@ class RouteDb:
             return None
         self.last = (lat, lon)
         nodes, rels = {}, {}
+        tiles = self.load(keys, online)
         for key in keys:
-            t = self.tile(key, online)
+            t = tiles.get(key)
             if t is None:
                 return None
             for st in t["stops"]:
@@ -2449,8 +2623,9 @@ class Service:
         return self.get(geo_key(q, lat, lon), (q, lat, lon), upstream=ask)
 
     def want_timetables(self, lat, lon):
-        """Start fetching the timetables of the countries round a point (once; in the background)."""
-        if not self.gtfs.enabled:
+        """Start fetching the timetables of the countries round a point (once; in the background). Not where the route
+        database answers: its lines have the timetables' times already."""
+        if not self.gtfs.enabled or self.db_covers(lat, lon):
             return
         if self.places.base:
             self.gtfs.want(self.places.countries_near(lat, lon))
@@ -2462,6 +2637,10 @@ class Service:
         self.places.want(lat, lon)
         self.want_timetables(lat, lon)
         elements = self.index.search(q, lat, lon)
+        if self.uses_db():
+            for e in self.db.named(q, lat, lon):
+                if not any(_dist_m(e["lat"], e["lon"], x["lat"], x["lon"]) < 60 for x in elements if x.get("lat") is not None):
+                    elements.append(e)
         if self.gtfs.ready():
             for row in self.gtfs.stops_named(q, lat, lon):
                 if not any(_dist_m(row[2], row[3], e["lat"], e["lon"]) < 60 for e in elements if e.get("lat") is not None):
@@ -2471,9 +2650,13 @@ class Service:
     MAP_SAME_M = 200          # stops of one name this near are one place on the map (its platforms)
     MAP_STATION_M = 150       # a stop this near a bus station of the map is that station
 
-    def map_stops(self, lat, lon, radius, limit=600):
+    def map_stops(self, lat, lon, radius, limit=600, src="auto"):
         """{"stops": [{id, name, lat, lon, kind, lines: [numbers]}]} round a point, from this computer only (the timetables and
         every stop this service has seen): bus stations first, then the stops with most lines; platforms of one stop are one."""
+        if self.uses_db(src):
+            got = self.db.map_places(lat, lon, radius)
+            if got is not None:                                # the route database has the place: its stops and lines only
+                return self.merge_map(got, lat, lon, limit, True)
         self.want_timetables(lat, lon)
         places = []                                            # [name, lat, lon, refs, kind]
         for name, la, lo, refs in (self.gtfs.stops_around(lat, lon, radius) if self.gtfs.ready() else []):
@@ -2498,6 +2681,10 @@ class Service:
         if not self.gtfs.ready():                              # no timetables here: the stops this service has seen
             for it in known:
                 places.append([it["name"], it["lat"], it["lon"], set(), "stop"])
+        return self.merge_map(places, lat, lon, limit, self.gtfs.ready())
+
+    def merge_map(self, places, lat, lon, limit, timetables):
+        """The map's answer of [name, lat, lon, refs, kind] places: platforms of one stop as one, bus stations first."""
         merged, by_name, stations = [], {}, []
         for pl in sorted(places, key=lambda x: (x[4] != "station", -len(x[3]))):
             key = fold(pl[0])
@@ -2518,11 +2705,18 @@ class Service:
             return (int(re.match(r"\d*", r).group() or 10 ** 6), r)
         out = [{"id": i + 1, "name": m[0], "lat": round(m[1], 6), "lon": round(m[2], 6), "kind": m[4],
                 "lines": sorted(m[3], key=by_number)[:24]} for i, m in enumerate(merged[:limit])]
-        return {"stops": out, "timetables": self.gtfs.ready()}
+        return {"stops": out, "timetables": timetables}
 
     def uses_db(self, src="auto"):
         """Does a request with this source choice read the route database?"""
         return self.db.enabled and (src == "db" or (src == "auto" and not self.live))
+
+    def db_covers(self, lat, lon, src="auto"):
+        """The route database answers for this place (nothing is asked of the live servers, no timetables are downloaded)."""
+        try:
+            return self.uses_db(src) and self.db.covers(lat, lon)
+        except (OSError, ValueError):
+            return False
 
     def nearby(self, lat, lon, offline=False, src="auto"):
         """(text, cached): the stops and lines around a point: OpenStreetMap's (kept per cell) with the timetables' lines
@@ -2578,8 +2772,15 @@ class Service:
             text = json.dumps(data, separators=(",", ":"), ensure_ascii=False)
         return text, cached
 
-    def lines(self, ref, lat, lon, local=False):
-        """(text, cached): the lines with this number: those the timetables know, then OpenStreetMap's."""
+    def lines(self, ref, lat, lon, local=False, src="auto"):
+        """(text, cached): the lines with this number: the route database's where it has the place (`local`: only its tiles on
+        this computer), else those the timetables know, then OpenStreetMap's."""
+        if self.uses_db(src):
+            text = self.db.lines_numbered(ref, lat, lon, online=not local)
+            if text is not None:
+                return text, True
+            if src == "db":
+                return '{"elements":[]}', True
         gt = self.gtfs.lines_numbered(ref, lat, lon) if self.gtfs.ready() else []
         if local:
             found = self.index.find_lines(ref, lat, lon)
@@ -2754,6 +2955,18 @@ class Service:
                 nodes.append(gtfs_node((x["sid"], x["name"], x["lat"], x["lon"], x["rowid"])))
         return json.dumps({"elements": [rel] + nodes}, separators=(",", ":"), ensure_ascii=False)
 
+    def stations(self, lat, lon, src="auto"):
+        """(text, cached): the bus stations round a point: the route database's where it has the place, else Overpass's."""
+        if self.uses_db(src):
+            text = self.db.stations(lat, lon)
+            if text is not None:
+                return text, True
+            if src == "db":
+                return '{"elements":[]}', True
+        c = STATIONS_CELL_DEG
+        slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
+        return self.get(stations_key(lat, lon), stations_query(slat, slon))
+
     def search(self, q, lat, lon):
         """(text, cached): the towns and stops on this computer first, the geocoder's (one request, ~1 s) after them; the
         slow map database only when neither knows the name."""
@@ -2768,6 +2981,8 @@ class Service:
                "places": merge_places(local["places"], geo.get("places") or []),
                "source": geo.get("source") or "local"}
         if not out["elements"] and not out["places"]:
+            if self.db_covers(lat, lon):                     # the database knows the place: a name it lacks is not worth 90 s of Overpass
+                return json.dumps(out, separators=(",", ":"), ensure_ascii=False), cached
             return self.get(search_key(q, lat, lon), search_query(q, lat, lon))
         return json.dumps(out, separators=(",", ":"), ensure_ascii=False), cached
 
@@ -2834,12 +3049,19 @@ class Service:
             say(f"path: {e}; straight lines instead")
             return straight_path(pts), False
 
-    def along(self, pts):
-        """(text, cached) of the stops near the road route; none while there is only a straight fallback."""
+    def along(self, pts, src="auto"):
+        """(text, cached) of the stops near the road route (the route database's where it has the places, else Overpass's);
+        none while there is only a straight fallback."""
         p, _ = self.path(pts)
         if p["source"] != "osrm":
             return '{"elements":[],"fallback":true}', False
         road = p["points"]
+        if self.uses_db(src):
+            text = self.db.along(road)
+            if text is not None:
+                return text, True
+            if src == "db":
+                return '{"elements":[]}', True
         return self.get(along_key(pts), along_query(road), post=lambda text: filter_along(text, road), upstream=self.upstream_once)
 
 
@@ -3181,20 +3403,18 @@ def make_handler(service, port):
                 elif u.path == "/v1/along":
                     pts = parse_pts(q["pts"][0])
                     check_legs(pts)
-                    text, cached = service.along(pts)
+                    text, cached = service.along(pts, src=parse_src(q))
                 elif u.path == "/v1/stations":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
                         return self.fail(400, "lat / lon out of range")
-                    c = STATIONS_CELL_DEG
-                    slat, slon = round(round(lat / c) * c, 4), round(round(lon / c) * c, 4)
-                    text, cached = service.get(stations_key(lat, lon), stations_query(slat, slon))
+                    text, cached = service.stations(lat, lon, src=parse_src(q))
                 elif u.path == "/v1/mapstops":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     r = min(30000.0, max(200.0, float(q.get("r", ["25000"])[0])))
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
                         return self.fail(400, "lat / lon out of range")
-                    text, cached = json.dumps(service.map_stops(lat, lon, r), separators=(",", ":"), ensure_ascii=False), True
+                    text, cached = json.dumps(service.map_stops(lat, lon, r, src=parse_src(q)), separators=(",", ":"), ensure_ascii=False), True
                 elif u.path == "/v1/towns":
                     lat, lon = float(q["lat"][0]), float(q["lon"][0])
                     if not (-85 <= lat <= 85 and -180 <= lon <= 180):
@@ -3218,7 +3438,7 @@ def make_handler(service, port):
                     ref = clean_ref(q["ref"][0])
                     if ref is None:
                         return self.fail(400, "not a line number")
-                    text, cached = service.lines(ref, lat, lon, local=bool(q.get("local")))
+                    text, cached = service.lines(ref, lat, lon, local=bool(q.get("local")), src=parse_src(q))
                 else:
                     return self.fail(404, "unknown path")
             except (KeyError, IndexError, ValueError):

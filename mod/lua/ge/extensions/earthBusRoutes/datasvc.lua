@@ -90,11 +90,11 @@ function M.nearby(lat, lon, cb, how)
   M.get(('/v1/nearby?lat=%.5f&lon=%.5f'):format(lat, lon) .. srcQ(), cb, { low = how == 'low', urgent = how == 'urgent' })
 end
 function M.path(pts, cb) M.get('/v1/path?pts=' .. pts, cb, { urgent = true, total = 60, keep = true }) end
-function M.along(pts, cb) M.get('/v1/along?pts=' .. pts, cb, { urgent = true, keep = true }) end
+function M.along(pts, cb) M.get('/v1/along?pts=' .. pts .. srcQ(), cb, { urgent = true, keep = true }) end
 -- the stops round a point only if the service has them on this computer (service 0.10.3+, has('nearbycached')): for the
 -- background (the buses of the lines), which never asks a public server
 function M.nearbyKept(lat, lon, cb) M.get(('/v1/nearby?lat=%.5f&lon=%.5f&cached=1'):format(lat, lon) .. srcQ(), cb, { fast = true, total = 10 }) end
-function M.stations(lat, lon, cb) M.get(('/v1/stations?lat=%.4f&lon=%.4f'):format(lat, lon), cb, { urgent = true, total = 120 }) end
+function M.stations(lat, lon, cb) M.get(('/v1/stations?lat=%.4f&lon=%.4f'):format(lat, lon) .. srcQ(), cb, { urgent = true, total = 120 }) end
 -- fast: only what the service already knows, answered at once (on the second lane); else it asks the public servers
 function M.search(q, lat, lon, cb, fast)
   local path = ('/v1/search?q=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(q), lat, lon)
@@ -102,7 +102,7 @@ function M.search(q, lat, lon, cb, fast)
 end
 -- the bus lines with this number near a point
 function M.lines(ref, lat, lon, cb, fast)
-  local path = ('/v1/lines?ref=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(ref), lat, lon)
+  local path = ('/v1/lines?ref=%s&lat=%.4f&lon=%.4f'):format(http.urlencode(ref), lat, lon) .. srcQ()
   if fast then M.get(path .. '&local=1', cb, { fast = true }) else M.get(path, cb, { urgent = true, total = 120 }) end
 end
 -- the cities, towns and villages round a point (the map of towns)
@@ -113,7 +113,8 @@ function M.route(id, cb, low) M.get(('/v1/route?id=%d'):format(id) .. srcQ(), cb
 -- background loads, which must not queue in front of what the player asked for
 function M.routeKept(id, cb) M.get(('/v1/route?id=%d&cached=1'):format(id) .. srcQ(), cb, { fast = true, total = 10 }) end
 -- the stations and stops within r metres for the map (from the service's own data: at once, on the second lane)
-function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r), cb, { fast = true, total = 10 }) end
+-- (where the route database has the place, a cold 25 km region reads ~100 small files: the slow lane, not the instant one)
+function M.mapStops(lat, lon, r, cb) M.get(('/v1/mapstops?lat=%.4f&lon=%.4f&r=%d'):format(lat, lon, r) .. srcQ(), cb, { urgent = true, total = 40 }) end
 function M.ping(cb) M.get('/v1/info', cb, { fast = true }) end
 
 -- POST a JSON body (a table): cb(data, info). Used by the export of a hand-made line (service 0.12+, has('export')).
