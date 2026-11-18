@@ -177,8 +177,8 @@ function T.a_request_stop_says_on_request_until_somebody_presses_the_button()
   t.onboard = { 2 }                                                 -- somebody wants out there, 500 m ahead: not yet
   frame(t, lat, lon, 8)
   assert(trip.hud(t).cabin.led.onRequest == true)
-  local lat2, lon2 = geo.pointAt(r.path, r.cum, (r.stops[2].along or 0) - 300)
-  frame(t, lat2, lon2, 8)                                           -- 300 m: the button is pressed
+  local lat2, lon2 = geo.pointAt(r.path, r.cum, (r.stops[2].along or 0) - 38)
+  for _ = 1, 6 do frame(t, lat2, lon2, 8) end                       -- near the stop: the button has been pressed (trip.PRESS_*)
   led = trip.hud(t).cabin.led
   assert(led.requested == true and led.onRequest == false and led.bellSeq == 1)
 end
@@ -186,7 +186,7 @@ end
 function T.the_bell_rings_once_when_a_stop_is_asked_for()
   local r = route()
   local t = newTrip(r)
-  local lat, lon = approaching(r, t, 300, { 2, 4 })
+  local lat, lon = approaching(r, t, 38, { 2, 4 })
   local bells = 0
   for _ = 1, 20 do
     frame(t, lat, lon, 8)
@@ -195,7 +195,7 @@ function T.the_bell_rings_once_when_a_stop_is_asked_for()
   assert(bells == 1, bells .. ' bells')
   -- nobody gets off at the next stop: no bell
   local t2 = newTrip(r)
-  lat, lon = approaching(r, t2, 300, { 4, 5 })
+  lat, lon = approaching(r, t2, 38, { 4, 5 })
   for _ = 1, 20 do frame(t2, lat, lon, 8) end
   for _, e in ipairs(trip.takeEvents(t2)) do assert(e.name ~= 'bell') end
   assert(t2.cabin.bellSeq == 0)

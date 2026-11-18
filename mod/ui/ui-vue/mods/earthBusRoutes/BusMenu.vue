@@ -28,28 +28,15 @@
           </template>
         </nav>
         <div class="tools">
-          <label v-if="s && s.source" class="lang source" :title="s.source.supported ? t('source.hint') : t('source.needsService')">
-            <span class="lang-icon" aria-hidden="true">🗂</span>
-            <select :value="s.source.choice" :disabled="!s.source.supported || !!s.tripActive" :aria-label="t('source')" @change="call('uiSource', $event.target.value)">
-              <option value="auto">{{ t("source.auto") }}</option>
-              <option value="db">{{ t("source.db") }}</option>
-              <option value="live">{{ t("source.live") }}</option>
-            </select>
-          </label>
-          <label v-if="s && s.voice" class="lang source" :title="s.voice.supported ? t('voice.hint') : t('voice.needsService')">
-            <span class="lang-icon" aria-hidden="true">🔊</span>
-            <select :value="s.voice.on ? 'on' : 'off'" :disabled="!s.voice.supported" :aria-label="t('voice')" @change="call('uiVoice', $event.target.value)">
-              <option value="on">{{ t("voice.on") }}</option>
-              <option value="off">{{ t("voice.off") }}</option>
-            </select>
-          </label>
-          <label class="lang" :title="t('lang')">
-            <span class="lang-icon" aria-hidden="true">🌐</span>
-            <select :value="isAuto() ? 'auto' : lang" :aria-label="t('lang')" @change="pickLang($event.target.value)">
-              <option value="auto">{{ t("lang.auto") }} · {{ langName }}</option>
-              <option v-for="l in LANGS" :key="l.code" :value="l.code">{{ l.name }}</option>
-            </select>
-          </label>
+          <Pick v-if="s && s.source" icon="🗂" :value="s.source.choice" :disabled="!s.source.supported || !!s.tripActive"
+            :title="s.source.supported ? t('source.hint') : t('source.needsService')" :aria-label="t('source')"
+            :options="[{ value: 'auto', label: t('source.auto') }, { value: 'db', label: t('source.db') }, { value: 'live', label: t('source.live') }]"
+            @pick="v => call('uiSource', v)" />
+          <Pick v-if="s && s.voice" icon="🔊" :value="s.voice.on ? 'on' : 'off'" :disabled="!s.voice.supported"
+            :title="s.voice.supported ? t('voice.hint') : t('voice.needsService')" :aria-label="t('voice')"
+            :options="[{ value: 'on', label: t('voice.on') }, { value: 'off', label: t('voice.off') }]"
+            @pick="v => call('uiVoice', v)" />
+          <Pick icon="🌐" :value="isAuto() ? 'auto' : lang" :title="t('lang')" :aria-label="t('lang')" :options="langOptions" @pick="pickLang" />
           <button class="btn ghost" @click="close">{{ t("close") }}</button>
         </div>
       </header>
@@ -368,11 +355,10 @@
             </div>
 
             <div v-if="endChoices.length" class="endstop">
-              <label class="label" for="end-stop">{{ t("start.end") }}</label>
-              <select id="end-stop" :value="s.start.partial ? s.start.endIndex : 0" :title="t('start.endHint')" @change="call('uiSetEnd', Number($event.target.value))">
-                <option :value="0">{{ t("start.endLast", { name: s.route.stops[s.route.stops.length - 1].name }) }}</option>
-                <option v-for="st in endChoices" :key="st.i" :value="st.i">{{ st.i }}. {{ st.name }}</option>
-              </select>
+              <span class="label">{{ t("start.end") }}</span>
+              <Pick :value="s.start.partial ? s.start.endIndex : 0" :title="t('start.endHint')" :aria-label="t('start.end')"
+                :options="[{ value: 0, label: t('start.endLast', { name: s.route.stops[s.route.stops.length - 1].name }) }].concat(endChoices.map(st => ({ value: st.i, label: st.i + '. ' + st.name })))"
+                @pick="v => call('uiSetEnd', Number(v))" />
             </div>
 
             <div class="time">
@@ -497,6 +483,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import ProgressBar from "./ProgressBar.vue"
+import Pick from "./Pick.vue"
 import MiniMap from "./MiniMap.vue"
 import BuildPage from "./BuildPage.vue"
 import StopsPage from "./StopsPage.vue"
@@ -512,6 +499,7 @@ import { lang, setLang, resetLang, isAuto, syncLang, LANGS, t, noteText } from "
 const tellLua = () => call("uiLang", isAuto() ? "auto" : lang.value)
 const pickLang = v => { if (v === "auto") resetLang(); else setLang(v); tellLua() }
 const langName = computed(() => (LANGS.find(l => l.code === lang.value) || LANGS[0]).name)
+const langOptions = computed(() => [{ value: "auto", label: t("lang.auto") + " · " + langName.value }].concat(LANGS.map(l => ({ value: l.code, label: l.name }))))
 
 const events = useEvents()
 events.on("EarthBusRoutesState", m => { syncLang(); onState(m) })

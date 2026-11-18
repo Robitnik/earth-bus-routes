@@ -3,6 +3,7 @@ local osm = require('earthBusRoutes/osm')
 local geo = require('earthBusRoutes/geomath')
 local sched = require('earthBusRoutes/schedule')
 local trip = require('earthBusRoutes/trip')
+local dispatch = require('earthBusRoutes/dispatch')
 local T = {}
 
 local function route() return assert(osm.parseRoute(H.fixture('route_6964117'))) end
@@ -594,6 +595,70 @@ function T.the_hud_warns_of_open_doors_on_the_move()
   assert(t.score.doorEvents >= 1)                            -- the score already counts it
   s:frame(5, false)
   assert(trip.hud(t).rules.doorsMoving == false)
+end
+
+-- 2026-11-18, seen in the game: boarding was slow and waited for everybody to get off first
+function T.people_get_off_and_board_at_the_same_time()
+  local r = route()
+  local t = newTrip(r, { scheduled = false })
+  local s = sim(t, r)
+  s:frame(0, false)
+  assert(t.phase == 'atStop')
+  t.alightLeft, t.boardLeft = 10, 10
+  t.onboard = {}
+  for k = 1, 10 do t.onboard[k] = 1 end
+  t.tickets = false
+  local secs = 0
+  while (t.alightLeft > 0 or t.boardLeft > 0) and secs < 60 do s:frame(0, true) secs = secs + 0.1 end
+  -- one after another it took 10 x 1.2 + 10 x 1.8 = 30 s; side by side it is the slower stream
+  assert(secs <= 10 * 1.2 + 1, secs .. ' s')
+  assert(t.alighted == 10 and t.boarded == 10, t.alighted .. ' / ' .. t.boarded)
+end
+
+-- 2026-11-18: the next stop was "requested" the moment the doors closed; the passenger presses the button on the way
+function T.the_stop_button_is_pressed_on_the_way_not_when_the_doors_close()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  s:dwell(10)
+  t.onboard = { 2, 2, 3 }
+  for _ = 1, 30 do s:frame(5, false) end                    -- left the stop
+  assert(t.phase == 'approach' and t.idx == 2)
+  assert(not t.requested, 'requested at once after leaving')
+  s:driveTo(r.stops[2].along - 40, 9)
+  assert(t.requested, 'not requested 40 m before the stop')
+end
+
+-- 2026-11-18: a stop out of service was still "requested" by those going there; they get off at the next one
+function T.a_closed_stop_is_not_requested_and_its_passengers_go_on_to_the_next()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  s:dwell(10)
+  t.onboard = { 2, 2, 4 }
+  t.dispatch.events = { { stop = 2, kind = 'closed' } }
+  s:driveTo(r.stops[2].along - 40, 9)
+  assert(dispatch.closed(t, 2))
+  assert(not t.requested, 'a closed stop is requested')
+  local n3 = 0
+  for _, d in ipairs(t.onboard) do assert(d ~= 2) if d == 3 then n3 = n3 + 1 end end
+  assert(n3 == 2, 'the two for stop 2 now go to stop 3')
+end
+
+-- 2026-11-18: now and then a stop counted as missed before the bus got there: the place along the road jumped onto another part of
+-- the road near by. A stop is past only after the bus drove (about) that far.
+function T.a_jump_along_the_road_is_not_a_missed_stop()
+  local r = route()
+  local t = newTrip(r)
+  local s = sim(t, r)
+  s:dwell(10)
+  t.onboard = { 2 }
+  for _ = 1, 20 do s:frame(5, false) end
+  assert(t.idx == 2)
+  t.along = r.stops[2].along + 200                         -- as if the tracker had jumped ahead
+  t.alongTimer = 10                                         -- (and kept it for a moment)
+  for _ = 1, 5 do s:frame(5, false) end
+  assert(t.idx == 2 and t.outcome[2] == nil, 'counted as ' .. tostring(t.outcome[2]))
 end
 
 return T

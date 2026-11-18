@@ -9,6 +9,7 @@ M.TTL_S = 12               -- a sentence not spoken this long after it was due i
 M.GAP_S = 0.25             -- between two clips
 M.QUEUE_MAX = 3
 M.ASK_AGAIN_S = 6          -- while the voice downloads: ask how far it is this often (the service stops when we stop asking)
+M.DIR = '/temp/earthBusRoutes/voice/'   -- the clips as the game sees them (the game reads no file outside its own folders)
 
 M.on = true
 local S = { trip = nil, queue = {}, busyUntil = 0, clock = 0, ask = 0, state = nil, told = {}, lang = nil }
@@ -18,6 +19,8 @@ M.deps = {
   get = function(path, cb, opts) return require('earthBusRoutes/datasvc').get(path, cb, opts) end,
   has = function(f) return require('earthBusRoutes/datasvc').has(f) end,
   play = function(path) return require('earthBusRoutes/world').playClip(path) end,
+  exists = function(path) return require('earthBusRoutes/world').fileExists(path) end,
+  save = function(path, bytes) return require('earthBusRoutes/world').saveBytes(path, bytes) end,
   toast = function(key) local w, t = require('earthBusRoutes/world'), require('earthBusRoutes/texts') w.toast(t.t(key), 5) end,
   uiLang = function() return require('earthBusRoutes/texts').lang() end,
   read = function(path) local r = rawget(_G, 'jsonReadFile') return r and r(path) or nil end,
@@ -91,10 +94,21 @@ function M.say(data)
   S.queue[#S.queue + 1] = e
   while #S.queue > M.QUEUE_MAX do table.remove(S.queue, 1) end
   local stop = data.stop
-  local path = ('/v1/say?file=1&kind=%s&name=%s&req=%d'):format(enc(data.kind), enc(stop.name or ''), data.request and 1 or 0) .. where(stop)
-  M.deps.get(path, function(clip, info)
-    if clip and clip.path then e.clip = clip else e.failed = true end
-  end, { fast = true, total = 10 })
+  local path = ('/v1/say?kind=%s&name=%s&req=%d'):format(enc(data.kind), enc(stop.name or ''), data.request and 1 or 0) .. where(stop)
+  M.deps.get(path, function(ans, info)
+    if not (ans and ans.body and #ans.body > 44) then
+      e.failed = true
+      log('W', TAG, 'voice: no clip: ' .. tostring(info and info.error))
+      return
+    end
+    local h = ans.headers or {}
+    local id = tostring(h['x-clip'] or ''):gsub('[^%w]', '')
+    if id == '' then id = tostring(math.floor(S.clock * 1000)) end
+    local file = M.DIR .. id .. '.wav'
+    local ok = M.deps.exists(file) or M.deps.save(file, ans.body)
+    if not ok then e.failed = true log('W', TAG, 'voice: the clip could not be written to ' .. file) return end
+    e.clip = { path = file, seconds = tonumber(h['x-seconds']) or 3 }
+  end, { fast = true, total = 10, raw = true })
 end
 
 function M.frame(dt)

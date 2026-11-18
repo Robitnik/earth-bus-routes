@@ -116,6 +116,9 @@ local function voiceSetup()
   voice.deps.toast = function(k) d.toasts[#d.toasts + 1] = k end
   voice.deps.play = function(p) d.played[#d.played + 1] = p return true end
   voice.deps.write = function(_, v) d.saved = v end
+  d.files = {}
+  voice.deps.exists = function(p) return d.files[p] ~= nil end
+  voice.deps.save = function(p, b) d.files[p] = b return true end
   d.state = 'ready'
   voice.deps.get = function(path, cb)
     d.calls[#d.calls + 1] = { path = path, cb = cb }
@@ -127,6 +130,8 @@ local function voiceSetup()
   return d
 end
 
+local function wav(id, secs) return { body = string.rep('x', 100), headers = { ['x-clip'] = id, ['x-seconds'] = tostring(secs) } } end
+
 local function ev(d, kind, i) return { kind = kind, index = i or 2, stop = d.stop, request = false } end
 
 function T.a_clip_is_asked_for_and_played_when_the_voice_is_ready()
@@ -135,13 +140,14 @@ function T.a_clip_is_asked_for_and_played_when_the_voice_is_ready()
   assert(voice.ready())
   voice.say(ev(d, 'next'))
   local c = d.calls[#d.calls]
-  assert(c.path:find('/v1/say?file=1&kind=next', 1, true), c.path)
+  assert(c.path:find('/v1/say?kind=next', 1, true), c.path)
   assert(c.path:find('&ui=uk', 1, true) and c.path:find('&lat=', 1, true), c.path)
   voice.frame(0.1)
   assert(#d.played == 0, 'nothing to play before the clip is there')
-  c.cb({ path = 'C:/clips/a.wav', seconds = 3 })
+  c.cb(wav('a1', 3))
   voice.frame(0.1)
-  assert(d.played[1] == 'C:/clips/a.wav')
+  assert(d.played[1] == '/temp/earthBusRoutes/voice/a1.wav', tostring(d.played[1]))
+  assert(d.files['/temp/earthBusRoutes/voice/a1.wav'], 'the clip is written into the game folder')
   voice.stop()
 end
 
@@ -150,14 +156,14 @@ function T.clips_play_one_after_the_other_not_over_each_other()
   voice.begin(d.trip)
   voice.say(ev(d, 'next'))
   voice.say(ev(d, 'at'))
-  d.calls[#d.calls - 1].cb({ path = 'one.wav', seconds = 2 })
-  d.calls[#d.calls].cb({ path = 'two.wav', seconds = 2 })
+  d.calls[#d.calls - 1].cb(wav('one', 2))
+  d.calls[#d.calls].cb(wav('two', 2))
   voice.frame(0.1)
-  assert(#d.played == 1 and d.played[1] == 'one.wav')
+  assert(#d.played == 1 and d.played[1]:find('one.wav', 1, true))
   for _ = 1, 10 do voice.frame(0.1) end
   assert(#d.played == 1, 'the first still speaks')
   for _ = 1, 15 do voice.frame(0.1) end
-  assert(#d.played == 2 and d.played[2] == 'two.wav', #d.played)
+  assert(#d.played == 2 and d.played[2]:find('two.wav', 1, true), #d.played)
   voice.stop()
 end
 
@@ -166,7 +172,7 @@ function T.a_sentence_that_came_too_late_is_dropped()
   voice.begin(d.trip)
   voice.say(ev(d, 'next'))
   for _ = 1, 130 do voice.frame(0.1) end
-  d.calls[#d.calls].cb({ path = 'late.wav', seconds = 2 })
+  d.calls[#d.calls].cb(wav('late', 2))
   voice.frame(0.1)
   assert(#d.played == 0, 'a stale sentence was spoken')
   voice.stop()
@@ -205,6 +211,23 @@ function T.an_old_service_or_the_switch_off_asks_for_nothing()
   voice.say(ev(d, 'next'))
   assert(#d.calls == 0)
   voice.on = true
+  voice.stop()
+end
+
+-- 2026-11-18, seen in the game: the game reads no file outside its folders; the clip comes as bytes and is written into /temp
+function T.a_clip_already_in_the_game_folder_is_not_written_again_and_a_failed_answer_is_silence()
+  local d = voiceSetup()
+  voice.begin(d.trip)
+  d.files['/temp/earthBusRoutes/voice/same.wav'] = 'old'
+  voice.say(ev(d, 'next'))
+  d.calls[#d.calls].cb(wav('same', 2))
+  assert(d.files['/temp/earthBusRoutes/voice/same.wav'] == 'old')
+  voice.frame(0.1)
+  assert(#d.played == 1)
+  voice.say(ev(d, 'at'))
+  d.calls[#d.calls].cb(nil, { error = 'voice missing' })
+  for _ = 1, 40 do voice.frame(0.1) end
+  assert(#d.played == 1, 'nothing played for a failed clip')
   voice.stop()
 end
 

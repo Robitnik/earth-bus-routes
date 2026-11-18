@@ -6,7 +6,7 @@ local M = {}
 M.DENSITY = { low = 0.6, normal = 1.0, high = 1.6 }
 M.BASE_PER_MIN = 0.30        -- people per minute appearing at an average stop at profile 1.0
 M.SEATS, M.STANDING = 25, 55 -- when the vehicle does not say
-M.BOARD_S, M.ALIGHT_S = 1.8, 1.2
+M.BOARD_S, M.ALIGHT_S = 1.2, 0.8    -- s per person: on through the front door, off through the others (at the same time)
 
 local function gauss(h, mu, sigma) local d = (h - mu) / sigma return math.exp(-0.5 * d * d) end
 
@@ -178,9 +178,9 @@ function M.capacity(info)
   return seats + standing, seats
 end
 
--- Seconds the doors stay useful for: people off, then on; kneeling is quicker
+-- Seconds the doors stay useful for: people off and on at the same time (the slower stream); kneeling is quicker
 function M.dwellTime(alighting, boarding, kneeling)
-  local s = alighting * M.ALIGHT_S + boarding * M.BOARD_S
+  local s = math.max(alighting * M.ALIGHT_S, boarding * M.BOARD_S)
   if kneeling then s = s * 0.8 end
   return s
 end

@@ -231,4 +231,24 @@ function T.an_urgent_request_has_a_lane_when_the_others_are_busy()
   cleanup()
 end
 
+-- 0.13.1: the announcer's clip comes as bytes (a WAV), not JSON
+function T.a_raw_request_gives_the_bytes_and_the_headers()
+  local ds, _, _, reqs = setup()
+  local got, err
+  ds.get('/v1/say?kind=next&name=A', function(d, info) got, err = d, info end, { fast = true, raw = true })
+  ds.update(0.1)
+  local r = reqs[#reqs]
+  assert(r and r.path == '/v1/say?kind=next&name=A')
+  r.state, r.parser.status, r.parser.headers, r.parser.text = 'done', 200, { ['x-clip'] = 'ab12' }, 'RIFF binary'
+  ds.update(0.1)
+  assert(got and got.body == 'RIFF binary' and got.headers['x-clip'] == 'ab12')
+  ds.get('/v1/say?kind=next&name=B', function(d, info) got, err = d, info end, { fast = true, raw = true })
+  ds.update(0.1)
+  r = reqs[#reqs]
+  r.state, r.parser.status, r.parser.text = 'done', 409, '{"ok":false,"error":"voice missing"}'
+  ds.update(0.1)
+  assert(got == nil and err.error == 'voice missing', tostring(err and err.error))
+  cleanup()
+end
+
 return T

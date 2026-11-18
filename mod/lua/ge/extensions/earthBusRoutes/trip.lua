@@ -31,6 +31,11 @@ M.TICKET_SHARE = 0.25    -- of those who board buy a ticket from the driver
 M.TICKET_S = 1.5         -- each one holds the doors this much longer
 M.TICKET_MAX_S = 12      -- the dwell at one stop grows by at most this much
 M.TICKET_FARE_K = 2      -- the price of a ticket in fares
+M.PRESS_MIN_M, M.PRESS_MAX_M = 120, 350   -- a passenger for the next stop presses the button somewhere this far before it ...
+M.PRESS_SHARE = 0.7      -- ... never sooner than this share of the way from the stop before ...
+M.PRESS_AFTER_S = 6      -- ... nor in the first seconds after leaving it
+M.PASS_PLAUSIBLE = 0.6   -- a stop counts as driven past only after the bus covered this share of the road to it (a jump of the
+                         -- place along the road onto another part of it near by is not a miss)
 
 -- plan = { route, trips (timetable) or nil, entry (the chosen scheduled trip) or nil, startIndex, day, clock (s),
 --          opts = { density, difficulty, timeScale, weather }, vehicle = { bus, seats, standing } }
@@ -51,6 +56,8 @@ function M.new(plan)
     outcome = {},                    -- index -> 'served' | 'missed' | 'passed' (driven by, nobody needed it): the markers' colours
     conn = {}, offered = {}, announced = {}, connCount = 0, connOffers = 0, waived = 0,   -- transfers (connections.lua)
     ticketExtra = 0,                                                                      -- seconds of ticket selling at this stop
+    odo = 0, odoMark = 0, alongMark = (route.stops[plan.startIndex or 1] or {}).along,    -- metres driven; where they were counted from
+    pressed = false, leftAt = nil,                                                        -- the stop button
   }
   t.score = scoring.new({ difficulty = t.opts.difficulty, bus = not plan.vehicle or plan.vehicle.bus ~= false,
     planned = #route.stops - t.startIndex + 1 })
@@ -89,9 +96,31 @@ local function inStopZone(t, stop)
   return d ~= nil and d <= M.ZONE_ALONG_M
 end
 
+-- has the bus driven far enough since the last stop to be past this one? (the road from the stop before, by the odometer)
+local function couldBePast(t, stop)
+  if not (stop.along and t.alongMark) then return true end
+  return (t.odo - t.odoMark) >= M.PASS_PLAUSIBLE * (stop.along - t.alongMark) - 80
+end
+
 local function passedStop(t, stop)
+  if not couldBePast(t, stop) then return false end
   if t.inZone and t.dist > M.PASSED_M and t.dist > t.minDist + 20 then return true end       -- drove away from it
-  return t.off ~= nil and stop.along ~= nil and t.along > stop.along + M.PASSED_M            -- the road went on past it
+  return t.off ~= nil and stop.along ~= nil and t.along > stop.along + M.PASSED_M and t.dist > M.PASSED_M   -- the road went on past it
+end
+
+local function mark(t, stop)
+  t.odoMark, t.alongMark = t.odo, stop and stop.along or t.along
+  t.pressed = false
+end
+
+-- how near the stop a passenger presses the button: a fixed draw per stop and trip, shorter when the stops are close together
+local function pressDist(t, i)
+  local stops = t.route.stops
+  local here, before = stops[i], stops[i - 1]
+  local rand = demand.rng(demand.hashSeed(t.route.id or t.route.ref, t.entry and t.entry.trip.id or 0, i, 'press', t.day))
+  local d = M.PRESS_MIN_M + (M.PRESS_MAX_M - M.PRESS_MIN_M) * rand()
+  if here and before and here.along and before.along then d = math.min(d, math.max(40, M.PRESS_SHARE * (here.along - before.along))) end
+  return d
 end
 
 local function emit(t, name, data) t.events[#t.events + 1] = { name = name, data = data } end
@@ -151,7 +180,7 @@ end
 local function startStopping(t, sample)
   t.phase = 'atStop'
   t.arrivedAt = t.clock
-  t.timer, t.standing, t.doorOpenedHere = 0, 0, false
+  t.timer, t.timerA, t.standing, t.doorOpenedHere = 0, 0, 0, false
   t.ticketExtra = 0
   t.alightLeft = onboardFor(t, t.idx)
   if t.idx == #t.route.stops then t.alightLeft = #t.onboard end
@@ -188,46 +217,61 @@ local function depart(t)
   if here then demand.markServed(demand.book, here.lat, here.lon, demand.lineKey(t.route), t.clock, t.lastBoard) end
   t.lastDeparture = t.clock
   t.departedStops = t.departedStops + 1
+  mark(t, here)
+  t.leftAt = t.elapsed
   t.idx = i + 1
   t.waiting, t.phase, t.inZone, t.minDist = nil, 'approach', false, math.huge
   t.doorOpenedHere = false
 end
 
--- One person boards or gets off at a time while the doors are open
+-- While the doors are open people get off (the back doors) and board (the front door) at the same time, one by one on each side.
+-- A full bus takes the waiting in as the leaving make room; only when nobody is left to get off are the rest left behind.
 local function serve(t, dt, doorsOpen)
   if not doorsOpen then return end
   t.doorOpenedHere = true
-  t.timer = t.timer + dt
-  while true do
-    if t.alightLeft > 0 then
-      if t.timer < demand.ALIGHT_S then return end
-      t.timer = t.timer - demand.ALIGHT_S
+  local last = t.idx == #t.route.stops
+  -- off
+  if t.alightLeft > 0 then
+    t.timerA = (t.timerA or 0) + dt
+    while t.alightLeft > 0 and t.timerA >= demand.ALIGHT_S do
+      t.timerA = t.timerA - demand.ALIGHT_S
       -- the person nearest to getting off here leaves (any with this destination; at the terminus everybody)
       local removed = false
       for k = #t.onboard, 1, -1 do
-        if t.onboard[k] == t.idx or t.idx == #t.route.stops then table.remove(t.onboard, k) removed = true break end
+        if t.onboard[k] == t.idx or last then table.remove(t.onboard, k) removed = true break end
       end
       t.alightLeft = t.alightLeft - 1
       if removed then t.alighted = t.alighted + 1 t.lastAlight = t.lastAlight + 1 end
-    elseif t.boardLeft > 0 and t.idx < #t.route.stops then
-      if t.timer < demand.BOARD_S then return end
-      if #t.onboard >= t.capacity then t.leftBehind = t.leftBehind + t.boardLeft t.boardLeft = 0 return end
+    end
+  else
+    t.timerA = 0
+  end
+  -- on
+  if t.boardLeft > 0 and not last then
+    if #t.onboard >= t.capacity then
+      if t.alightLeft > 0 then t.timer = math.min(t.timer, 0) return end     -- they wait at the door for room
+      t.leftBehind = t.leftBehind + t.boardLeft
+      t.boardLeft = 0
+      return
+    end
+    t.timer = t.timer + dt
+    while t.boardLeft > 0 and t.timer >= demand.BOARD_S and #t.onboard < t.capacity do
       t.timer = t.timer - demand.BOARD_S
       local rand = demand.rng(demand.hashSeed(t.route.id or t.route.ref, t.entry and t.entry.trip.id or 0, t.idx, 'p', t.boarded, t.day))
       t.onboard[#t.onboard + 1] = demand.destination(t.route, t.w, t.central, t.idx, hour(t), weekend(t), rand)
       t.boardLeft = t.boardLeft - 1
       t.boarded = t.boarded + 1
       t.lastBoard = t.lastBoard + 1
-      -- some of them buy a ticket from the driver: a moment longer at the doors, capped per stop
+      -- some of them buy a ticket from the driver: a moment longer at the front door, capped per stop
       if t.tickets and t.ticketExtra < M.TICKET_MAX_S and rand() < M.TICKET_SHARE then
         local s = math.min(M.TICKET_S, M.TICKET_MAX_S - t.ticketExtra)
         t.ticketExtra = t.ticketExtra + s
         t.timer = t.timer - s
         scoring.ticket(t.score, t.score.fare * M.TICKET_FARE_K)
       end
-    else
-      return
     end
+  elseif last then
+    t.boardLeft = 0
   end
 end
 
@@ -241,6 +285,7 @@ function M.update(t, dt, s)
   local speed = s.speed or 0
   local doorsOpen = s.doorsOpen
   t.standing = (speed < M.STOP_SPEED) and (t.standing + dt) or 0
+  t.odo = t.odo + speed * dt
   if doorsOpen == nil then doorsOpen = (t.phase == 'atStop' or t.phase == 'start') and t.standing >= M.NO_DOORS_DWELL_S end
   local over = s.overLimit
   if over == nil then over = rules.speeding(t.rules, t.route, t.along, t.off, speed) end
@@ -277,11 +322,18 @@ function M.update(t, dt, s)
         t.outcome[t.idx] = 'passed'                 -- nobody wanted it: no fault, the marker turns grey
         emit(t, 'passed', { index = t.idx, stop = stop })
       end
+      mark(t, stop)
       t.idx = t.idx + 1
       t.waiting, t.inZone, t.minDist = nil, false, math.huge
-      if t.idx > #t.route.stops then finish(t) end
+      if t.idx > #t.route.stops then finish(t) return end
     end
-    t.requested = onboardFor(t, t.idx) > 0 or dispatch.requested(t, t.idx)
+    -- the stop button: pressed on the way by somebody who gets off there (not at once when the doors close)
+    local closed = dispatch.closed(t, t.idx)
+    if not t.pressed and not closed and t.idx < #t.route.stops and onboardFor(t, t.idx) > 0 then
+      local d = alongDelta(t, M.stop(t)) or t.dist
+      if d and d <= pressDist(t, t.idx) and t.elapsed - (t.leftAt or -1e9) >= M.PRESS_AFTER_S then t.pressed = true end
+    end
+    t.requested = not closed and (t.pressed or dispatch.requested(t, t.idx))
   elseif t.phase == 'atStop' then
     serve(t, dt, doorsOpen)
     local done = t.alightLeft <= 0 and t.boardLeft <= 0

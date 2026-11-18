@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.1
+
+Fixes of what was seen in the game on 0.13.0:
+
+- **The announcer was silent.** The game reads no file outside its own folders, and the data service wrote the clips into its own (`the announcer is off: no such file` in the log). Now the mod takes the clip from the service and writes it into the game's `temp/earthBusRoutes/voice` folder before playing it. If the game's intercom channel does not take the clip, the GUI channel is tried before the announcer gives up.
+- **The drop-downs in the menu's header (language, announcer, data source) and "Trip ends at" did nothing:** the game's browser does not open the list of a native drop-down. They are now drop-downs of the menu's own.
+- **Boarding is quicker and at the same time as getting off:** people leave through the back doors (0.8 s each) while others board through the front door (1.2 s each, plus the time of those buying a ticket). Before, everybody got off first, then the others boarded, 1.2 and 1.8 s each. A full bus takes the waiting in as the leaving make room.
+- **The next stop is no longer "requested" the moment the doors close.** A passenger for it presses the button on the way, 120 to 350 m before the stop (sooner when the stops are close together) and never in the first 6 s; the bell and the LED board follow the same moment. The terminus is never "requested".
+- **A stop out of service is no longer requested**: those going there get off at the next stop instead.
+- **A stop was now and then counted as missed before the bus got there**: the bus's place along the road could jump onto another part of the road near by (a road that comes back near itself). A stop now counts as driven past only after the bus drove about that far since the stop before (by its odometer) and is more than 60 m from it.
+
 ## 0.13.0
 
 - **The stop announcer.** A voice says each stop 100 m before the bus gets to it ("Stop X", at the terminus "Last stop X, please leave the bus") and, once the doors close, the next one ("Next stop: X"; the terminus as "Next stop: X, last stop"). It comes after a two-tone gong, through the game's Intercom volume (the one of the rally co-driver). A request stop is said as one where the country says it that way (on Czech and Slovak buses "na znamení", Polish "na żądanie", Ukrainian "на вимогу", Hungarian "feltételes megálló", Romanian "stație facultativă"). A stop that was just told as the next one, and is within 100 m already, is not told twice.

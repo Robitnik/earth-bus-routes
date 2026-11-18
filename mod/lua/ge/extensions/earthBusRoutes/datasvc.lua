@@ -36,12 +36,13 @@ end
 
 -- GET `path`; cb(data, info) with info = { cached = bool } or cb(nil, { error = text, down = bool })
 -- opts: fresh (skip the memo), low (a background prefetch: an urgent request may cancel it), urgent (goes first),
--- total (seconds to wait for the answer), keep (not dropped when the menu closes or a trip begins: a route, a shift)
+-- total (seconds to wait for the answer), keep (not dropped when the menu closes or a trip begins: a route, a shift),
+-- raw (with fast: cb({ body, headers }) with the bytes, not JSON: a sound)
 function M.get(path, cb, opts)
   opts = opts or {}
   if opts.fast then
     for _, j in ipairs(fastQueue) do if j.path == path then j.cbs[#j.cbs + 1] = cb return end end
-    fastQueue[#fastQueue + 1] = { path = path, cbs = { cb }, tries = 1, total = opts.total or 15 }
+    fastQueue[#fastQueue + 1] = { path = path, cbs = { cb }, tries = 1, total = opts.total or 15, raw = opts.raw or false }
     return
   end
   if memo[path] and not opts.fresh then cb(memo[path].data, { cached = true, memo = true }) return end
@@ -207,6 +208,15 @@ local function updateFast(dt)
   if req.state == 'done' then
     local job = fastActive.job
     fastActive = nil
+    if job.raw then                     -- the bytes as they came (a sound): { body, headers } for a 200, else the error
+      local st = req.parser.status
+      if st == 200 then M.state.up = true finish(job, { body = http.body(req.parser), headers = req.parser.headers or {} }, { fast = true })
+      else
+        local okE, err = pcall(jsonDecode, http.body(req.parser))
+        finish(job, nil, { error = (okE and type(err) == 'table' and err.error) or ('HTTP ' .. tostring(st)), down = false })
+      end
+      return
+    end
     local ok, data = pcall(jsonDecode, http.body(req.parser))
     if not ok or type(data) ~= 'table' or data.ok == false then
       finish(job, nil, { error = (type(data) == 'table' and data.error) or 'bad answer from the data service', down = false })

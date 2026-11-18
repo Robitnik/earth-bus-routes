@@ -192,6 +192,8 @@ function M.step(t, dt, doorsOpen)
         elseif e.kind == 'closed' then
           ex.closed = true
           if t.waiting then t.waiting = 0 end
+          -- those who were going there get off at the next stop instead (they do not ask for a stop that is closed)
+          if i < n then for k, dst in ipairs(t.onboard) do if dst == i then t.onboard[k] = i + 1 end end end
           M.say(t, 'closed', { stop = name }, 'event')
           e.fired = true
         elseif e.kind == 'request' then

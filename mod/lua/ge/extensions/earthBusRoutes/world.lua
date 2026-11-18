@@ -504,21 +504,39 @@ function M.stopBell()
   return ok
 end
 
--- A voice clip of the stop announcer (a WAV file the data service wrote on this computer): played through the intercom channel,
--- the one the rally co-driver speaks on (its volume is the player's "Intercom" slider). Not heard in a game session yet; a call
--- that fails turns the voice off for the session, never the trip.
-local clipOff = false
+-- The stop announcer's clips: written by the mod into the game's own folder (/temp/...; the game reads no file outside it), played
+-- through the intercom channel the rally co-driver speaks on (its volume is the player's "Intercom" slider); if that call is not
+-- there or refuses the file, the GUI channel. Not heard in a game session yet: a call that fails turns that way off for the session.
+function M.fileExists(path)
+  local ok, r = pcall(function() return FS:fileExists(path) end)
+  return ok and r == true
+end
+
+function M.saveBytes(path, bytes)
+  return pcall(function()
+    local dir = path:match('^(.*)/[^/]*$')
+    if dir and FS.directoryCreate then pcall(function() FS:directoryCreate(dir, true) end) end
+    local f = assert(io.open(path, 'wb'))
+    f:write(bytes)
+    f:close()
+  end) == true and M.fileExists(path)
+end
+
+local clipWay = { intercom = true, gui = true }
 function M.playClip(path)
-  if clipOff then return false end
-  local ok, err = pcall(function()
-    if rawget(_G, 'FS') and FS.fileExists and not FS:fileExists(path) then error('no such file: ' .. tostring(path)) end
-    return Engine.Audio.intercomPlayPacenote({ filename = path })
-  end)
-  if not ok then
-    clipOff = true
-    log('W', TAG, 'world: the announcer is off: ' .. tostring(err))
+  if clipWay.intercom then
+    local ok, r = pcall(function() return Engine.Audio.intercomPlayPacenote({ filename = path }) end)
+    if ok then return true end                     -- (what it returns is not the same in every version: only an error says no)
+    clipWay.intercom = false
+    log('W', TAG, 'world: the intercom does not play the announcer (' .. tostring(r) .. '), trying the GUI channel')
   end
-  return ok
+  if clipWay.gui then
+    local ok, r = pcall(function() return Engine.Audio.playOnce('AudioGui', path) end)
+    if ok then return true end
+    clipWay.gui = false
+    log('W', TAG, 'world: the announcer is off: ' .. tostring(r))
+  end
+  return false
 end
 
 -- ---- the clock ---------------------------------------------------------------------------------------------------

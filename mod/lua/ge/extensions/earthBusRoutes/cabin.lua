@@ -58,9 +58,9 @@ end
 function M.update(t, dt, s)
   if t.finished or not t.onboard then return end
   local c = state(t)
-  -- the bell: a passenger for the next stop asks for it once the stop is near (never for the terminus: everybody gets off there)
+  -- the bell: a passenger for the next stop presses the button on the way (trip.lua: t.pressed) (never for the terminus: everybody gets off there)
   if wants(t, 'ledBoard') and t.phase == 'approach' and c.bellIdx ~= t.idx and t.idx < #t.route.stops
-    and (t.dist or math.huge) <= M.BELL_M and somebodyGetsOffAt(t, t.idx) then
+    and t.pressed and somebodyGetsOffAt(t, t.idx) then              -- (trip.lua decides when the button is pressed)
     c.bellIdx = t.idx
     c.bellSeq = c.bellSeq + 1
     emit(t, 'bell', { index = t.idx })

@@ -45,7 +45,7 @@ const lines = [
   { ref: "305", colour: "#2f9e8f" }, { ref: "308", colour: "#c0572b" }, { ref: "309", colour: "#4a6fc7" }, { ref: "302", colour: "#c9a227" }, { ref: "334", colour: "#8a4fb0" }, { ref: "392", colour: "#2d2d2d" },
 ]
 const common = {
-  version: "0.2.0", earth: true, reason: "ok", error: null, loading: null, units: "km/h", day: 3, nowSec: 27300, tripActive: false, starting: false, source: { choice: "auto", supported: true },
+  version: "0.2.0", earth: true, reason: "ok", error: null, loading: null, units: "km/h", day: 3, nowSec: 27300, tripActive: false, starting: false, source: { choice: "auto", supported: true }, voice: { on: true, supported: true, state: "ready" },
   service: { up: true, version: "0.1.0", port: 47630 }, pos: { lat: 50.41573, lon: 16.16261 },
   place: { street: "Masarykovo náměstí", place: "Náchod", country: "Czechia" }, mapCredit: "© OpenStreetMap contributors",
   stats: { trips: 7, passengers: 214, points: 5120 },
