@@ -183,4 +183,61 @@ function T.strictness_changes_the_score()
   assert(pts('relaxed') > pts('strict'))
 end
 
+-- 0.13.1, seen in the game: 30 people waited at a stop in the fields. The people of a stop come from the town it is in.
+local function demandLine()
+  local lat0, lon0 = 50.0, 16.0
+  local function at(dm) return lat0 + dm / 111000, lon0 end
+  local stops, along = {}, 0
+  local function add(dm, station) along = along + 500 local la, lo = at(dm) stops[#stops + 1] = { lat = la, lon = lo, along = along, station = station } end
+  add(-5000)                         -- 1 in the fields
+  add(0)                             -- 2 the village of 300
+  add(10950)                         -- 3 the town of 20 000, 1 km from its centre
+  add(11050)                         -- 4 its centre
+  add(11400, true)                   -- 5 its bus station
+  add(30000)                         -- 6 the end
+  local towns = { { lat0, lon0, 1200, 300 }, { lat0 + 0.1, lon0, 2000, 20000 } }
+  return { id = 77, stops = stops, limitInfo = { towns = towns } }
+end
+local function mean(r, w, c, i, hour, mins)
+  local sum = 0
+  for k = 1, 300 do sum = sum + demand.waiting(r, w, c, i, hour, false, mins * 60, { tripId = k }) end
+  return sum / 300
+end
+
+function T.a_stop_in_the_fields_has_almost_nobody_and_a_village_a_few()
+  local r = demandLine()
+  local w, c = demand.stopWeights(r, nil)
+  local field, village = mean(r, w, c, 1, 7.5, 60), mean(r, w, c, 2, 7.5, 60)
+  assert(field < 1, 'field ' .. field)
+  assert(village >= 0.5 and village <= 3, 'village ' .. village)
+  -- even after two hours without a bus
+  assert(mean(r, w, c, 1, 12, 120) < 1 and mean(r, w, c, 2, 12, 120) <= 4)
+end
+
+function T.a_town_has_more_its_centre_more_still_and_its_station_most()
+  local r = demandLine()
+  local w, c = demand.stopWeights(r, nil)
+  local village, edge, centre, station = mean(r, w, c, 2, 12, 60), mean(r, w, c, 3, 12, 60), mean(r, w, c, 4, 12, 60), mean(r, w, c, 5, 12, 60)
+  assert(edge > village and centre > edge and station > centre, ('%.1f %.1f %.1f %.1f'):format(village, edge, centre, station))
+  assert(centre >= 2 and centre <= 15, 'town centre at noon, hourly bus: ' .. centre)
+  assert(mean(r, w, c, 6, 12, 60) == 0, 'nobody boards at the terminus')
+end
+
+function T.the_peak_and_a_longer_gap_bring_more_people_but_not_without_end()
+  local r = demandLine()
+  local w, c = demand.stopWeights(r, nil)
+  assert(mean(r, w, c, 3, 7.5, 60) > mean(r, w, c, 3, 12, 60), 'the morning peak')
+  assert(mean(r, w, c, 3, 12, 60) > mean(r, w, c, 3, 12, 15), 'an hourly bus takes more than one every 15 min')
+  assert(mean(r, w, c, 3, 12, 600) <= mean(r, w, c, 3, 12, demand.WINDOW_MAX_MIN) * 1.1, 'a gap of 10 h is not 10 h of people')
+  assert(demand.windowShare(12, false, 24 * 60) <= 1.0001)
+end
+
+function T.without_towns_the_spacing_of_the_stops_tells_town_from_country()
+  local r = demandLine()
+  r.limitInfo = nil
+  for i, s in ipairs(r.stops) do s.along = i <= 3 and i * 3000 or 9000 + (i - 3) * 350 end
+  local w, c = demand.stopWeights(r, nil)
+  assert(w.daily[1] < w.daily[4], ('%.1f vs %.1f'):format(w.daily[1], w.daily[4]))
+end
+
 return T

@@ -373,7 +373,7 @@ function T.leaving_the_bus_during_a_layover_makes_the_shift_wait()
 end
 
 function T.a_short_shift_ends_when_no_trip_fits_and_shows_the_summary()
-  local m, env, r = setup({ opts = { timeScale = 30 } })          -- (the clock runs fast: the trip takes hours of it)
+  local m, env, r = setup({ opts = { timeScale = 120 } })          -- (the clock runs fast: the trip takes hours of it)
   openRoute(m, env, r)
   m.uiStartShift(60, false)                       -- the line takes longer than the hour: nothing else begins
   assert(driveTrip(m, env, r.stops))
@@ -389,7 +389,7 @@ end
 
 -- the career (stage E): a trip in a shift is not paid on its own; the shift pays at its end and counts for the rank
 function T.a_finished_shift_pays_the_career_once()
-  local m, env, r = setup({ opts = { timeScale = 30 } })
+  local m, env, r = setup({ opts = { timeScale = 120 } })
   local profile
   _G.jsonWriteFile = function(path, data) if tostring(path):find('profile') then profile = data end return true end
   openRoute(m, env, r)

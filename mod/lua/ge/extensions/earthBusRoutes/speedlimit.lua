@@ -103,7 +103,7 @@ function M.info(spans, limits)
       towns = {}
       for _, t in ipairs(limits.towns) do
         if type(t) == 'table' and tonumber(t[1]) and tonumber(t[2]) and tonumber(t[3]) then
-          towns[#towns + 1] = { tonumber(t[1]), tonumber(t[2]), tonumber(t[3]) }
+          towns[#towns + 1] = { tonumber(t[1]), tonumber(t[2]), tonumber(t[3]), tonumber(t[4]) }   -- (4: population, service 0.13.1+; demand.lua)
         end
       end
     end

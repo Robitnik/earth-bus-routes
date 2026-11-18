@@ -1675,6 +1675,8 @@ class SpeedLimits(unittest.TestCase):
             self.assertEqual(names[(50.5369, 16.2335)], 1600)         # Police nad Metují, 4316 people
             self.assertEqual(names[(50.4993, 16.2769)], 1200)         # Machov, 1109
             self.assertEqual(names[(50.4167, 16.1629)], 2000)         # Náchod, 20000
+            pops = {(t[0], t[1]): t[3] for t in lim["towns"]}
+            self.assertEqual(pops[(50.5369, 16.2335)], 4316)          # the population goes along (the passengers, 0.13.1)
             self.assertNotIn((50.088, 14.4208), names)                 # Prague is 140 km away
             self.assertIsNone(d.road_limits(g.in_box, [(50.5, 16.2)]))  # no road, no answer
             self.assertIsNone(d.road_limits(None, road))

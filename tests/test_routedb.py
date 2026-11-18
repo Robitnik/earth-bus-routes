@@ -587,7 +587,7 @@ class SpeedLimitsFast(unittest.TestCase):
             if nearest is None or best < nearest[0]:
                 nearest = (best, p[6])
             if best <= d.town_radius(p[5]):
-                towns.append([round(p[2], 5), round(p[3], 5), d.town_radius(p[5])])
+                towns.append([round(p[2], 5), round(p[3], 5), d.town_radius(p[5]), int(p[5] or 0)])
         got = d.road_limits(in_box, road)
         self.assertEqual(got["towns"], towns)
         self.assertEqual(got["cc"], nearest[1])

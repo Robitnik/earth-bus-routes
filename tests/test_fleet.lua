@@ -908,6 +908,7 @@ function T.a_player_trip_meets_fewer_people_where_an_ai_bus_of_the_line_just_sto
     demand.book = demand.newBook()
     demand.book.active = true
     local r = assert(osm.parseRoute(H.fixture('route_6964117')))
+    r.limitInfo = { towns = { { r.stops[2].lat, r.stops[2].lon, 2400, 50000 } } }      -- the second stop in the centre of a town
     local trips = sched.generate(r, 2)
     local d = sched.departures(trips, 1, 8 * 3600, 1)[1]
     local t = trip_.new({ route = r, trips = trips, entry = { trip = d.trip, at = d.at }, startIndex = 1, day = 2, clock = sched.scheduled(d.trip, 1),
